@@ -15,6 +15,26 @@ A simple Revolt bot that fetches the latest Hoyoverse gift codes using the Hoyoc
 - `!fetchGI` — Get the latest Genshin Impact codes.
 - `!fetchHSR` — Get the latest Honkai: Star Rail codes.
 - `!fetchZZZ` — Get the latest Zenless Zone Zero codes.
+- `!enableFetch` — Enable auto-fetching of new codes for this channel.
+- `!disableFetch` — Disable auto-fetching for this channel.
+
+---
+
+### Features
+
+💡 **Auto-Fetch Mode**  
+You can enable a passive listener in your channel using `!enableFetch`.  
+Every 2 hours, the bot will check for **new** codes and automatically announce them in the channel.
+
+🔔 New codes will be posted with personalized headers like:
+
+- `**Genshin Impact: there are new primogems to be redeemed! Come get em!**`
+- `**Honkai Star Rail: there are new stellar jades to be redeemed! Come get em!**`
+- `**Zenless Zone Zero: there are new polychromes to be redeemed! Come get em!**`
+
+This ensures you never miss a drop, even without manually running commands.
+
+📴 You can turn this off anytime using `!disableFetch`.
 
 ---
 
@@ -38,6 +58,7 @@ This simply means the API found a code but didn't provide reward details. The co
 
 5️⃣ **Downtime / Support:**  
 If the bot goes offline, please contact `suichanwaa` (on revolt). The VPS running it probably crashed or went down.
+
 ---
 
 ### Deployment
