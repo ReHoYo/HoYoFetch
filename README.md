@@ -37,8 +37,7 @@ Sometimes you may see messages like:
 This simply means the API found a code but didn't provide reward details. The code is still valid and redeemable.
 
 5️⃣ **Downtime / Support:**  
-If the bot goes offline, please contact `suichanwaa` — most likely the MacBook running the bot was closed or rebooted 😄
-
+If the bot goes offline, please contact `suichanwaa` (on revolt). The VPS running it probably crashed or went down.
 ---
 
 ### Deployment
