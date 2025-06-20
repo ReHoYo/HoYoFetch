@@ -2,6 +2,7 @@ import { Client } from "revolt.js";
 import axios from "axios";
 import 'dotenv/config';
 
+// I pushed this one line so the webhook can force update. Testing in production again how comical
 // ─── Load token from env ───────────────────────────────────────────────────────
 const TOKEN = process.env.REVOLT_BOT_TOKEN?.trim();
 if (!TOKEN) {
