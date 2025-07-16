@@ -8,6 +8,9 @@ if (!TOKEN) {
   process.exit(1);
 }
 
+// Used for version checking
+const START_TIME = new Date().toISOString();
+
 const API_BASE = "https://hoyo-codes.seria.moe/codes?game=";
 const GAMES = {
   "!fetchgi":  { param:"genshin", name:"Genshin Impact",   redeem:"https://genshin.hoyoverse.com/en/gift?code=" },
@@ -20,7 +23,12 @@ const enabledChannels = new Map();
 
 const client = new Client();
 
-// Auto-fetch loop (every 2h)
+// catch any unhandled promise rejections
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled promise rejection:", err);
+});
+
+// Auto-fetch loop
 client.on("ready", () => {
   console.log(`✅ Logged in as ${client.user.username}`);
   setInterval(async () => {
@@ -34,70 +42,73 @@ client.on("ready", () => {
           const list = data.codes || data.active || [];
           const codes = list.map(e => e.code||e.key||e.name);
           const newOnes = codes.filter(c => !seen[gameInfo.param].has(c));
-          if (newOnes.length) {
-            newOnes.forEach(c => seen[gameInfo.param].add(c));
-            // build announcement...
-            let hdr = {
-              genshin: "**Genshin Impact: new primogems!**",
-              hkrpg:   "**Honkai Star Rail: new stellar jades!**",
-              nap:     "**Zenless Zone Zero: new polychromes!**",
-            }[gameInfo.param];
-            const lines = [hdr];
-            for (const e of list.filter(x => newOnes.includes(x.code||x.key||x.name))) {
-              const code = e.code||e.key||e.name;
-              const raw  = e.rewards ?? e.reward;
-              const rewards = Array.isArray(raw)
-                ? raw.join(", ")
-                : raw?.replace(/&amp;/g,"&").trim() || "Unknown reward";
-              lines.push(`• **${code}** — ${rewards}\n<${gameInfo.redeem}${code}>`);
-            }
-            await ch.sendMessage(lines.join("\n"));
+          if (!newOnes.length) continue;
+
+          newOnes.forEach(c => seen[gameInfo.param].add(c));
+          const hdr = {
+            genshin: "**Genshin Impact: new primogems!**",
+            hkrpg:   "**Honkai Star Rail: new stellar jades!**",
+            nap:     "**Zenless Zone Zero: new polychromes!**",
+          }[gameInfo.param];
+
+          const lines = [hdr];
+          for (const e of list.filter(x => newOnes.includes(x.code||x.key||x.name))) {
+            const code = e.code||e.key||e.name;
+            const raw  = e.rewards ?? e.reward;
+            const rewards = Array.isArray(raw)
+              ? raw.join(", ")
+              : raw?.replace(/&amp;/g,"&").trim() || "Unknown reward";
+            lines.push(`• **${code}** — ${rewards}\n<${gameInfo.redeem}${code}>`);
           }
+          await ch.sendMessage(lines.join("\n"));
         } catch(err) {
           console.error("Auto-fetch error for", gameInfo.name, err);
         }
       }
     }
-  }, 2 * 60 * 60 * 1000);
+  }, 2 * 60 * 60 * 1000); // 2h
 });
 
-// Unified handler
-const handleMessage = async (msg) => {
+// Unified message handler
+async function handleMessage(msg) {
   if (!msg.content) return;
   const key = msg.content.trim().toLowerCase();
   const cid = msg.channel.id;
 
-  // —— TEST: simple ping
+  // ---- CORE DEBUG ----
   if (key === "!ping") {
     return msg.channel.sendMessage("pong");
   }
-
-  // —— DEBUG: did we even see your enable request?
   if (key === "!debugenable") {
-    return msg.channel.sendMessage(`🔍 debug: key='${key}', channelId='${cid}'`);
+    return msg.channel.sendMessage(`🔍 debug: key='${key}', channel='${cid}'`);
+  }
+  if (key === "!version") {
+    return msg.channel.sendMessage(`🚀 Bot start time: ${START_TIME}`);
+  }
+  if (key === "!restart") {
+    await msg.channel.sendMessage("🔄 Restarting…");
+    process.exit(0);
   }
 
-  // —— ENABLE
+  // ---- ENABLE / DISABLE FETCH ----
   if (key === "!enablefetch") {
     if (!enabledChannels.has(cid)) {
       enabledChannels.set(cid, { genshin:new Set(), hkrpg:new Set(), nap:new Set() });
-      return msg.channel.sendMessage("✅ Auto-fetch enabled! I’ll post new codes every 2h here.");
+      return msg.channel.sendMessage("✅ Auto-fetch enabled here!");
     } else {
-      return msg.channel.sendMessage("ℹ️ Auto-fetch’s already on in this channel.");
+      return msg.channel.sendMessage("ℹ️ Auto-fetch is already enabled in this channel.");
     }
   }
-
-  // —— DISABLE
   if (key === "!disablefetch") {
     if (enabledChannels.has(cid)) {
       enabledChannels.delete(cid);
-      return msg.channel.sendMessage("❎ Auto-fetch disabled. I won’t ping codes here anymore.");
+      return msg.channel.sendMessage("❎ Auto-fetch disabled here.");
     } else {
       return msg.channel.sendMessage("ℹ️ Auto-fetch wasn’t enabled in this channel.");
     }
   }
 
-  // —— MANUAL FETCH
+  // ---- MANUAL FETCH COMMANDS ----
   const gameInfo = GAMES[key];
   if (!gameInfo) return;
 
@@ -124,9 +135,9 @@ const handleMessage = async (msg) => {
     console.error("❌ Failed manual fetch:", err);
     await msg.channel.sendMessage("Failed to fetch codes—try again later.");
   }
-};
+}
 
-// Hook both possible events
+// Listen on both possible events
 client.on("message", handleMessage);
 client.on("messageCreate", handleMessage);
 
