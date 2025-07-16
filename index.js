@@ -2,37 +2,27 @@ import { Client } from "revolt.js";
 import axios from "axios";
 import 'dotenv/config';
 
-// ─── Load token from env ───────────────────────────────────────────
+// ─── Load token from env ────────────────────────────────────────────
 const TOKEN = process.env.REVOLT_BOT_TOKEN?.trim();
 if (!TOKEN) {
   console.error("❌ REVOLT_BOT_TOKEN is missing! Please check your env.");
   process.exit(1);
 }
 
-// ─── Config ────────────────────────────────────────────────────────
+// ─── Who’s allowed to restart ───────────────────────────────────────
+// Replace this with your actual Revolt user ID (you can also wire this
+// up to an OWNER_ID env-var if you prefer not to hard-code).
+const OWNER_ID = "01H2VRZSN1AY7QASPNKXMP52HZ";
+
+// ─── Config ─────────────────────────────────────────────────────────
 const API_BASE = "https://hoyo-codes.seria.moe/codes?game=";
 const GAMES = {
-  "!fetchgi": {
-    param:  "genshin",
-    name:   "Genshin Impact",
-    redeem: "https://genshin.hoyoverse.com/en/gift?code=",
-  },
-  "!fetchhsr": {
-    param:  "hkrpg",
-    name:   "Honkai Star Rail",
-    redeem: "https://hsr.hoyoverse.com/gift?code=",
-  },
-  "!fetchzzz": {
-    param:  "nap",
-    name:   "Zenless Zone Zero",
-    redeem: "https://zenless.hoyoverse.com/redemption?code=",
-  },
+  "!fetchgi":  { param:"genshin", name:"Genshin Impact",    redeem:"https://genshin.hoyoverse.com/en/gift?code=" },
+  "!fetchhsr": { param:"hkrpg",  name:"Honkai Star Rail",   redeem:"https://hsr.hoyoverse.com/gift?code=" },
+  "!fetchzzz": { param:"nap",    name:"Zenless Zone Zero", redeem:"https://zenless.hoyoverse.com/redemption?code=" },
 };
 
-// ─── State for auto-fetch ───────────────────────────────────────────
-/** Map<channelId, { genshin: Set, hkrpg: Set, nap: Set }> */
-const enabledChannels = new Map();
-
+// ─── Bot Setup ──────────────────────────────────────────────────────
 const client = new Client();
 
 // catch-all for any unhandled promise rejections
@@ -44,39 +34,21 @@ client.on("ready", () => {
   console.log(`✅ Logged in as ${client.user.username}. Waiting for commands…`);
 });
 
+// ─── Message Handler ─────────────────────────────────────────────────
 client.on("message", async (msg) => {
   if (!msg.content) return;
 
   const key = msg.content.trim().toLowerCase();
-  // ← always use .id first (fallback to _id for older versions)
-  const cid = msg.channel.id ?? msg.channel._id;
 
-  // ─── Enable / Disable auto-fetch ────────────────────────────────
-  if (key === "!enablefetch") {
-    if (!enabledChannels.has(cid)) {
-      enabledChannels.set(cid, {
-        genshin: new Set(),
-        hkrpg:   new Set(),
-        nap:     new Set(),
-      });
-      return msg.channel.sendMessage("✅ Auto-fetch enabled! I’ll check every 2 hours and announce new codes here.");
-    } else {
-      return msg.channel.sendMessage("ℹ️ Auto-fetch is already enabled in this channel.");
-    }
+  // ─── Self-restart ───────────────────────────────────────────────────
+  if (key === "!restart" && msg.author._id === OWNER_ID) {
+    await msg.channel.sendMessage("🔄 Bot restarting now…");
+    return process.exit(0);
   }
 
-  if (key === "!disablefetch") {
-    if (enabledChannels.has(cid)) {
-      enabledChannels.delete(cid);
-      return msg.channel.sendMessage("❎ Auto-fetch disabled. I won’t post new codes here anymore.");
-    } else {
-      return msg.channel.sendMessage("ℹ️ Auto-fetch wasn’t enabled in this channel.");
-    }
-  }
-
-  // ─── Manual fetch commands ───────────────────────────────────────
+  // ─── Manual fetch commands ─────────────────────────────────────────
   const gameInfo = GAMES[key];
-  if (!gameInfo) return; // ignore all other messages
+  if (!gameInfo) return; // only respond to !fetchgi / !fetchhsr / !fetchzzz
 
   try {
     const { data } = await axios.get(API_BASE + gameInfo.param);
@@ -86,7 +58,7 @@ client.on("message", async (msg) => {
       return msg.channel.sendMessage(`No active codes for **${gameInfo.name}** right now.`);
     }
 
-    // format date in Tokyo timezone
+    // Tokyo-time date
     const today = new Date().toLocaleDateString("en-JP", {
       timeZone: "Asia/Tokyo",
       year:   "numeric",
@@ -101,20 +73,18 @@ client.on("message", async (msg) => {
     for (const entry of list) {
       const code = entry.code || entry.key || entry.name;
 
-      // reward logic with humorous fallbacks
+      // reward logic with funny fallback
       let rawRewards = entry.rewards ?? entry.reward;
       let rewards;
       if (rawRewards) {
-        if (Array.isArray(rawRewards)) {
-          rewards = rawRewards.join(", ");
-        } else {
-          rewards = rawRewards.replace(/&amp;/g, "&").trim();
-        }
+        rewards = Array.isArray(rawRewards)
+          ? rawRewards.join(", ")
+          : rawRewards.replace(/&amp;/g, "&").trim();
       } else {
         const fallbacks = {
-          genshin: "i asked paimon and she said probably primogems 🤷",
-          hkrpg:   "pom-pom had no clue so maybe stellar jade 🤷",
-          nap:     "bangboo was silent so likely polychromes 🤷",
+          genshin: "Paimon said “probably primogems” 🤷",
+          hkrpg:   "Pom-pom shrugged, so maybe stellar jade 🤷",
+          nap:     "Bangboo was silent, likely polychromes 🤷",
         };
         rewards = fallbacks[gameInfo.param] || "Unknown reward";
       }
@@ -129,6 +99,7 @@ client.on("message", async (msg) => {
   }
 });
 
+// ─── Login ───────────────────────────────────────────────────────────
 client.loginBot(TOKEN).catch((err) => {
   console.error("❌ Login failed:", err);
   process.exit(1);
