@@ -2,7 +2,6 @@ import { Client } from "revolt.js";
 import axios from "axios";
 import 'dotenv/config';
 
-// I pushed this one line so the webhook can force update. Testing in production again how comical
 // ─── Load token from env ───────────────────────────────────────────────────────
 const TOKEN = process.env.REVOLT_BOT_TOKEN?.trim();
 if (!TOKEN) {
@@ -99,7 +98,7 @@ client.on("ready", () => {
 client.on("message", async (msg) => {
   if (!msg.content) return;
   const key = msg.content.trim().toLowerCase();
-  const cid = msg.channel._id;
+  const cid = msg.channel.id;  // ← fixed here
 
   // ─── Enable auto-fetch ──────────────────────────────────────────────────────
   if (key === "!enablefetch") {
