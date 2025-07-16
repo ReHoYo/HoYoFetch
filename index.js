@@ -12,21 +12,9 @@ if (!TOKEN) {
 // ─── Config ───────────────────────────────────────────────────────────────────
 const API_BASE = "https://hoyo-codes.seria.moe/codes?game=";
 const GAMES = {
-  "!fetchgi": {
-    param:  "genshin",
-    name:   "Genshin Impact",
-    redeem: "https://genshin.hoyoverse.com/en/gift?code=",
-  },
-  "!fetchhsr": {
-    param:  "hkrpg",
-    name:   "Honkai Star Rail",
-    redeem: "https://hsr.hoyoverse.com/gift?code=",
-  },
-  "!fetchzzz": {
-    param:  "nap",
-    name:   "Zenless Zone Zero",
-    redeem: "https://zenless.hoyoverse.com/redemption?code=",
-  },
+  "!fetchgi": { param: "genshin", name: "Genshin Impact", redeem: "https://genshin.hoyoverse.com/en/gift?code=" },
+  "!fetchhsr": { param: "hkrpg", name: "Honkai Star Rail", redeem: "https://hsr.hoyoverse.com/gift?code=" },
+  "!fetchzzz": { param: "nap",   name: "Zenless Zone Zero", redeem: "https://zenless.hoyoverse.com/redemption?code=" },
 };
 
 // ─── State for auto-fetch ─────────────────────────────────────────────────────
@@ -57,22 +45,13 @@ client.on("ready", () => {
           const newCodes = codes.filter(c => !seen[gameInfo.param].has(c));
 
           if (newCodes.length) {
-            // mark all as seen
             newCodes.forEach(c => seen[gameInfo.param].add(c));
 
-            // choose bold header
-            let header;
-            switch (gameInfo.param) {
-              case "genshin":
-                header = "**Genshin Impact: there are new primogems to be redeemed! Come get em!**";
-                break;
-              case "hkrpg":
-                header = "**Honkai Star Rail: there are new stellar jades to be redeemed! Come get em!**";
-                break;
-              case "nap":
-                header = "**Zenless Zone Zero: there are new polychromes to be redeemed! Come get em!**";
-                break;
-            }
+            let header = {
+              genshin: "**Genshin Impact: new primogems!**",
+              hkrpg:   "**Honkai Star Rail: new stellar jades!**",
+              nap:     "**Zenless Zone Zero: new polychromes!**",
+            }[gameInfo.param];
 
             const lines = [header];
             for (const entry of list.filter(e => newCodes.includes(e.code || e.key || e.name))) {
@@ -92,25 +71,24 @@ client.on("ready", () => {
         }
       }
     }
-  }, 2 * 60 * 60 * 1000); // 2 hours
+  }, 2 * 60 * 60 * 1000); // 2h
 });
 
 client.on("message", async (msg) => {
   if (!msg.content) return;
   const key = msg.content.trim().toLowerCase();
-  const cid = msg.channel.id;  // ← fixed here
+  const cid = msg.channel.id;  // ← use `.id`, not `._id`
+
+  // —— DEBUG: log every message you see on the VPS
+  console.log("[MSG]", key, "in channel", cid);
 
   // ─── Enable auto-fetch ──────────────────────────────────────────────────────
   if (key === "!enablefetch") {
     if (!enabledChannels.has(cid)) {
-      enabledChannels.set(cid, {
-        genshin: new Set(),
-        hkrpg:   new Set(),
-        nap:     new Set(),
-      });
-      return msg.channel.sendMessage("✅ Auto-fetch enabled! I’ll check every 2 hours and announce new codes here.");
+      enabledChannels.set(cid, { genshin: new Set(), hkrpg: new Set(), nap: new Set() });
+      return msg.channel.sendMessage("✅ Auto-fetch enabled! I’ll check every 2 hours here.");
     } else {
-      return msg.channel.sendMessage("ℹ️ Auto-fetch is already enabled in this channel.");
+      return msg.channel.sendMessage("ℹ️ Auto-fetch’s already on in this channel.");
     }
   }
 
@@ -118,9 +96,9 @@ client.on("message", async (msg) => {
   if (key === "!disablefetch") {
     if (enabledChannels.has(cid)) {
       enabledChannels.delete(cid);
-      return msg.channel.sendMessage("❎ Auto-fetch disabled. I won’t post new codes here anymore.");
+      return msg.channel.sendMessage("❎ Auto-fetch disabled. No more code pings here.");
     } else {
-      return msg.channel.sendMessage("ℹ️ Auto-fetch wasn’t enabled in this channel.");
+      return msg.channel.sendMessage("ℹ️ Auto-fetch wasn’t enabled here.");
     }
   }
 
@@ -136,27 +114,20 @@ client.on("message", async (msg) => {
     }
 
     const today = new Date().toLocaleDateString("en-JP", {
-      timeZone: "Asia/Tokyo",
-      year: "numeric",
-      month: "short",
-      day: "numeric",
+      timeZone: "Asia/Tokyo", year: "numeric", month: "short", day: "numeric",
     });
-
-    const lines = [
-      `**As of ${today}, here are the codes for ${gameInfo.name}:**`,
-    ];
+    const lines = [`**As of ${today}, codes for ${gameInfo.name}:**`];
 
     for (const entry of list) {
       const code = entry.code || entry.key || entry.name;
       const raw  = entry.rewards ?? entry.reward;
       const rewards = Array.isArray(raw)
         ? raw.join(", ")
-        : raw?.replace(/&amp;/g, "&").trim() ||
-          {
-            genshin: "i asked paimon and she replied probably primogems",
-            hkrpg:   "i asked pom-pom, probably stellar jade",
-            nap:     "asked bangboo, probably polychromes",
-          }[gameInfo.param];
+        : raw?.replace(/&amp;/g, "&").trim() || {
+          genshin: "probably primogems",
+          hkrpg:   "probably stellar jade",
+          nap:     "probably polychromes",
+        }[gameInfo.param];
 
       lines.push(`• **${code}** — ${rewards}\n<${gameInfo.redeem}${code}>`);
     }
