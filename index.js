@@ -12,21 +12,9 @@ if (!TOKEN) {
 // ─── Config ───────────────────────────────────────────────────────────────────
 const API_BASE = "https://hoyo-codes.seria.moe/codes?game=";
 const GAMES = {
-  "!fetchgi": {
-    param:  "genshin",
-    name:   "Genshin Impact",
-    redeem: "https://genshin.hoyoverse.com/en/gift?code=",
-  },
-  "!fetchhsr": {
-    param:  "hkrpg",
-    name:   "Honkai Star Rail",
-    redeem: "https://hsr.hoyoverse.com/gift?code=",
-  },
-  "!fetchzzz": {
-    param:  "nap",
-    name:   "Zenless Zone Zero",
-    redeem: "https://zenless.hoyoverse.com/redemption?code=",
-  },
+  "!fetchgi":  { param: "genshin", name: "Genshin Impact",   redeem: "https://genshin.hoyoverse.com/en/gift?code=" },
+  "!fetchhsr": { param: "hkrpg",  name: "Honkai Star Rail", redeem: "https://hsr.hoyoverse.com/gift?code=" },
+  "!fetchzzz": { param: "nap",    name: "Zenless Zone Zero",redeem: "https://zenless.hoyoverse.com/redemption?code=" },
 };
 
 // ─── State for auto-fetch ─────────────────────────────────────────────────────
@@ -60,7 +48,6 @@ client.on("ready", () => {
             // mark all as seen
             newCodes.forEach(c => seen[gameInfo.param].add(c));
 
-            // choose bold header
             let header;
             switch (gameInfo.param) {
               case "genshin":
@@ -99,10 +86,10 @@ client.on("message", async (msg) => {
   if (!msg.content) return;
 
   const key = msg.content.trim().toLowerCase();
-  // ↓ the fix: use `.id` instead of `._id`
-  const cid = msg.channel.id;
+  // ← the only line that changed:
+  const cid = msg.channel.id ?? msg.channel._id;
 
-  // ─── Enable auto-fetch ──────────────────────────────────────────────────────
+  // ─── Enable auto-fetch ─────────────────────────────────────────────────────
   if (key === "!enablefetch") {
     if (!enabledChannels.has(cid)) {
       enabledChannels.set(cid, {
@@ -116,7 +103,7 @@ client.on("message", async (msg) => {
     }
   }
 
-  // ─── Disable auto-fetch ─────────────────────────────────────────────────────
+  // ─── Disable auto-fetch ────────────────────────────────────────────────────
   if (key === "!disablefetch") {
     if (enabledChannels.has(cid)) {
       enabledChannels.delete(cid);
@@ -126,7 +113,7 @@ client.on("message", async (msg) => {
     }
   }
 
-  // ─── Manual fetch commands ──────────────────────────────────────────────────
+  // ─── Manual fetch commands ─────────────────────────────────────────────────
   const gameInfo = GAMES[key];
   if (!gameInfo) return;
 
