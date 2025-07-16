@@ -2,107 +2,102 @@ import { Client } from "revolt.js";
 import axios from "axios";
 import 'dotenv/config';
 
-// ─── Load token from env ───────────────────────────────────────────────────────
 const TOKEN = process.env.REVOLT_BOT_TOKEN?.trim();
 if (!TOKEN) {
-  console.error("❌ REVOLT_BOT_TOKEN is missing! Please check your env.");
+  console.error("❌ REVOLT_BOT_TOKEN is missing!");
   process.exit(1);
 }
 
-// ─── Config ───────────────────────────────────────────────────────────────────
 const API_BASE = "https://hoyo-codes.seria.moe/codes?game=";
 const GAMES = {
-  "!fetchgi": { param: "genshin", name: "Genshin Impact", redeem: "https://genshin.hoyoverse.com/en/gift?code=" },
-  "!fetchhsr": { param: "hkrpg", name: "Honkai Star Rail", redeem: "https://hsr.hoyoverse.com/gift?code=" },
-  "!fetchzzz": { param: "nap",   name: "Zenless Zone Zero", redeem: "https://zenless.hoyoverse.com/redemption?code=" },
+  "!fetchgi":  { param:"genshin", name:"Genshin Impact",   redeem:"https://genshin.hoyoverse.com/en/gift?code=" },
+  "!fetchhsr": { param:"hkrpg",  name:"Honkai Star Rail", redeem:"https://hsr.hoyoverse.com/gift?code=" },
+  "!fetchzzz": { param:"nap",    name:"Zenless Zone Zero",redeem:"https://zenless.hoyoverse.com/redemption?code=" },
 };
 
-// ─── State for auto-fetch ─────────────────────────────────────────────────────
-/** Map<channelId, { genshin: Set, hkrpg: Set, nap: Set }> */
+// channelId → { genshin: Set, hkrpg: Set, nap: Set }
 const enabledChannels = new Map();
 
 const client = new Client();
 
-// catch-all for unhandled promise rejections
-process.on("unhandledRejection", (err) => {
-  console.error("Unhandled promise rejection:", err);
-});
-
+// Auto-fetch loop (every 2h)
 client.on("ready", () => {
-  console.log(`✅ Logged in as ${client.user.username}.`);
-
-  // every 2 hours, check enabled channels
+  console.log(`✅ Logged in as ${client.user.username}`);
   setInterval(async () => {
-    for (const [channelId, seen] of enabledChannels.entries()) {
-      const channel = client.channels.get(channelId);
-      if (!channel) continue;
+    for (const [cid, seen] of enabledChannels.entries()) {
+      const ch = client.channels.get(cid);
+      if (!ch) continue;
 
       for (const gameInfo of Object.values(GAMES)) {
         try {
           const { data } = await axios.get(API_BASE + gameInfo.param);
           const list = data.codes || data.active || [];
-          const codes = list.map(e => e.code || e.key || e.name);
-          const newCodes = codes.filter(c => !seen[gameInfo.param].has(c));
-
-          if (newCodes.length) {
-            newCodes.forEach(c => seen[gameInfo.param].add(c));
-
-            let header = {
+          const codes = list.map(e => e.code||e.key||e.name);
+          const newOnes = codes.filter(c => !seen[gameInfo.param].has(c));
+          if (newOnes.length) {
+            newOnes.forEach(c => seen[gameInfo.param].add(c));
+            // build announcement...
+            let hdr = {
               genshin: "**Genshin Impact: new primogems!**",
               hkrpg:   "**Honkai Star Rail: new stellar jades!**",
               nap:     "**Zenless Zone Zero: new polychromes!**",
             }[gameInfo.param];
-
-            const lines = [header];
-            for (const entry of list.filter(e => newCodes.includes(e.code || e.key || e.name))) {
-              const code = entry.code || entry.key || entry.name;
-              const raw  = entry.rewards ?? entry.reward;
+            const lines = [hdr];
+            for (const e of list.filter(x => newOnes.includes(x.code||x.key||x.name))) {
+              const code = e.code||e.key||e.name;
+              const raw  = e.rewards ?? e.reward;
               const rewards = Array.isArray(raw)
                 ? raw.join(", ")
-                : raw?.replace(/&amp;/g, "&").trim() || "Unknown reward";
-
+                : raw?.replace(/&amp;/g,"&").trim() || "Unknown reward";
               lines.push(`• **${code}** — ${rewards}\n<${gameInfo.redeem}${code}>`);
             }
-
-            await channel.sendMessage(lines.join("\n"));
+            await ch.sendMessage(lines.join("\n"));
           }
-        } catch (err) {
+        } catch(err) {
           console.error("Auto-fetch error for", gameInfo.name, err);
         }
       }
     }
-  }, 2 * 60 * 60 * 1000); // 2h
+  }, 2 * 60 * 60 * 1000);
 });
 
-client.on("message", async (msg) => {
+// Unified handler
+const handleMessage = async (msg) => {
   if (!msg.content) return;
   const key = msg.content.trim().toLowerCase();
-  const cid = msg.channel.id;  // ← use `.id`, not `._id`
+  const cid = msg.channel.id;
 
-  // —— DEBUG: log every message you see on the VPS
-  console.log("[MSG]", key, "in channel", cid);
+  // —— TEST: simple ping
+  if (key === "!ping") {
+    return msg.channel.sendMessage("pong");
+  }
 
-  // ─── Enable auto-fetch ──────────────────────────────────────────────────────
+  // —— DEBUG: did we even see your enable request?
+  if (key === "!debugenable") {
+    return msg.channel.sendMessage(`🔍 debug: key='${key}', channelId='${cid}'`);
+  }
+
+  // —— ENABLE
   if (key === "!enablefetch") {
     if (!enabledChannels.has(cid)) {
-      enabledChannels.set(cid, { genshin: new Set(), hkrpg: new Set(), nap: new Set() });
-      return msg.channel.sendMessage("✅ Auto-fetch enabled! I’ll check every 2 hours here.");
+      enabledChannels.set(cid, { genshin:new Set(), hkrpg:new Set(), nap:new Set() });
+      return msg.channel.sendMessage("✅ Auto-fetch enabled! I’ll post new codes every 2h here.");
     } else {
       return msg.channel.sendMessage("ℹ️ Auto-fetch’s already on in this channel.");
     }
   }
 
-  // ─── Disable auto-fetch ─────────────────────────────────────────────────────
+  // —— DISABLE
   if (key === "!disablefetch") {
     if (enabledChannels.has(cid)) {
       enabledChannels.delete(cid);
-      return msg.channel.sendMessage("❎ Auto-fetch disabled. No more code pings here.");
+      return msg.channel.sendMessage("❎ Auto-fetch disabled. I won’t ping codes here anymore.");
     } else {
-      return msg.channel.sendMessage("ℹ️ Auto-fetch wasn’t enabled here.");
+      return msg.channel.sendMessage("ℹ️ Auto-fetch wasn’t enabled in this channel.");
     }
   }
 
-  // ─── Manual fetch commands ──────────────────────────────────────────────────
+  // —— MANUAL FETCH
   const gameInfo = GAMES[key];
   if (!gameInfo) return;
 
@@ -112,34 +107,30 @@ client.on("message", async (msg) => {
     if (!list.length) {
       return msg.channel.sendMessage(`No active codes for **${gameInfo.name}** right now.`);
     }
-
     const today = new Date().toLocaleDateString("en-JP", {
-      timeZone: "Asia/Tokyo", year: "numeric", month: "short", day: "numeric",
+      timeZone:"Asia/Tokyo", year:"numeric", month:"short", day:"numeric"
     });
     const lines = [`**As of ${today}, codes for ${gameInfo.name}:**`];
-
-    for (const entry of list) {
-      const code = entry.code || entry.key || entry.name;
-      const raw  = entry.rewards ?? entry.reward;
+    for (const e of list) {
+      const code = e.code||e.key||e.name;
+      const raw  = e.rewards ?? e.reward;
       const rewards = Array.isArray(raw)
         ? raw.join(", ")
-        : raw?.replace(/&amp;/g, "&").trim() || {
-          genshin: "probably primogems",
-          hkrpg:   "probably stellar jade",
-          nap:     "probably polychromes",
-        }[gameInfo.param];
-
+        : raw?.replace(/&amp;/g,"&").trim() || "Unknown reward";
       lines.push(`• **${code}** — ${rewards}\n<${gameInfo.redeem}${code}>`);
     }
-
     await msg.channel.sendMessage(lines.join("\n"));
-  } catch (err) {
-    console.error("❌ Failed to fetch codes:", err);
-    await msg.channel.sendMessage("Failed to fetch codes — try again later.");
+  } catch(err) {
+    console.error("❌ Failed manual fetch:", err);
+    await msg.channel.sendMessage("Failed to fetch codes—try again later.");
   }
-});
+};
 
-client.loginBot(TOKEN).catch((err) => {
+// Hook both possible events
+client.on("message", handleMessage);
+client.on("messageCreate", handleMessage);
+
+client.loginBot(TOKEN).catch(err => {
   console.error("❌ Login failed:", err);
   process.exit(1);
 });
