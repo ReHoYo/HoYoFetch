@@ -22,13 +22,11 @@ const GAMES = {
 // ─── Persistence Helpers ────────────────────────────────────────────
 const DATA_FILE = path.resolve(process.cwd(), "enabledChannels.json");
 
-// Load saved channel IDs (object: { [channelId]: [seenGenshinCodes..., ...] })
 function loadEnabled() {
   if (!fs.existsSync(DATA_FILE)) return new Map();
   try {
     const raw = fs.readFileSync(DATA_FILE, "utf8");
     const obj = JSON.parse(raw);
-    // obj = { channelId: { genshin: [...], hkrpg: [...], nap: [...] }, ... }
     const m = new Map();
     for (const [cid, sets] of Object.entries(obj)) {
       m.set(cid, {
@@ -44,7 +42,6 @@ function loadEnabled() {
   }
 }
 
-// Write current Map back to disk
 function saveEnabled(map) {
   const obj = {};
   for (const [cid, seen] of map.entries()) {
@@ -62,19 +59,18 @@ function saveEnabled(map) {
 }
 
 // ─── State for auto-fetch ───────────────────────────────────────────
-/** Map<channelId, { genshin: Set, hkrpg: Set, nap: Set }> */
 const enabledChannels = loadEnabled();
 
 const client = new Client();
 
-// catch-all for unhandled promise rejections
+// catch-all for any unhandled promise rejections
 process.on("unhandledRejection", (err) => {
   console.error("Unhandled promise rejection:", err);
 });
 
 client.on("ready", () => {
   console.log(`✅ Logged in as ${client.user.username}.`);
-  // every 2 hours, check enabled channels
+
   setInterval(async () => {
     for (const [channelId, seen] of enabledChannels.entries()) {
       const channel = client.channels.get(channelId);
@@ -90,16 +86,17 @@ client.on("ready", () => {
           if (newCodes.length) {
             newCodes.forEach(c => seen[gameInfo.param].add(c));
 
+            // game-specific headers
             let header;
             switch (gameInfo.param) {
               case "genshin":
-                header = "**Genshin Impact: new primogems to redeem!**";
+                header = "**there are new primogems to be redeemed! Come get em!**";
                 break;
               case "hkrpg":
-                header = "**Honkai Star Rail: new stellar jades!**";
+                header = "**there are new stellar jades to be redeemed! Come get em!**";
                 break;
               case "nap":
-                header = "**Zenless Zone Zero: new polychromes!**";
+                header = "**fresh polychrome from the bangboo on sixth street! Come get them!**";
                 break;
             }
 
@@ -121,7 +118,7 @@ client.on("ready", () => {
         }
       }
     }
-  }, 2 * 60 * 60 * 1000);
+  }, 60 * 60 * 1000); // 1 hour
 });
 
 client.on("message", async (msg) => {
@@ -139,9 +136,9 @@ client.on("message", async (msg) => {
         nap:     new Set(),
       });
       saveEnabled(enabledChannels);
-      return msg.channel.sendMessage("✅ Auto-fetch enabled! Will check every 2h.");
+      return msg.channel.sendMessage("✅ Auto-fetch enabled! I’ll check every hour and announce new codes here.");
     } else {
-      return msg.channel.sendMessage("ℹ️ Auto-fetch already enabled here.");
+      return msg.channel.sendMessage("ℹ️ Auto-fetch is already enabled in this channel.");
     }
   }
 
@@ -150,9 +147,9 @@ client.on("message", async (msg) => {
     if (enabledChannels.has(cid)) {
       enabledChannels.delete(cid);
       saveEnabled(enabledChannels);
-      return msg.channel.sendMessage("❎ Auto-fetch disabled here.");
+      return msg.channel.sendMessage("❎ Auto-fetch disabled. I won’t post new codes here anymore.");
     } else {
-      return msg.channel.sendMessage("ℹ️ Auto-fetch wasn’t enabled here.");
+      return msg.channel.sendMessage("ℹ️ Auto-fetch wasn’t enabled in this channel.");
     }
   }
 
