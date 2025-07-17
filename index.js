@@ -21,28 +21,31 @@ const GAMES = {
 
 // ─── Persistence Helpers ────────────────────────────────────────────
 const DATA_FILE = path.resolve(process.cwd(), "enabledChannels.json");
+function backupCorruptFile() {
+  try {
+    const badName = DATA_FILE + ".corrupt." + Date.now();
+    fs.renameSync(DATA_FILE, badName);
+    console.warn(`⚠️ Backed up corrupt JSON to ${badName}`);
+  } catch {
+    console.error("❌ Could not backup corrupt JSON");
+  }
+}
 
 function loadThresholds() {
   if (!fs.existsSync(DATA_FILE)) return new Map();
   try {
     const raw = fs.readFileSync(DATA_FILE, "utf8");
     const obj = JSON.parse(raw);
-    const m = new Map();
-    for (const [cid, thr] of Object.entries(obj)) {
-      m.set(cid, thr);
-    }
-    return m;
+    return new Map(Object.entries(obj));
   } catch (err) {
-    console.error("❌ Failed to load thresholds:", err);
+    console.error("❌ Failed to parse thresholds, backing up and starting fresh:", err);
+    backupCorruptFile();
     return new Map();
   }
 }
 
 function saveThresholds(map) {
-  const obj = {};
-  for (const [cid, thr] of map.entries()) {
-    obj[cid] = thr;
-  }
+  const obj = Object.fromEntries(map.entries());
   try {
     fs.writeFileSync(DATA_FILE, JSON.stringify(obj, null, 2), "utf8");
   } catch (err) {
@@ -53,8 +56,25 @@ function saveThresholds(map) {
 // ─── State: last-seen-ID thresholds ─────────────────────────────────
 const thresholds = loadThresholds();
 const client = new Client();
-
 process.on("unhandledRejection", console.error);
+
+// Numeric coercion helper
+const getIdNum = e => Number(e.id) || 0;
+
+// Safe send
+async function safeSend(channel, content) {
+  try {
+    await channel.sendMessage(content);
+  } catch (err) {
+    console.error(`❌ Failed to send message to ${channel._id}:`, err);
+    // Optionally disable channel if unauthorized
+    if (err.message.includes('permissions')) {
+      console.warn(`🚫 Removing auto-fetch for ${channel._id} due to permission error.`);
+      thresholds.delete(channel._id);
+      saveThresholds(thresholds);
+    }
+  }
+}
 
 // ─── Auto-fetch loop ─────────────────────────────────────────────────
 client.on("ready", () => {
@@ -62,37 +82,44 @@ client.on("ready", () => {
   setInterval(async () => {
     for (const [cid, thr] of thresholds.entries()) {
       const channel = client.channels.get(cid);
-      if (!channel) continue;
+      if (!channel) { thresholds.delete(cid); saveThresholds(thresholds); continue; }
+
       const sections = [];
       for (const gameInfo of Object.values(GAMES)) {
+        let list;
         try {
           const res = await axios.get(API_BASE + gameInfo.param);
-          const list = res.data.codes || res.data.active || [];
-          const newEntries = list.filter(e => (e.id || 0) > (thr[gameInfo.param] || 0));
-          if (!newEntries.length) continue;
-          thr[gameInfo.param] = Math.max(...newEntries.map(e => e.id || 0), thr[gameInfo.param] || 0);
-          let header;
-          switch (gameInfo.param) {
-            case "genshin": header = "**there are new primogems to be redeemed! Come get em!**"; break;
-            case "hkrpg":  header = "**there are new stellar jades to be redeemed! Come get em!**"; break;
-            case "nap":    header = "**fresh polychrome from the bangboo on sixth street! Come get them!**"; break;
-          }
-          const lines = [header];
-          for (const entry of newEntries) {
-            const code = entry.code || entry.key || entry.name;
-            const raw  = entry.rewards ?? entry.reward;
-            const rewards = Array.isArray(raw)
-              ? raw.join(", ")
-              : raw?.replace(/&amp;/g, "&").trim() || "Unknown reward";
-            lines.push(`• **${code}** — ${rewards}\n<${gameInfo.redeem}${code}>`);
-          }
-          sections.push(lines.join("\n"));
+          list = res.data.codes || res.data.active || [];
         } catch (err) {
           console.error(`Error fetching ${gameInfo.name}:`, err);
+          continue;
         }
+        // filter, coerce, sort
+        const newEntries = list
+          .map(e => ({ ...e, _idNum: getIdNum(e) }))
+          .filter(e => e._idNum > (thr[gameInfo.param] || 0))
+          .sort((a,b) => a._idNum - b._idNum);
+        if (!newEntries.length) continue;
+        thr[gameInfo.param] = newEntries[newEntries.length -1]._idNum;
+
+        // header
+        let header;
+        switch (gameInfo.param) {
+          case "genshin": header = "**there are new primogems to be redeemed! Come get em!**"; break;
+          case "hkrpg":  header = "**there are new stellar jades to be redeemed! Come get em!**"; break;
+          case "nap":    header = "**fresh polychrome from the bangboo on sixth street! Come get them!**"; break;
+        }
+        const lines = [header];
+        newEntries.forEach(e => {
+          const code = e.code || e.key || e.name;
+          const raw  = e.rewards ?? e.reward;
+          const rewards = Array.isArray(raw) ? raw.join(", ") : raw?.replace(/&amp;/g,"&").trim() || "Unknown reward";
+          lines.push(`• **${code}** — ${rewards}\n<${gameInfo.redeem}${code}>`);
+        });
+        sections.push(lines.join("\n"));
       }
       if (sections.length) {
-        await channel.sendMessage(sections.join("\n\n"));
+        await safeSend(channel, sections.join("\n\n"));
         saveThresholds(thresholds);
       }
     }
@@ -100,7 +127,7 @@ client.on("ready", () => {
 });
 
 // ─── Commands: enable/disable/manual ─────────────────────────────────
-client.on("message", async (msg) => {
+client.on("message", async msg => {
   if (!msg.content) return;
   const key = msg.content.trim().toLowerCase();
   const cid = msg.channel.id ?? msg.channel._id;
@@ -108,66 +135,69 @@ client.on("message", async (msg) => {
   if (key === "!enablefetch") {
     if (!thresholds.has(cid)) {
       const thr = {};
-      for (const gameInfo of Object.values(GAMES)) {
+      for (const gInfo of Object.values(GAMES)) {
         try {
-          const res = await axios.get(API_BASE + gameInfo.param);
+          const res = await axios.get(API_BASE + gInfo.param);
           const list = res.data.codes || res.data.active || [];
-          thr[gameInfo.param] = list.reduce((max,e)=>(e.id>max?e.id:max), 0);
-        } catch {}
+          thr[gInfo.param] = list.reduce((max,e)=>Math.max(max, getIdNum(e)), 0);
+        } catch (err) {
+          console.warn(`Could not prime ${gInfo.name}:`, err);
+          thr[gInfo.param] = 0;
+        }
       }
       thresholds.set(cid, thr);
       saveThresholds(thresholds);
-      return msg.channel.sendMessage("✅ Auto-fetch enabled! I’ll check every hour and announce new codes here.");
+      return safeSend(msg.channel, "✅ Auto-fetch enabled! I’ll check every hour and announce new codes here.");
     }
-    return msg.channel.sendMessage("ℹ️ Auto-fetch is already enabled in this channel.");
+    return safeSend(msg.channel, "ℹ️ Auto-fetch is already enabled in this channel.");
   }
 
   if (key === "!disablefetch") {
     if (thresholds.has(cid)) {
       thresholds.delete(cid);
       saveThresholds(thresholds);
-      return msg.channel.sendMessage("❎ Auto-fetch disabled. I won’t post new codes here anymore.");
+      return safeSend(msg.channel, "❎ Auto-fetch disabled. I won’t post new codes here anymore.");
     }
-    return msg.channel.sendMessage("ℹ️ Auto-fetch wasn’t enabled in this channel.");
+    return safeSend(msg.channel, "ℹ️ Auto-fetch wasn’t enabled in this channel.");
   }
 
-  // manual fetch respects thresholds
+  // manual-fetch respects threshold
   const gameInfo = GAMES[key];
   if (!gameInfo) return;
+  let list;
   try {
     const res = await axios.get(API_BASE + gameInfo.param);
-    const list = res.data.codes || res.data.active || [];
-    const thr = thresholds.get(cid) || {};
-    const newEntries = list.filter(e => (e.id || 0) > (thr[gameInfo.param] || 0));
-    if (!newEntries.length) {
-      return msg.channel.sendMessage(`❌ No new codes for **${gameInfo.name}** since last check.`);
-    }
-    // update threshold and save
-    thr[gameInfo.param] = Math.max(...newEntries.map(e => e.id || 0), thr[gameInfo.param] || 0);
-    thresholds.set(cid, thr);
-    saveThresholds(thresholds);
-
-    // build response
-    const today = new Date().toLocaleDateString("en-JP", { timeZone:"Asia/Tokyo", year:"numeric", month:"short", day:"numeric" });
-    const header = `**As of ${today}, new codes for ${gameInfo.name}:**`;
-    const lines = [header];
-    for (const entry of newEntries) {
-      const code = entry.code || entry.key || entry.name;
-      const raw  = entry.rewards ?? entry.reward;
-      const rewards = Array.isArray(raw)
-        ? raw.join(", ")
-        : raw?.replace(/&amp;/g, "&").trim() || "Unknown reward";
-      lines.push(`• **${code}** — ${rewards}\n<${gameInfo.redeem}${code}>`);
-    }
-    await msg.channel.sendMessage(lines.join("\n"));
+    list = res.data.codes || res.data.active || [];
   } catch (err) {
     console.error(`Manual fetch error for ${gameInfo.name}:`, err);
-    await msg.channel.sendMessage("Failed to fetch codes — try again later.");
+    return safeSend(msg.channel, "Failed to fetch codes — try again later.");
   }
+  const thr = thresholds.get(cid) || {};
+  const newEntries = list
+    .map(e => ({ ...e, _idNum: getIdNum(e) }))
+    .filter(e => e._idNum > (thr[gameInfo.param] || 0))
+    .sort((a,b) => a._idNum - b._idNum);
+  if (!newEntries.length) {
+    return safeSend(msg.channel, `No new codes for **${gameInfo.name}** since last check.`);
+  }
+  thr[gameInfo.param] = newEntries[newEntries.length -1]._idNum;
+  thresholds.set(cid, thr);
+  saveThresholds(thresholds);
+
+  const today = new Date().toLocaleDateString("en-JP", { timeZone:"Asia/Tokyo", year:"numeric", month:"short", day:"numeric" });
+  const header = `**As of ${today}, new codes for ${gameInfo.name}:**`;
+  const lines = [header];
+  newEntries.forEach(e => {
+    const code = e.code || e.key || e.name;
+    const raw  = e.rewards ?? e.reward;
+    const rewards = Array.isArray(raw) ? raw.join(", ") : raw?.replace(/&amp;/g,"&").trim() || "Unknown reward";
+    lines.push(`• **${code}** — ${rewards}\n<${gameInfo.redeem}${code}>`);
+  });
+  await safeSend(msg.channel, lines.join("\n"));
 });
 
 // ─── Start Bot ──────────────────────────────────────────────────────
-client.loginBot(TOKEN).catch((err) => {
+client.loginBot(TOKEN).catch(err => {
   console.error("❌ Login failed:", err);
   process.exit(1);
 });
