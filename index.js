@@ -60,81 +60,72 @@ function saveEnabled(map) {
 
 // ─── State for auto-fetch ───────────────────────────────────────────
 const enabledChannels = loadEnabled();
-
 const client = new Client();
-
-// catch-all for any unhandled promise rejections
 process.on("unhandledRejection", (err) => {
   console.error("Unhandled promise rejection:", err);
 });
 
 client.on("ready", () => {
   console.log(`✅ Logged in as ${client.user.username}.`);
-
   setInterval(async () => {
     for (const [channelId, seen] of enabledChannels.entries()) {
       const channel = client.channels.get(channelId);
       if (!channel) continue;
-
+      const sections = [];
       for (const gameInfo of Object.values(GAMES)) {
         try {
           const { data } = await axios.get(API_BASE + gameInfo.param);
           const list = data.codes || data.active || [];
           const codes = list.map(e => e.code || e.key || e.name);
           const newCodes = codes.filter(c => !seen[gameInfo.param].has(c));
-
-          if (newCodes.length) {
-            newCodes.forEach(c => seen[gameInfo.param].add(c));
-
-            // game-specific headers
-            let header;
-            switch (gameInfo.param) {
-              case "genshin":
-                header = "**there are new primogems to be redeemed! Come get em!**";
-                break;
-              case "hkrpg":
-                header = "**there are new stellar jades to be redeemed! Come get em!**";
-                break;
-              case "nap":
-                header = "**fresh polychrome from the bangboo on sixth street! Come get them!**";
-                break;
-            }
-
-            const lines = [header];
-            for (const entry of list.filter(e => newCodes.includes(e.code || e.key || e.name))) {
-              const code    = entry.code || entry.key || entry.name;
-              const raw     = entry.rewards ?? entry.reward;
-              const rewards = Array.isArray(raw)
-                ? raw.join(", ")
-                : raw?.replace(/&amp;/g, "&").trim() || "Unknown reward";
-
-              lines.push(`• **${code}** — ${rewards}\n<${gameInfo.redeem}${code}>`);
-            }
-
-            await channel.sendMessage(lines.join("\n"));
+          if (!newCodes.length) continue;
+          newCodes.forEach(c => seen[gameInfo.param].add(c));
+          let header;
+          switch (gameInfo.param) {
+            case "genshin": header = "**there are new primogems to be redeemed! Come get em!**"; break;
+            case "hkrpg":  header = "**there are new stellar jades to be redeemed! Come get em!**"; break;
+            case "nap":    header = "**fresh polychrome from the bangboo on sixth street! Come get them!**"; break;
           }
+          const lines = [header];
+          for (const entry of list.filter(e => newCodes.includes(e.code || e.key || e.name))) {
+            const code = entry.code || entry.key || entry.name;
+            const raw = entry.rewards ?? entry.reward;
+            const rewards = Array.isArray(raw)
+              ? raw.join(", ")
+              : raw?.replace(/&amp;/g, "&").trim() || "Unknown reward";
+            lines.push(`• **${code}** — ${rewards}\n<${gameInfo.redeem}${code}>`);
+          }
+          sections.push(lines.join("\n"));
         } catch (err) {
           console.error("Auto-fetch error for", gameInfo.name, err);
         }
       }
+      if (sections.length) await channel.sendMessage(sections.join("\n\n"));
     }
-  }, 60 * 60 * 1000); // 1 hour
+  }, 60 * 60 * 1000);
 });
 
 client.on("message", async (msg) => {
   if (!msg.content) return;
-
   const key = msg.content.trim().toLowerCase();
   const cid = msg.channel.id ?? msg.channel._id;
 
   // ─── Enable auto-fetch ────────────────────────────────────────────
   if (key === "!enablefetch") {
     if (!enabledChannels.has(cid)) {
-      enabledChannels.set(cid, {
-        genshin: new Set(),
-        hkrpg:   new Set(),
-        nap:     new Set(),
-      });
+      // initialize sets and prime with current codes to avoid reposting
+      const seen = { genshin:new Set(), hkrpg:new Set(), nap:new Set() };
+      for (const g of Object.values(GAMES)) {
+        try {
+          const res = await axios.get(API_BASE + g.param);
+          const list = res.data.codes || res.data.active || [];
+          for (const e of list) {
+            const code = e.code || e.key || e.name;
+            seen[g.param].add(code);
+          }
+        } catch {}
+      }
+      enabledChannels.set(cid, seen);
       saveEnabled(enabledChannels);
       return msg.channel.sendMessage("✅ Auto-fetch enabled! I’ll check every hour and announce new codes here.");
     } else {
@@ -156,29 +147,20 @@ client.on("message", async (msg) => {
   // ─── Manual fetch commands ────────────────────────────────────────
   const gameInfo = GAMES[key];
   if (!gameInfo) return;
-
   try {
     const { data } = await axios.get(API_BASE + gameInfo.param);
     const list = data.codes || data.active || [];
-    if (!list.length) {
-      return msg.channel.sendMessage(`No active codes for **${gameInfo.name}** right now.`);
-    }
-
-    const today = new Date().toLocaleDateString("en-JP", {
-      timeZone:"Asia/Tokyo",
-      year:"numeric", month:"short", day:"numeric"
-    });
-
+    if (!list.length) return msg.channel.sendMessage(`No active codes for **${gameInfo.name}** right now.`);
+    const today = new Date().toLocaleDateString("en-JP", { timeZone:"Asia/Tokyo", year:"numeric", month:"short", day:"numeric" });
     const lines = [`**As of ${today}, here are the codes for ${gameInfo.name}:**`];
     for (const entry of list) {
       const code = entry.code || entry.key || entry.name;
-      const raw  = entry.rewards ?? entry.reward;
+      const raw = entry.rewards ?? entry.reward;
       const rewards = Array.isArray(raw)
         ? raw.join(", ")
         : raw?.replace(/&amp;/g, "&").trim() || "Unknown reward";
       lines.push(`• **${code}** — ${rewards}\n<${gameInfo.redeem}${code}>`);
     }
-
     await msg.channel.sendMessage(lines.join("\n"));
   } catch (err) {
     console.error("❌ Manual fetch failed:", err);
