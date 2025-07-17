@@ -140,7 +140,7 @@ client.on("message", async (msg) => {
     const thr = thresholds.get(cid) || {};
     const newEntries = list.filter(e => (e.id || 0) > (thr[gameInfo.param] || 0));
     if (!newEntries.length) {
-      return msg.channel.sendMessage(`No new codes for **${gameInfo.name}** since last check.`);
+      return msg.channel.sendMessage(`❌ No new codes for **${gameInfo.name}** since last check.`);
     }
     // update threshold and save
     thr[gameInfo.param] = Math.max(...newEntries.map(e => e.id || 0), thr[gameInfo.param] || 0);
