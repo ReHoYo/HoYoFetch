@@ -1,69 +1,110 @@
 # HoYoFetch Bot
 
-A simple Revolt bot that fetches the latest Hoyoverse gift codes using the Hoyocode API.
+A simple Revolt bot that fetches the latest Hoyoverse gift codes using the Hoyocode API, with both manual “force-fetch” and passive “auto-fetch” modes, plus a bunch of comical fallbacks if the API isn’t fully populated.
 
 ---
 
 ### Credits
 
-> ⚠ This bot uses the [Hoyocode API](https://github.com/seriaati/hoyo-codes) provided by `seriaati/hoyo-codes` to retrieve the latest codes.
+> ⚠ This bot uses the [Hoyocode API](https://github.com/seriaati/hoyo-codes) by `seriaati/hoyo-codes` to retrieve the latest codes.
 
 ---
 
 ### Commands
 
-- `!fetchGI` — Get the latest Genshin Impact codes.
-- `!fetchHSR` — Get the latest Honkai: Star Rail codes.
-- `!fetchZZZ` — Get the latest Zenless Zone Zero codes.
-- `!enableFetch` — Enable auto-fetching of new codes for this channel.
-- `!disableFetch` — Disable auto-fetching for this channel.
+- `!forceGI` — Manually fetch **all** current Genshin Impact codes (new and still-active ones).
+- `!forceHSR` — Manually fetch **all** current Honkai: Star Rail codes.
+- `!forceZZZ` — Manually fetch **all** current Zenless Zone Zero codes.
+- `!enablefetch` — Enable **auto-fetch** for this channel (every hour).
+- `!disablefetch` — Disable auto-fetch for this channel.
 
 ---
 
 ### Features
 
 💡 **Auto-Fetch Mode**  
-You can enable a passive listener in your channel using `!enableFetch`.  
-Every 2 hours, the bot will check for **new** codes and automatically announce them in the channel.
+Enable with `!enablefetch`. Every **1 hour**, the bot will:
 
-🔔 New codes will be posted with personalized headers like:
+1. Check each supported game’s API endpoint  
+2. Compare against what it’s **already posted** (per-channel, per-game)  
+3. Announce **only genuinely new** codes with a fun, game-specific header.
 
-- `**Genshin Impact: there are new primogems to be redeemed! Come get em!**`
-- `**Honkai Star Rail: there are new stellar jades to be redeemed! Come get em!**`
-- `**Zenless Zone Zero: there are new polychromes to be redeemed! Come get em!**`
+🔔 New codes are posted with headers like:
 
-This ensures you never miss a drop, even without manually running commands.
+- **there are new primogems to be redeemed! Come get em!**  
+- **there are new stellar jades to be redeemed! Come get em!**  
+- **fresh polychrome from the bangboo on sixth street! Come get them!**
 
-📴 You can turn this off anytime using `!disableFetch`.
+Turn it off anytime with `!disablefetch`.
+
+😎 **Manual “Force-Fetch”**  
+Run `!forceGI`, `!forceHSR`, or `!forceZZZ` to immediately list **all** codes (new + active) for that game, with this preamble:
+
+> After manually checking the codes for *<Game Name>*, here are the codes. This includes new codes, and some codes which aren't new but may still be active.
+
+---
+
+### Funny Reward Fallbacks
+
+If the API returns an empty `rewards` field, the bot will substitute a comical guess:
+
+- **Genshin Impact:** “I asked Paimon and she guesses primogems.”  
+- **Honkai Star Rail:** “I asked Pom-Pom and it's probably stellar jade.”  
+- **Zenless Zone Zero:** “I asked the Bangboo in the back alley of Sixth Street and they told me it's probably polychromes.”
 
 ---
 
 ### Notes
 
-1️⃣ **Game Coverage:**  
-Currently supports Genshin Impact, Honkai: Star Rail, and Zenless Zone Zero.  
-_Tears of Themis and Honkai Impact 3 are not supported due to API limitations._
+1. **Supported Games:**  
+   - Genshin Impact  
+   - Honkai: Star Rail  
+   - Zenless Zone Zero  
+   *(Other Hoyoverse titles are not supported due to API limitations.)*
 
-2️⃣ **Server Compatibility:**  
-The bot only works for Global servers (Asia, America, EU, and HW/TW/MO servers).  
-⚠ Mainland China servers (Irminsul, Celestia) are not supported.
+2. **Region Coverage:**  
+   Works on global servers (Asia, America, EU, TW/HK/MO).  
+   *Mainland China servers (Irminsul, Celestia) are not covered.*
 
-3️⃣ **Code Update Timing:**  
-The bot uses the Hoyocode API, so there may be a short delay before new codes appear depending on when the API updates.
+3. **API Delay:**  
+   Hoyocode can lag ~1 hour behind the official gift page.  
+   Reward strings may be empty until they update.
 
-4️⃣ **Funny Reward Messages:**  
-Sometimes you may see messages like:  
-> “We asked Paimon and she replied that it's probably primogems.”  
-This simply means the API found a code but didn't provide reward details. The code is still valid and redeemable.
+4. **Persistence:**  
+   Per-channel “last-seen” thresholds are stored in `enabledChannels.json` (auto-created).  
+   **Make sure** to add this to your `.gitignore`.
 
-5️⃣ **Downtime / Support:**  
-If the bot goes offline, please contact `suichanwaa` (on revolt). The VPS running it probably crashed or went down.
+5. **Resilience:**  
+   - Automatic JSON backups on corruption  
+   - Numeric ID coercion + sorting to guarantee ordering  
+   - Safe `sendMessage` handling (removes channels if permissions change)
+
+6. **Downtime / Support:**  
+   If the bot goes offline, contact `suichanwaa` on Revolt.
 
 ---
 
 ### Deployment
 
-1. Install Node.js (v16 or higher)
-2. Install dependencies:  
-```bash
+1. **Install** Node.js v16+  
+2. **Clone** this repo and `cd` in:  
+   ```bash
+   git clone <repo-url>
+   cd hoyofetch
+
+	3.	Secrets:
+	•	Set REVOLT_BOT_TOKEN in your environment or a .env file.
+	4.	Ignore the data file:
+
+enabledChannels.json
+
+
+	5.	Install dependencies:
+
 npm install
+
+
+	6.	Run the bot under your process manager:
+	•	PM2: pm2 start index.js --name hoyofetch --watch
+	•	systemd: set up a service with Restart=always
+	•	Docker: build & run, mounting your token as an env var
