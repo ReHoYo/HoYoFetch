@@ -67,7 +67,6 @@ async function safeSend(channel, content) {
     await channel.sendMessage(content);
   } catch (err) {
     console.error(`❌ Failed to send message to ${channel._id}:`, err);
-    // Optionally disable channel if unauthorized
     if (err.message.includes('permissions')) {
       console.warn(`🚫 Removing auto-fetch for ${channel._id} due to permission error.`);
       thresholds.delete(channel._id);
@@ -83,7 +82,6 @@ client.on("ready", () => {
     for (const [cid, thr] of thresholds.entries()) {
       const channel = client.channels.get(cid);
       if (!channel) { thresholds.delete(cid); saveThresholds(thresholds); continue; }
-
       const sections = [];
       for (const gameInfo of Object.values(GAMES)) {
         let list;
@@ -94,7 +92,6 @@ client.on("ready", () => {
           console.error(`Error fetching ${gameInfo.name}:`, err);
           continue;
         }
-        // filter, coerce, sort
         const newEntries = list
           .map(e => ({ ...e, _idNum: getIdNum(e) }))
           .filter(e => e._idNum > (thr[gameInfo.param] || 0))
@@ -102,7 +99,6 @@ client.on("ready", () => {
         if (!newEntries.length) continue;
         thr[gameInfo.param] = newEntries[newEntries.length -1]._idNum;
 
-        // header
         let header;
         switch (gameInfo.param) {
           case "genshin": header = "**there are new primogems to be redeemed! Come get em!**"; break;
@@ -111,9 +107,15 @@ client.on("ready", () => {
         }
         const lines = [header];
         newEntries.forEach(e => {
+          let raw = e.rewards ?? e.reward;
+          if (raw === undefined) {
+            const altKey = Object.keys(e).find(k => /reward/i.test(k));
+            raw = altKey ? e[altKey] : undefined;
+          }
+          const rewards = Array.isArray(raw)
+            ? raw.join(", ")
+            : (typeof raw === 'string' ? raw.replace(/&amp;/g, "&").trim() : "") || "Unknown reward";
           const code = e.code || e.key || e.name;
-          const raw  = e.rewards ?? e.reward;
-          const rewards = Array.isArray(raw) ? raw.join(", ") : raw?.replace(/&amp;/g,"&").trim() || "Unknown reward";
           lines.push(`• **${code}** — ${rewards}\n<${gameInfo.redeem}${code}>`);
         });
         sections.push(lines.join("\n"));
@@ -161,7 +163,6 @@ client.on("message", async msg => {
     return safeSend(msg.channel, "ℹ️ Auto-fetch wasn’t enabled in this channel.");
   }
 
-  // manual-fetch respects threshold
   const gameInfo = GAMES[key];
   if (!gameInfo) return;
   let list;
@@ -188,9 +189,15 @@ client.on("message", async msg => {
   const header = `**As of ${today}, new codes for ${gameInfo.name}:**`;
   const lines = [header];
   newEntries.forEach(e => {
+    let raw = e.rewards ?? e.reward;
+    if (raw === undefined) {
+      const altKey = Object.keys(e).find(k => /reward/i.test(k));
+      raw = altKey ? e[altKey] : undefined;
+    }
+    const rewards = Array.isArray(raw)
+      ? raw.join(", ")
+      : (typeof raw === 'string' ? raw.replace(/&amp;/g, "&").trim() : "") || "Unknown reward";
     const code = e.code || e.key || e.name;
-    const raw  = e.rewards ?? e.reward;
-    const rewards = Array.isArray(raw) ? raw.join(", ") : raw?.replace(/&amp;/g,"&").trim() || "Unknown reward";
     lines.push(`• **${code}** — ${rewards}\n<${gameInfo.redeem}${code}>`);
   });
   await safeSend(msg.channel, lines.join("\n"));
