@@ -96,12 +96,12 @@ If the API returns an empty `rewards` field, the bot will substitute a comical g
 	•	Set REVOLT_BOT_TOKEN in your environment or a .env file.
 	4.	Ignore the data file:
 
-enabledChannels.json
+`enabledChannels.json`
 
 
 	5.	Install dependencies:
 
-npm install
+`npm install`
 
 
 	6.	Run the bot under your process manager:
