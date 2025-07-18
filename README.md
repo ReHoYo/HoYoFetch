@@ -40,7 +40,7 @@ Turn it off anytime with `!disablefetch`.
 😎 **Manual “Force-Fetch”**  
 Run `!forceGI`, `!forceHSR`, or `!forceZZZ` to immediately list **all** codes (new + active) for that game, with this preamble:
 
-> After manually checking the codes for *<Game Name>*, here are the codes. This includes new codes, and some codes which aren't new but may still be active.
+> After manually checking the codes for x, here are the codes. This includes new codes, and some codes which aren't new but may still be active.
 
 ---
 
