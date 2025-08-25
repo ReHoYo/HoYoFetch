@@ -18,7 +18,12 @@ const GAMES = {
   "!fetchhsr": { param: "hkrpg",  name: "Honkai Star Rail", redeem: "https://hsr.hoyoverse.com/gift?code=" },
   "!fetchzzz": { param: "nap",    name: "Zenless Zone Zero", redeem: "https://zenless.hoyoverse.com/redemption?code=" },
 };
-const DETAIL_RETRY_LIMIT = 3;
+
+// How long to wait (minutes) before posting a code that still has no reward text
+// You can override via env: DETAIL_HOLD_MINUTES=90
+const DETAIL_HOLD_MINUTES = Number(process.env.DETAIL_HOLD_MINUTES || 90);
+// How many hourly checks to wait at most before posting without rewards
+const DETAIL_RETRY_LIMIT = Number(process.env.DETAIL_RETRY_LIMIT || 3);
 
 // ─── Persistence Helpers ────────────────────────────────────────────
 const DATA_FILE = path.resolve(process.cwd(), "enabledChannels.json");
@@ -52,14 +57,17 @@ function saveJSON(file, obj) {
 }
 
 // ─── State: thresholds & pending counts ─────────────────────────────
+// thresholds: Map<channelId, { genshin:number, hkrpg:number, nap:number }>
 const thresholds = new Map(Object.entries(loadJSON(DATA_FILE)));
-const pending = loadJSON(PENDING_FILE); // { cid: { param: { code: count } } }
+// pending: { [cid]: { [param]: { [code]: { count:number, firstSeen:number } } } }
+const pending = loadJSON(PENDING_FILE);
 
 const client = new Client();
 process.on("unhandledRejection", console.error);
 
 // ID coercion helper
 const getIdNum = e => Number(e.id) || 0;
+const getCodeKey = e => e.code || e.key || e.name;
 
 // Safe send helper
 async function safeSend(channel, content) {
@@ -67,7 +75,7 @@ async function safeSend(channel, content) {
     await channel.sendMessage(content);
   } catch (err) {
     console.error(`❌ Failed to send message to ${channel._id}:`, err);
-    if (err.message.includes('permissions')) {
+    if (err?.message?.includes('permissions')) {
       thresholds.delete(channel._id);
       saveJSON(DATA_FILE, Object.fromEntries(thresholds));
       console.warn(`🚫 Auto-fetch removed for ${channel._id} due to permissions.`);
@@ -86,7 +94,8 @@ const FALLBACKS = {
 client.on("ready", () => {
   console.log(`✅ Logged in as ${client.user.username}.`);
   setInterval(async () => {
-    let changed = false;
+    let changed = false; // track if we need to save files at the end
+
     for (const [cid, thr] of thresholds.entries()) {
       const channel = client.channels.get(cid);
       if (!channel) {
@@ -94,7 +103,9 @@ client.on("ready", () => {
         changed = true;
         continue;
       }
+
       const sections = [];
+
       for (const gameInfo of Object.values(GAMES)) {
         let list;
         try {
@@ -103,34 +114,58 @@ client.on("ready", () => {
         } catch {
           continue;
         }
+
         const lastId = Number(thr[gameInfo.param] || 0);
         const newEntries = list
           .map(e => ({ ...e, _idNum: getIdNum(e) }))
           .filter(e => e._idNum > lastId)
           .sort((a,b) => a._idNum - b._idNum);
+
         const publish = [];
         for (const e of newEntries) {
           const hasDetails = Boolean(e.rewards ?? e.reward);
-          const codeKey = e.code || e.key || e.name;
-          // init pending structure
+          const codeKey = getCodeKey(e);
+
+          // init pending structure & normalize shape (back-compat if old numeric value exists)
           pending[cid] = pending[cid] || {};
           pending[cid][gameInfo.param] = pending[cid][gameInfo.param] || {};
+          const prev = pending[cid][gameInfo.param][codeKey];
+          let count = 0;
+          let firstSeen = Date.now();
+          if (prev) {
+            if (typeof prev === 'number') {
+              count = prev;
+              firstSeen = Date.now();
+            } else {
+              count = Number(prev.count || 0);
+              firstSeen = Number(prev.firstSeen || Date.now());
+            }
+          }
+
           if (hasDetails) {
             publish.push(e);
             delete pending[cid][gameInfo.param][codeKey];
           } else {
-            const count = (pending[cid][gameInfo.param][codeKey] || 0) + 1;
-            pending[cid][gameInfo.param][codeKey] = count;
-            if (count >= DETAIL_RETRY_LIMIT) {
+            // increment attempts and set/keep firstSeen
+            count += 1;
+            if (!prev) firstSeen = Date.now();
+            pending[cid][gameInfo.param][codeKey] = { count, firstSeen };
+
+            const ageMin = (Date.now() - firstSeen) / 60000;
+            if (count >= DETAIL_RETRY_LIMIT || ageMin >= DETAIL_HOLD_MINUTES) {
+              // time/attempt threshold reached: publish with fallback
               publish.push(e);
               delete pending[cid][gameInfo.param][codeKey];
             }
           }
         }
+
         if (!publish.length) continue;
-        // update threshold to highest published id
+
+        // update threshold to highest published id (do not skip held-back codes)
         thr[gameInfo.param] = Math.max(...publish.map(e=>e._idNum), lastId);
         changed = true;
+
         // build message
         let header;
         switch (gameInfo.param) {
@@ -142,16 +177,18 @@ client.on("ready", () => {
         publish.forEach(e => {
           let raw = e.rewards ?? e.reward;
           if (!raw) raw = FALLBACKS[gameInfo.param];
-          const rewards = Array.isArray(raw) ? raw.join(", ") : raw.replace(/&amp;/g, "&").trim();
-          const code = e.code || e.key || e.name;
+          const rewards = Array.isArray(raw) ? raw.join(", ") : String(raw).replace(/&amp;/g, "&").trim();
+          const code = getCodeKey(e);
           lines.push(`• **${code}** — ${rewards}\n<${gameInfo.redeem}${code}>`);
         });
         sections.push(lines.join("\n"));
       }
+
       if (sections.length) {
         await safeSend(channel, sections.join("\n\n"));
       }
     }
+
     if (changed) {
       saveJSON(DATA_FILE, Object.fromEntries(thresholds));
       saveJSON(PENDING_FILE, pending);
@@ -180,7 +217,7 @@ client.on("message", async msg => {
       }
       thresholds.set(cid, thr);
       saveJSON(DATA_FILE, Object.fromEntries(thresholds));
-      return safeSend(msg.channel, "✅ Auto-fetch enabled! I’ll check every hour and announce new codes here.");
+      return safeSend(msg.channel, `✅ Auto-fetch enabled! I’ll check every hour and announce new codes here. (Delaying ${DETAIL_HOLD_MINUTES}m for missing reward details, up to ${DETAIL_RETRY_LIMIT} attempts)`) ;
     }
     return safeSend(msg.channel, "ℹ️ Auto-fetch is already enabled in this channel.");
   }
@@ -213,8 +250,8 @@ client.on("message", async msg => {
       list.forEach(entry => {
         let raw = entry.rewards ?? entry.reward;
         if (!raw) raw = FALLBACKS[gameInfo.param];
-        const rewards = Array.isArray(raw) ? raw.join(", ") : raw.replace(/&amp;/g, "&").trim();
-        const code = entry.code || entry.key || entry.name;
+        const rewards = Array.isArray(raw) ? raw.join(", ") : String(raw).replace(/&amp;/g, "&").trim();
+        const code = getCodeKey(entry);
         lines.push(`• **${code}** — ${rewards}\n<${gameInfo.redeem}${code}>`);
       });
       return safeSend(msg.channel, lines.join("\n"));
