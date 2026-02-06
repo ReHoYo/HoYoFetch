@@ -68,18 +68,18 @@ If the API returns an empty `rewards` field, the bot will substitute a comical g
 
 3. **API Delay:**  
    Hoyocode can lag ~1 hour behind the official gift page.  
-   Reward strings may be empty until they update.
+   Reward strings may be empty, but there will be a message when the API fails to provide reward information.
 
-4. **Persistence:**  
+5. **Persistence:**  
    Per-channel “last-seen” thresholds are stored in `enabledChannels.json` (auto-created).  
    **Make sure** to add this to your `.gitignore`.
 
-5. **Resilience:**  
+6. **Resilience:**  
    - Automatic JSON backups on corruption  
    - Numeric ID coercion + sorting to guarantee ordering  
    - Safe `sendMessage` handling (removes channels if permissions change)
 
-6. **Downtime / Support:**  
+7. **Downtime / Support:**  
    If the bot goes offline, contact `suichanwaa` on Revolt.
 
 ---
