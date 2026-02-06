@@ -85,9 +85,9 @@ async function safeSend(channel, content) {
 
 // Comical reward fallbacks
 const FALLBACKS = {
-  genshin: "I asked Paimon and she guesses primogems.",
-  hkrpg:   "I asked Pom-Pom and it's probably stellar jade.",
-  nap:     "I asked the Bangboo in the back alley of Sixth Street and they told me it's probably polychromes.",
+  genshin: "I asked Paimon and she guesses primogems. (The API did not pass any reward information for this code.)",
+  hkrpg:   "I asked Pom-Pom and it's probably stellar jade. (The API did not pass any reward information for this code.)",
+  nap:     "I asked the Bangboo in the back alley of Sixth Street and they told me it's probably polychromes. (The API did not pass any reward information for this code.)",
 };
 
 // ─── Auto-fetch loop ─────────────────────────────────────────────────
