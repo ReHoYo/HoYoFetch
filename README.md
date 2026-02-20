@@ -1,6 +1,6 @@
 # HoYoFetch Bot
 
-A simple Revolt bot that fetches the latest Hoyoverse gift codes using the Hoyocode API, with both manual “force-fetch” and passive “auto-fetch” modes, plus a bunch of comical fallbacks if the API isn’t fully populated.
+A simple Revolt bot that fetches the latest Hoyoverse gift codes using the Hoyocode API, with both manual “force-fetch” and passive “auto-fetch” modes, plus comical fallbacks if reward details are missing.
 
 ---
 
@@ -15,6 +15,7 @@ A simple Revolt bot that fetches the latest Hoyoverse gift codes using the Hoyoc
 - `!forceGI` — Manually fetch **all** current Genshin Impact codes (new and still-active ones).
 - `!forceHSR` — Manually fetch **all** current Honkai: Star Rail codes.
 - `!forceZZZ` — Manually fetch **all** current Zenless Zone Zero codes.
+- `!forceHI3` — Manually fetch **all** current Honkai Impact 3rd exchange rewards (from Fandom).
 - `!enablefetch` — Enable **auto-fetch** for this channel (every hour).
 - `!disablefetch` — Disable auto-fetch for this channel.
 
@@ -25,86 +26,77 @@ A simple Revolt bot that fetches the latest Hoyoverse gift codes using the Hoyoc
 💡 **Auto-Fetch Mode**  
 Enable with `!enablefetch`. Every **1 hour**, the bot will:
 
-1. Check each supported game’s API endpoint  
-2. Compare against what it’s **already posted** (per-channel, per-game)  
-3. Announce **only genuinely new** codes with a fun, game-specific header.
+1. Check each supported game source (Hoyocode API + HI3 Fandom page).
+2. Compare against what it’s already posted (per-channel, per-game).
+3. Announce only genuinely new codes with game-specific headers.
 
-🔔 New codes are posted with headers like:
+🔔 Example headers:
 
-- **there are new primogems to be redeemed! Come get em!**  
-- **there are new stellar jades to be redeemed! Come get em!**  
+- **there are new primogems to be redeemed! Come get em!**
+- **there are new stellar jades to be redeemed! Come get em!**
 - **fresh polychrome from the bangboo on sixth street! Come get them!**
+- **captain! new HI3 exchange rewards were found!**
 
-Turn it off anytime with `!disablefetch`.
-
-😎 **Manual “Force-Fetch”**  
-Run `!forceGI`, `!forceHSR`, or `!forceZZZ` to immediately list **all** codes (new + active) for that game, with this preamble:
-
-> After manually checking the codes for x, here are the codes. This includes new codes, and some codes which aren't new but may still be active.
+😎 **Manual Force-Fetch**  
+Run `!forceGI`, `!forceHSR`, `!forceZZZ`, or `!forceHI3` to immediately list current codes/rewards for that game.
 
 ---
 
 ### Funny Reward Fallbacks
 
-If the API returns an empty `rewards` field, the bot will substitute a comical guess:
+If the API returns an empty `rewards` field, the bot substitutes a comical guess:
 
-- **Genshin Impact:** “I asked Paimon and she guesses primogems.”  
-- **Honkai Star Rail:** “I asked Pom-Pom and it's probably stellar jade.”  
+- **Genshin Impact:** “I asked Paimon and she guesses primogems.”
+- **Honkai Star Rail:** “I asked Pom-Pom and it's probably stellar jade.”
 - **Zenless Zone Zero:** “I asked the Bangboo in the back alley of Sixth Street and they told me it's probably polychromes.”
 
 ---
 
 ### Notes
 
-1. **Supported Games:**  
-   - Genshin Impact  
-   - Honkai: Star Rail  
-   - Zenless Zone Zero  
-   *(Other Hoyoverse titles are not supported due to API limitations.)*
+1. **Supported Games:**
+   - Genshin Impact
+   - Honkai: Star Rail
+   - Zenless Zone Zero
+   - Honkai Impact 3rd (exchange reward table from the Fandom wiki)
 
-2. **Region Coverage:**  
-   Works on global servers (Asia, America, EU, TW/HK/MO).  
-   *Mainland China servers (Irminsul, Celestia) are not covered.*
+2. **Region Coverage:**
+   Works on global servers (Asia, America, EU, TW/HK/MO). Mainland China servers (Irminsul, Celestia) are not covered.
 
-3. **API Delay:**  
-   Hoyocode can lag ~1 hour behind the official gift page.  
-   Reward strings may be empty, but there will be a message when the API fails to provide reward information.
+3. **API / Source Delay:**
+   Hoyocode can lag around 1 hour behind official pages. HI3 codes are scraped from the Fandom exchange rewards page and depend on how quickly that page is updated.
 
-5. **Persistence:**  
-   Per-channel “last-seen” thresholds are stored in `enabledChannels.json` (auto-created).  
-   **Make sure** to add this to your `.gitignore`.
+4. **Persistence:**
+   Per-channel thresholds are stored in `enabledChannels.json` and pending reward-detail retries in `pendingDetails.json`.
 
-6. **Resilience:**  
-   - Automatic JSON backups on corruption  
-   - Numeric ID coercion + sorting to guarantee ordering  
+5. **Resilience:**
+   - Automatic JSON backups on corruption
+   - Numeric ID coercion + sorting to guarantee ordering
    - Safe `sendMessage` handling (removes channels if permissions change)
 
-7. **Downtime / Support:**  
+6. **Downtime / Support:**
    If the bot goes offline, contact `suichanwaa` on Revolt.
 
 ---
 
 ### Deployment
 
-1. **Install** Node.js v16+  
-2. **Clone** this repo and `cd` in:  
+1. Install Node.js v16+
+2. Clone this repo and `cd` in:
    ```bash
    git clone <repo-url>
    cd hoyofetch
+   ```
+3. Set `REVOLT_BOT_TOKEN` in your environment or in a `.env` file.
+4. Add `enabledChannels.json` and `pendingDetails.json` to `.gitignore`.
+5. Install dependencies:
+   ```bash
+   npm install
+   ```
 
-	3.	Secrets:
-	•	Set REVOLT_BOT_TOKEN in your environment or a .env file.
-	4.	Ignore the data file:
+   This project uses `cheerio` to parse the HI3 exchange rewards table.
 
-`enabledChannels.json`
-
-
-	5.	Install dependencies:
-
-`npm install`
-
-
-	6.	Run the bot under your process manager:
-	•	PM2: pm2 start index.js --name hoyofetch --watch
-	•	systemd: set up a service with Restart=always
-	•	Docker: build & run, mounting your token as an env var
+6. Run the bot with your process manager:
+   - PM2: `pm2 start index.js --name hoyofetch --watch`
+   - systemd: service with `Restart=always`
+   - Docker: run with your token passed as an environment variable
