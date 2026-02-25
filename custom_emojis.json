@@ -1,0 +1,42 @@
+{
+  "_README": "Fill in Revolt emoji IDs from your emoji hub server. Leave empty or remove entries to use Unicode fallbacks. Bot must be a member of the server where emoji are uploaded.",
+
+  "_global": {
+    "_comment": "Global emoji used across all games (lowest priority)"
+  },
+
+  "genshin": {
+    "_comment": "Genshin Impact emoji — e.g. 'primogem': '01HXXXXXXXXXXXXXXXX'",
+    "primogem": "",
+    "mora": "",
+    "hero's wit": "",
+    "adventurer's experience": "",
+    "mystic enhancement ore": ""
+  },
+
+  "hkrpg": {
+    "_comment": "Honkai: Star Rail emoji",
+    "stellar jade": "",
+    "credit": "",
+    "traveler's guide": "",
+    "refined aether": "",
+    "trailblaze power": ""
+  },
+
+  "nap": {
+    "_comment": "Zenless Zone Zero emoji",
+    "polychrome": "",
+    "dennies": "",
+    "senior investigator log": "",
+    "w-engine energy module": "",
+    "battery charge": ""
+  },
+
+  "honkai3rd": {
+    "_comment": "Honkai Impact 3rd emoji",
+    "crystal": "",
+    "coin": "",
+    "asterite": "",
+    "stamina potion": ""
+  }
+}
