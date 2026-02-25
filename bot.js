@@ -82,6 +82,9 @@ client.on("ready", async () => {
 
 // ── Message handler (command router) ───────────────
 client.on("messageCreate", async (message) => {
+  // Debug: log every incoming message (remove after troubleshooting)
+  console.log(`📨  MSG | content: "${message.content}" | author: ${message.authorId} | channel: ${message.channelId}`);
+
   // Ignore own messages and messages without content
   if (!message.content) return;
   if (message.authorId === client.user.id) return;
