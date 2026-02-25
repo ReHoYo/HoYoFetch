@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+// ── WebSocket polyfill for Node < 21 ──────────────
+import { WebSocket as _WS } from "ws";
+if (typeof globalThis.WebSocket === "undefined") {
+  globalThis.WebSocket = _WS;
+}
+
 // bot.js — HoyoFetch: Revolt/Stoat bot for HoYoverse redemption codes
 // ════════════════════════════════════════════════════════════════════
 //
