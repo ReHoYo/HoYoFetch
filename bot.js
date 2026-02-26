@@ -103,12 +103,20 @@ client.on("messageCreate", async (message) => {
 
     // ── EnableFetch ──────────────────────────────
     if (body === "enablefetch") {
+      if (!requirePermission(message)) {
+        await sendNoPermission(message);
+        return;
+      }
       await handleEnableFetch(message);
       return;
     }
 
     // ── DisableFetch ─────────────────────────────
     if (body === "disablefetch") {
+      if (!requirePermission(message)) {
+        await sendNoPermission(message);
+        return;
+      }
       await handleDisableFetch(message);
       return;
     }
@@ -328,6 +336,33 @@ async function seedAllGames() {
       console.error(`   Seed error for ${game.name}:`, err.message);
     }
   }
+}
+
+// ═══════════════════════════════════════════════════
+//  Permissions
+// ═══════════════════════════════════════════════════
+
+/**
+ * Check whether the message author has a server-level permission.
+ * Returns false if there is no server context (e.g. DMs).
+ */
+function requirePermission(message, permission = "ManageServer") {
+  const member = message.member;
+  const server = message.server;
+  if (!member || !server) return false;
+  return member.hasPermission(server, permission);
+}
+
+async function sendNoPermission(message) {
+  await safeSend(message.channel, {
+    embeds: [
+      buildStatusEmbed(
+        "🔒 Permission Denied",
+        "You need the **Manage Server** permission to use this command.",
+        "#E74C3C"
+      ),
+    ],
+  });
 }
 
 // ═══════════════════════════════════════════════════
