@@ -232,8 +232,11 @@ export function formatRewards(rawRewards, gameKey) {
     return "_Reward details unavailable — check in-game mail after redeeming._";
   }
 
+  // Limit input length to prevent ReDoS on maliciously crafted API responses
+  const safeRewards = rawRewards.length > 500 ? rawRewards.slice(0, 500) : rawRewards;
+
   // Clean up messy reward strings from APIs
-  let cleaned = cleanRewards(rawRewards);
+  let cleaned = cleanRewards(safeRewards);
 
   // Add emoji before matching keywords
   for (const [keyword, emoji] of Object.entries(emojiMap)) {

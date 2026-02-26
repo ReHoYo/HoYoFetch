@@ -15,10 +15,28 @@ const CHANNELS_PATH = join(DATA_DIR, "channels.json");
 const KNOWN_CODES_PATH = join(DATA_DIR, "known_codes.json");
 
 // ── Helpers ────────────────────────────────────────
+const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+/**
+ * Recursively strip dangerous keys from parsed JSON to prevent prototype pollution.
+ */
+function sanitiseObject(obj) {
+  if (obj === null || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) return obj.map(sanitiseObject);
+
+  const clean = {};
+  for (const key of Object.keys(obj)) {
+    if (DANGEROUS_KEYS.has(key)) continue;
+    clean[key] = sanitiseObject(obj[key]);
+  }
+  return clean;
+}
+
 function readJSON(path, fallback) {
   try {
     if (!existsSync(path)) return fallback;
-    return JSON.parse(readFileSync(path, "utf-8"));
+    const raw = JSON.parse(readFileSync(path, "utf-8"));
+    return sanitiseObject(raw);
   } catch {
     return fallback;
   }

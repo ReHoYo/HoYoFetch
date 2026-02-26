@@ -88,6 +88,9 @@ client.on("messageCreate", async (message) => {
 
   const raw = message.content.trim();
 
+  // Reject excessively long messages early to avoid unnecessary processing
+  if (raw.length > 200) return;
+
   // Must start with the prefix
   if (!raw.toLowerCase().startsWith(CONFIG.prefix.toLowerCase())) return;
 
@@ -132,7 +135,7 @@ client.on("messageCreate", async (message) => {
       embeds: [
         buildStatusEmbed(
           "⚠️ Error",
-          `Something went wrong: \`${err.message}\``,
+          "Something went wrong while processing your command. Please try again later.",
           "#E74C3C"
         ),
       ],
@@ -304,6 +307,7 @@ async function runAutoFetch() {
               isAuto: true,
               page: totalBatches > 1 ? `${page}/${totalBatches}` : null,
             });
+            if (!isSafeId(chId)) continue;
             await client.api.post(`/channels/${chId}/messages`, {
               content: " ",
               embeds: [embed],
@@ -379,6 +383,10 @@ async function safeSend(channel, data) {
       console.warn("safeSend: channel is missing or has no id");
       return;
     }
+    if (!isSafeId(channel.id)) {
+      console.warn("safeSend: channel id contains invalid characters");
+      return;
+    }
     // Revolt requires content field; add a blank one if only embeds are sent
     if (data.embeds && !data.content) {
       data.content = " ";
@@ -404,6 +412,10 @@ async function safeSend(channel, data) {
 
 async function safeDelete(channelId, messageId) {
   try {
+    if (!isSafeId(channelId) || !isSafeId(messageId)) {
+      console.warn("safeDelete: ID contains invalid characters");
+      return;
+    }
     const url = `${client.api.baseURL}/channels/${channelId}/messages/${messageId}`;
     const res = await fetch(url, {
       method: "DELETE",
@@ -415,6 +427,14 @@ async function safeDelete(channelId, messageId) {
   } catch (err) {
     console.warn("safeDelete error:", err?.message || err);
   }
+}
+
+/**
+ * Validate that an ID string contains only alphanumeric characters.
+ * Prevents path traversal / URL injection when interpolating into API paths.
+ */
+function isSafeId(id) {
+  return typeof id === "string" && /^[A-Za-z0-9]+$/.test(id);
 }
 
 // ── Graceful shutdown ──────────────────────────────

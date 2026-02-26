@@ -3,6 +3,10 @@
 import { readFileSync, existsSync } from "fs";
 
 // ── Load .env manually (no dotenv dependency) ──────
+const ALLOWED_ENV_KEYS = new Set([
+  "BOT_TOKEN", "PREFIX", "FETCH_INTERVAL", "EMOJI_MODE", "HOYO_API_BASE",
+]);
+
 function loadEnv() {
   const envPath = new URL(".env", import.meta.url).pathname;
   if (!existsSync(envPath)) return;
@@ -19,16 +23,32 @@ function loadEnv() {
       (val.startsWith("'") && val.endsWith("'"))) {
       val = val.slice(1, -1);
     }
+    // Only set recognised keys to prevent overwriting sensitive Node.js env vars
+    if (!ALLOWED_ENV_KEYS.has(key)) {
+      console.warn(`⚠️  Ignoring unrecognised .env key: ${key}`);
+      continue;
+    }
     if (!process.env[key]) process.env[key] = val;
   }
 }
 loadEnv();
 
 // ── Exported config ────────────────────────────────
+const rawInterval = parseInt(process.env.FETCH_INTERVAL || "60", 10);
+const fetchIntervalMinutes = Number.isFinite(rawInterval) && rawInterval >= 1
+  ? Math.min(rawInterval, 1440)
+  : 60;
+
+if (fetchIntervalMinutes !== rawInterval) {
+  console.warn(
+    `⚠️  FETCH_INTERVAL clamped to ${fetchIntervalMinutes} (was ${process.env.FETCH_INTERVAL})`
+  );
+}
+
 export const CONFIG = {
   token: process.env.BOT_TOKEN || "",
   prefix: process.env.PREFIX || "/",
-  fetchIntervalMinutes: parseInt(process.env.FETCH_INTERVAL || "60", 10),
+  fetchIntervalMinutes,
   hoyoApiBase:
     process.env.HOYO_API_BASE || "https://hoyo-codes.seria.moe/codes",
 };
