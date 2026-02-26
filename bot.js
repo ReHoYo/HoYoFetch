@@ -156,11 +156,12 @@ async function handleFetchCommand(message, gameKey) {
     `Contacting the ${apiLabel}…`,
     game.colour
   );
-  await safeSend(message.channel, { embeds: [loadingEmbed] });
+  const loadingMsg = await safeSend(message.channel, { embeds: [loadingEmbed] });
 
   const codes = await fetchCodes(gameKey);
 
   if (!codes.length) {
+    if (loadingMsg?._id) await safeDelete(message.channel.id, loadingMsg._id);
     await safeSend(message.channel, {
       embeds: [buildNoCodesEmbed(gameKey)],
     });
@@ -180,6 +181,9 @@ async function handleFetchCommand(message, gameKey) {
     });
     await safeSend(message.channel, { embeds: [embed] });
   }
+
+  // Delete the loading message now that all code embeds are posted
+  if (loadingMsg?._id) await safeDelete(message.channel.id, loadingMsg._id);
 }
 
 async function handleEnableFetch(message) {
@@ -380,7 +384,7 @@ async function safeSend(channel, data) {
       data.content = " ";
     }
     // Use REST API directly to avoid revolt.js hydration bug with solid-js
-    await client.api.post(`/channels/${channel.id}/messages`, data);
+    return await client.api.post(`/channels/${channel.id}/messages`, data);
   } catch (err) {
     console.error("safeSend error:", err?.message || err);
     // Fallback: try sending as plain text if embed failed
@@ -395,6 +399,14 @@ async function safeSend(channel, data) {
     } catch (fallbackErr) {
       console.error("safeSend fallback error:", fallbackErr?.message || fallbackErr);
     }
+  }
+}
+
+async function safeDelete(channelId, messageId) {
+  try {
+    await client.api.delete(`/channels/${channelId}/messages/${messageId}`);
+  } catch (err) {
+    console.warn("safeDelete error:", err?.message || err);
   }
 }
 
