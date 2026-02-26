@@ -404,7 +404,14 @@ async function safeSend(channel, data) {
 
 async function safeDelete(channelId, messageId) {
   try {
-    await client.api.delete(`/channels/${channelId}/messages/${messageId}`);
+    const url = `${client.api.baseURL}/channels/${channelId}/messages/${messageId}`;
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: client.api.config.headers,
+    });
+    if (!res.ok) {
+      console.warn(`safeDelete: HTTP ${res.status} ${res.statusText}`);
+    }
   } catch (err) {
     console.warn("safeDelete error:", err?.message || err);
   }
