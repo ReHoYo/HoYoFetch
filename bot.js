@@ -129,6 +129,12 @@ client.on("messageCreate", async (message) => {
       await handleHelp(message);
       return;
     }
+
+    // ── HarHar ──────────────────────────────────────
+    if (body === "harhar") {
+      await safeSend(message.channel, { content: ":01KPK39288XJE44RWR495WSZGR:" });
+      return;
+    }
   } catch (err) {
     console.error(`Command error [${body}]:`, err);
     await safeSend(message.channel, {
