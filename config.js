@@ -172,6 +172,7 @@ export const COMMAND_GAME_MAP = {
   fetchhsr: "hkrpg",
   fetchzzz: "nap",
   fetchhi3: "honkai3rd",
+  fetchnte: "nte",
 };
 
 // ═══════════════════════════════════════════════════

@@ -46,7 +46,7 @@ On first boot, the bot seeds all existing codes into memory so it won't announce
 | `/FetchHSR` | Fetch active Honkai: Star Rail codes |
 | `/FetchZZZ` | Fetch active Zenless Zone Zero codes |
 | `/FetchHI3` | Fetch active Honkai Impact 3rd codes |
-| `!fetchNTE` | Fetch active Neverness to Everness codes |
+| `/FetchNTE` | Fetch active Neverness to Everness codes |
 | `/EnableFetch` | Enable auto-fetch in the current channel |
 | `/DisableFetch` | Disable auto-fetch in the current channel |
 | `/HelpHoyoFetch` | Show all commands |
@@ -168,7 +168,7 @@ pm2 startup
 ### Docker
 
 ```dockerfile
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --production

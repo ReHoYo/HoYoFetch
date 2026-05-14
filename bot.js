@@ -91,25 +91,6 @@ client.on("messageCreate", async (message) => {
   // Reject excessively long messages early to avoid unnecessary processing
   if (raw.length > 200) return;
 
-  // Literal NTE command, independent from the configurable HoyoFetch prefix.
-  if (raw.toLowerCase() === "!fetchnte") {
-    try {
-      await handleFetchCommand(message, "nte");
-    } catch (err) {
-      console.error("Command error [!fetchnte]:", err);
-      await safeSend(message.channel, {
-        embeds: [
-          buildStatusEmbed(
-            "⚠️ Error",
-            "Something went wrong while processing your command. Please try again later.",
-            "#E74C3C"
-          ),
-        ],
-      });
-    }
-    return;
-  }
-
   // Must start with the prefix
   if (!raw.toLowerCase().startsWith(CONFIG.prefix.toLowerCase())) return;
 
@@ -336,11 +317,7 @@ async function runAutoFetch() {
               isAuto: true,
               page: totalBatches > 1 ? `${page}/${totalBatches}` : null,
             });
-            if (!isSafeId(chId)) continue;
-            await client.api.post(`/channels/${chId}/messages`, {
-              content: " ",
-              embeds: [embed],
-            });
+            await safeSend(channel, { embeds: [embed] });
           }
         } catch (err) {
           console.error(`   Failed to send to channel ${chId}:`, err.message);
@@ -421,7 +398,7 @@ async function safeSend(channel, data) {
       data.content = " ";
     }
     // Use REST API directly to avoid revolt.js hydration bug with solid-js
-    return await client.api.post(`/channels/${channel.id}/messages`, data);
+    return await revoltRequest("POST", `/channels/${channel.id}/messages`, data);
   } catch (err) {
     console.error("safeSend error:", err?.message || err);
     // Fallback: try sending as plain text if embed failed
@@ -429,7 +406,7 @@ async function safeSend(channel, data) {
       const embed = data?.embeds?.[0];
       if (embed && channel?.id) {
         const fallback = `**${embed.title || ""}**\n${embed.description || ""}`;
-        await client.api.post(`/channels/${channel.id}/messages`, {
+        await revoltRequest("POST", `/channels/${channel.id}/messages`, {
           content: fallback,
         });
       }
@@ -445,16 +422,43 @@ async function safeDelete(channelId, messageId) {
       console.warn("safeDelete: ID contains invalid characters");
       return;
     }
-    const url = `${client.api.baseURL}/channels/${channelId}/messages/${messageId}`;
-    const res = await fetch(url, {
-      method: "DELETE",
-      headers: client.api.config.headers,
-    });
-    if (!res.ok) {
-      console.warn(`safeDelete: HTTP ${res.status} ${res.statusText}`);
-    }
+    await revoltRequest("DELETE", `/channels/${channelId}/messages/${messageId}`);
   } catch (err) {
     console.warn("safeDelete error:", err?.message || err);
+  }
+}
+
+async function revoltRequest(method, path, data = undefined) {
+  const res = await fetch(`${client.api.baseURL}${path}`, {
+    method,
+    headers: {
+      ...client.api.config.headers,
+      ...(data ? { "Content-Type": "application/json" } : {}),
+    },
+    body: data ? JSON.stringify(data) : undefined,
+  });
+
+  const text = await res.text();
+  const body = text ? parseJSON(text) : null;
+
+  if (!res.ok) {
+    const detail =
+      body?.reason ||
+      body?.error ||
+      body?.type ||
+      text ||
+      `${res.status} ${res.statusText}`;
+    throw new Error(`Revolt API ${method} ${path} failed: ${detail}`);
+  }
+
+  return body;
+}
+
+function parseJSON(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
   }
 }
 

@@ -95,7 +95,7 @@ export function buildHelpEmbed(prefix) {
       "Fetch active **Honkai Impact 3rd** codes",
     ],
     [
-      "!fetchNTE",
+      `${prefix}FetchNTE`,
       "Fetch active **Neverness to Everness** codes",
     ],
     [
