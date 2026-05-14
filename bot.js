@@ -53,6 +53,12 @@ const client = new Client(
   }
 );
 
+const processedMessageIds = new Set();
+const MAX_PROCESSED_MESSAGES = 500;
+const PERMISSION_BITS = {
+  ManageServer: 2n ** 1n,
+};
+
 // ── Error handler ──────────────────────────────────
 client.on("error", (err) => {
   const errData = err?.data ?? err;
@@ -92,13 +98,39 @@ client.on("ready", async () => {
   scheduleAutoFetch();
 });
 
-// ── Message handler (command router) ───────────────
-client.on("messageCreate", async (message) => {
-  // Ignore own messages and messages without content
-  if (!message.content) return;
-  if (message.authorId === client.user.id) return;
+// ── Message handlers (command router) ──────────────
+client.on("messageCreate", (message) => {
+  void routeIncomingMessage(message, "messageCreate");
+});
 
-  const raw = message.content.trim();
+// Stoat has had a few gateway/library mismatches. Listen to raw gateway
+// messages too so commands still route even if hydration skips messageCreate.
+client.events.on("event", (event) => {
+  void routeGatewayEvent(event);
+});
+
+async function routeGatewayEvent(event) {
+  if (event?.type === "Bulk" && Array.isArray(event.v)) {
+    for (const item of event.v) {
+      await routeGatewayEvent(item);
+    }
+    return;
+  }
+
+  if (event?.type === "Message") {
+    await routeIncomingMessage(event, "gateway");
+  }
+}
+
+async function routeIncomingMessage(message, source) {
+  const content = getMessageContent(message);
+  if (!content) return;
+
+  const authorId = getAuthorId(message);
+  if (authorId && authorId === client.user?.id) return;
+
+  const raw = content.trim();
+  if (!raw) return;
 
   // Reject excessively long messages early to avoid unnecessary processing
   if (raw.length > 200) return;
@@ -106,8 +138,19 @@ client.on("messageCreate", async (message) => {
   // Must start with the prefix
   if (!raw.toLowerCase().startsWith(CONFIG.prefix.toLowerCase())) return;
 
+  const messageId = getMessageId(message);
+  if (messageId && markMessageProcessed(messageId)) return;
+
   // Strip prefix and lowercase for matching
   const body = raw.slice(CONFIG.prefix.length).toLowerCase();
+  const channelId = getMessageChannelId(message);
+
+  if (COMMAND_GAME_MAP[body] || isKnownCommand(body)) {
+    console.log(
+      `↪  Command ${CONFIG.prefix}${body} from ${authorId ?? "unknown"} ` +
+      `in ${channelId ?? "unknown channel"} via ${source}`
+    );
+  }
 
   try {
     // ── Game fetch commands ──────────────────────
@@ -118,7 +161,7 @@ client.on("messageCreate", async (message) => {
 
     // ── EnableFetch ──────────────────────────────
     if (body === "enablefetch") {
-      if (!requirePermission(message)) {
+      if (!(await requirePermission(message))) {
         await sendNoPermission(message);
         return;
       }
@@ -128,7 +171,7 @@ client.on("messageCreate", async (message) => {
 
     // ── DisableFetch ─────────────────────────────
     if (body === "disablefetch") {
-      if (!requirePermission(message)) {
+      if (!(await requirePermission(message))) {
         await sendNoPermission(message);
         return;
       }
@@ -144,12 +187,12 @@ client.on("messageCreate", async (message) => {
 
     // ── HarHar ──────────────────────────────────────
     if (body === "harhar") {
-      await safeSend(message.channelId, { content: ":01KPK39288XJE44RWR495WSZGR:" });
+      await safeSend(channelId, { content: ":01KPK39288XJE44RWR495WSZGR:" });
       return;
     }
   } catch (err) {
     console.error(`Command error [${body}]:`, err);
-    await safeSend(message.channelId, {
+    await safeSend(channelId, {
       embeds: [
         buildStatusEmbed(
           "⚠️ Error",
@@ -159,7 +202,23 @@ client.on("messageCreate", async (message) => {
       ],
     });
   }
-});
+}
+
+function isKnownCommand(body) {
+  return body === "enablefetch" ||
+    body === "disablefetch" ||
+    body === "helphoyofetch" ||
+    body === "harhar";
+}
+
+function markMessageProcessed(messageId) {
+  if (processedMessageIds.has(messageId)) return true;
+  processedMessageIds.add(messageId);
+  if (processedMessageIds.size > MAX_PROCESSED_MESSAGES) {
+    processedMessageIds.delete(processedMessageIds.values().next().value);
+  }
+  return false;
+}
 
 // ═══════════════════════════════════════════════════
 //  Command handlers
@@ -167,6 +226,7 @@ client.on("messageCreate", async (message) => {
 
 async function handleFetchCommand(message, gameKey) {
   const game = GAMES[gameKey];
+  const channelId = getMessageChannelId(message);
 
   // Show which API source we're hitting
   const apiLabel =
@@ -181,13 +241,13 @@ async function handleFetchCommand(message, gameKey) {
     `Contacting the ${apiLabel}…`,
     game.colour
   );
-  const loadingMsg = await safeSend(message.channelId, { embeds: [loadingEmbed] });
+  const loadingMsg = await safeSend(channelId, { embeds: [loadingEmbed] });
 
   const codes = await fetchCodes(gameKey);
 
   if (!codes.length) {
-    if (loadingMsg?._id) await safeDelete(message.channelId, loadingMsg._id);
-    await safeSend(message.channelId, {
+    if (loadingMsg?._id) await safeDelete(channelId, loadingMsg._id);
+    await safeSend(channelId, {
       embeds: [buildNoCodesEmbed(gameKey)],
     });
     return;
@@ -204,15 +264,15 @@ async function handleFetchCommand(message, gameKey) {
       isAuto: false,
       page: totalBatches > 1 ? `${page}/${totalBatches}` : null,
     });
-    await safeSend(message.channelId, { embeds: [embed] });
+    await safeSend(channelId, { embeds: [embed] });
   }
 
   // Delete the loading message now that all code embeds are posted
-  if (loadingMsg?._id) await safeDelete(message.channelId, loadingMsg._id);
+  if (loadingMsg?._id) await safeDelete(channelId, loadingMsg._id);
 }
 
 async function handleEnableFetch(message) {
-  const channelId = message.channelId;
+  const channelId = getMessageChannelId(message);
 
   if (isChannelEnabled(channelId)) {
     await safeSend(channelId, {
@@ -241,7 +301,7 @@ async function handleEnableFetch(message) {
 }
 
 async function handleDisableFetch(message) {
-  const channelId = message.channelId;
+  const channelId = getMessageChannelId(message);
 
   if (!isChannelEnabled(channelId)) {
     await safeSend(channelId, {
@@ -269,7 +329,7 @@ async function handleDisableFetch(message) {
 }
 
 async function handleHelp(message) {
-  await safeSend(message.channelId, {
+  await safeSend(getMessageChannelId(message), {
     embeds: [buildHelpEmbed(CONFIG.prefix)],
   });
 }
@@ -371,15 +431,22 @@ async function seedAllGames() {
  * Check whether the message author has a server-level permission.
  * Returns false if there is no server context (e.g. DMs).
  */
-function requirePermission(message, permission = "ManageServer") {
+async function requirePermission(message, permission = "ManageServer") {
   const member = message.member;
   const server = message.server;
-  if (!member || !server) return false;
-  return member.hasPermission(server, permission);
+  if (member?.hasPermission && server) {
+    return member.hasPermission(server, permission);
+  }
+
+  return authorHasServerPermission(
+    getMessageChannelId(message),
+    getAuthorId(message),
+    permission
+  );
 }
 
 async function sendNoPermission(message) {
-  await safeSend(message.channelId, {
+  await safeSend(getMessageChannelId(message), {
     embeds: [
       buildStatusEmbed(
         "🔒 Permission Denied",
@@ -390,9 +457,75 @@ async function sendNoPermission(message) {
   });
 }
 
+async function authorHasServerPermission(channelId, authorId, permission) {
+  if (!channelId || !authorId || !PERMISSION_BITS[permission]) return false;
+
+  try {
+    const channel = await revoltRequest("GET", `/channels/${channelId}`);
+    if (!channel?.server) return false;
+
+    const server = await revoltRequest("GET", `/servers/${channel.server}`);
+    if (server.owner === authorId) return true;
+
+    const member = await revoltRequest(
+      "GET",
+      `/servers/${channel.server}/members/${authorId}`
+    );
+
+    let permissions = BigInt(server.default_permissions ?? 0);
+    const roleIds = member.roles ?? [];
+    const orderedRoles = roleIds
+      .map((id) => ({
+        id,
+        ...(server.roles?.[id] ?? {}),
+      }))
+      .sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0));
+
+    for (const role of orderedRoles) {
+      permissions = applyPermissionOverride(permissions, role.permissions);
+    }
+
+    return hasPermissionBit(permissions, permission);
+  } catch (err) {
+    console.warn(
+      `Permission check failed for ${authorId ?? "unknown user"}:`,
+      err?.message || err
+    );
+    return false;
+  }
+}
+
+function applyPermissionOverride(permissions, override) {
+  if (!override) return permissions;
+  const allow = BigInt(override.a ?? 0);
+  const deny = BigInt(override.d ?? 0);
+  return (permissions | allow) & ~deny;
+}
+
+function hasPermissionBit(permissions, permission) {
+  const bit = PERMISSION_BITS[permission];
+  return Boolean(bit && (permissions & bit) === bit);
+}
+
 // ═══════════════════════════════════════════════════
 //  Utility
 // ═══════════════════════════════════════════════════
+
+function getMessageId(message) {
+  return message?.id ?? message?._id ?? null;
+}
+
+function getMessageContent(message) {
+  return message?.content ?? "";
+}
+
+function getAuthorId(message) {
+  return message?.authorId ?? message?.author ?? null;
+}
+
+function getMessageChannelId(message) {
+  return message?.channelId ?? message?.channel ?? null;
+}
 
 async function safeSend(channel, data) {
   const channelId = getChannelId(channel);
