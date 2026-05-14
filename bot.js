@@ -45,7 +45,13 @@ if (!CONFIG.token || CONFIG.token === "your_bot_token_here") {
 }
 
 // ── Create client ──────────────────────────────────
-const client = new Client();
+const client = new Client(
+  { baseURL: CONFIG.revoltApiBase },
+  {
+    app: "https://stoat.chat",
+    ws: CONFIG.revoltWsUrl,
+  }
+);
 
 // ── Error handler ──────────────────────────────────
 client.on("error", (err) => {
@@ -62,14 +68,20 @@ client.on("error", (err) => {
     process.exit(1);
   }
 
-  // Transient WebSocket errors are normal during connection — just log a warning
-  console.warn("⚠️  Transient client error (usually recovers automatically)");
+  const detail =
+    errData?.message ||
+    errData?.error?.message ||
+    errData?.type ||
+    "unknown client error";
+  console.warn(`⚠️  Client error: ${detail}`);
 });
 
 // ── Ready handler ──────────────────────────────────
 client.on("ready", async () => {
   console.log(`✅  Logged in as ${client.user.username}`);
   console.log(`   Prefix : ${CONFIG.prefix}`);
+  console.log(`   API    : ${CONFIG.revoltApiBase}`);
+  console.log(`   Events : ${CONFIG.revoltWsUrl}`);
   console.log(`   Interval: every ${CONFIG.fetchIntervalMinutes} min`);
   console.log(`   Enabled channels: ${getEnabledChannels().length}`);
 
@@ -132,12 +144,12 @@ client.on("messageCreate", async (message) => {
 
     // ── HarHar ──────────────────────────────────────
     if (body === "harhar") {
-      await safeSend(message.channel, { content: ":01KPK39288XJE44RWR495WSZGR:" });
+      await safeSend(message.channelId, { content: ":01KPK39288XJE44RWR495WSZGR:" });
       return;
     }
   } catch (err) {
     console.error(`Command error [${body}]:`, err);
-    await safeSend(message.channel, {
+    await safeSend(message.channelId, {
       embeds: [
         buildStatusEmbed(
           "⚠️ Error",
@@ -169,13 +181,13 @@ async function handleFetchCommand(message, gameKey) {
     `Contacting the ${apiLabel}…`,
     game.colour
   );
-  const loadingMsg = await safeSend(message.channel, { embeds: [loadingEmbed] });
+  const loadingMsg = await safeSend(message.channelId, { embeds: [loadingEmbed] });
 
   const codes = await fetchCodes(gameKey);
 
   if (!codes.length) {
-    if (loadingMsg?._id) await safeDelete(message.channel.id, loadingMsg._id);
-    await safeSend(message.channel, {
+    if (loadingMsg?._id) await safeDelete(message.channelId, loadingMsg._id);
+    await safeSend(message.channelId, {
       embeds: [buildNoCodesEmbed(gameKey)],
     });
     return;
@@ -192,18 +204,18 @@ async function handleFetchCommand(message, gameKey) {
       isAuto: false,
       page: totalBatches > 1 ? `${page}/${totalBatches}` : null,
     });
-    await safeSend(message.channel, { embeds: [embed] });
+    await safeSend(message.channelId, { embeds: [embed] });
   }
 
   // Delete the loading message now that all code embeds are posted
-  if (loadingMsg?._id) await safeDelete(message.channel.id, loadingMsg._id);
+  if (loadingMsg?._id) await safeDelete(message.channelId, loadingMsg._id);
 }
 
 async function handleEnableFetch(message) {
   const channelId = message.channelId;
 
   if (isChannelEnabled(channelId)) {
-    await safeSend(message.channel, {
+    await safeSend(channelId, {
       embeds: [
         buildStatusEmbed(
           "ℹ️ Already Enabled",
@@ -216,7 +228,7 @@ async function handleEnableFetch(message) {
   }
 
   enableChannel(channelId);
-  await safeSend(message.channel, {
+  await safeSend(channelId, {
     embeds: [
       buildStatusEmbed(
         "✅ Auto-Fetch Enabled",
@@ -232,7 +244,7 @@ async function handleDisableFetch(message) {
   const channelId = message.channelId;
 
   if (!isChannelEnabled(channelId)) {
-    await safeSend(message.channel, {
+    await safeSend(channelId, {
       embeds: [
         buildStatusEmbed(
           "ℹ️ Already Disabled",
@@ -245,7 +257,7 @@ async function handleDisableFetch(message) {
   }
 
   disableChannel(channelId);
-  await safeSend(message.channel, {
+  await safeSend(channelId, {
     embeds: [
       buildStatusEmbed(
         "🔕 Auto-Fetch Disabled",
@@ -257,7 +269,7 @@ async function handleDisableFetch(message) {
 }
 
 async function handleHelp(message) {
-  await safeSend(message.channel, {
+  await safeSend(message.channelId, {
     embeds: [buildHelpEmbed(CONFIG.prefix)],
   });
 }
@@ -307,8 +319,7 @@ async function runAutoFetch() {
 
       for (const chId of enabledChannels) {
         try {
-          const channel = client.channels.get(chId);
-          if (!channel) continue;
+          if (!isSafeId(chId)) continue;
 
           for (let i = 0; i < newCodeObjects.length; i += BATCH_SIZE) {
             const batch = newCodeObjects.slice(i, i + BATCH_SIZE);
@@ -317,7 +328,7 @@ async function runAutoFetch() {
               isAuto: true,
               page: totalBatches > 1 ? `${page}/${totalBatches}` : null,
             });
-            await safeSend(channel, { embeds: [embed] });
+            await safeSend(chId, { embeds: [embed] });
           }
         } catch (err) {
           console.error(`   Failed to send to channel ${chId}:`, err.message);
@@ -344,7 +355,7 @@ async function seedAllGames() {
       const codeStrings = codes.map((c) => c.code);
       seedKnownCodes(game.key, codeStrings);
       console.log(
-        `   Seeded ${game.name} (${game.apiSource}): ${codeStrings.length} codes`
+        `   Seeded ${game.name} (${game.source}): ${codeStrings.length} codes`
       );
     } catch (err) {
       console.error(`   Seed error for ${game.name}:`, err.message);
@@ -368,7 +379,7 @@ function requirePermission(message, permission = "ManageServer") {
 }
 
 async function sendNoPermission(message) {
-  await safeSend(message.channel, {
+  await safeSend(message.channelId, {
     embeds: [
       buildStatusEmbed(
         "🔒 Permission Denied",
@@ -384,12 +395,13 @@ async function sendNoPermission(message) {
 // ═══════════════════════════════════════════════════
 
 async function safeSend(channel, data) {
+  const channelId = getChannelId(channel);
   try {
-    if (!channel?.id) {
+    if (!channelId) {
       console.warn("safeSend: channel is missing or has no id");
       return;
     }
-    if (!isSafeId(channel.id)) {
+    if (!isSafeId(channelId)) {
       console.warn("safeSend: channel id contains invalid characters");
       return;
     }
@@ -398,15 +410,15 @@ async function safeSend(channel, data) {
       data.content = " ";
     }
     // Use REST API directly to avoid revolt.js hydration bug with solid-js
-    return await revoltRequest("POST", `/channels/${channel.id}/messages`, data);
+    return await revoltRequest("POST", `/channels/${channelId}/messages`, data);
   } catch (err) {
     console.error("safeSend error:", err?.message || err);
     // Fallback: try sending as plain text if embed failed
     try {
       const embed = data?.embeds?.[0];
-      if (embed && channel?.id) {
+      if (embed && channelId) {
         const fallback = `**${embed.title || ""}**\n${embed.description || ""}`;
-        await revoltRequest("POST", `/channels/${channel.id}/messages`, {
+        await revoltRequest("POST", `/channels/${channelId}/messages`, {
           content: fallback,
         });
       }
@@ -414,6 +426,11 @@ async function safeSend(channel, data) {
       console.error("safeSend fallback error:", fallbackErr?.message || fallbackErr);
     }
   }
+}
+
+function getChannelId(channel) {
+  if (typeof channel === "string") return channel;
+  return channel?.id ?? channel?.channelId ?? null;
 }
 
 async function safeDelete(channelId, messageId) {

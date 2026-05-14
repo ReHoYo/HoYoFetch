@@ -151,6 +151,8 @@ All settings are in `.env`:
 |----------|---------|-------------|
 | `BOT_TOKEN` | _(required)_ | Revolt bot token |
 | `PREFIX` | `/` | Command prefix |
+| `REVOLT_API_BASE` | `https://stoat.chat/api` | Stoat/Revolt REST API |
+| `REVOLT_WS_URL` | `wss://stoat.chat/events` | Stoat/Revolt events websocket |
 | `FETCH_INTERVAL` | `60` | Auto-fetch interval in minutes |
 | `HOYO_API_BASE` | `https://hoyo-codes.seria.moe/codes` | GI/HSR/ZZZ API |
 

@@ -5,6 +5,7 @@ import { readFileSync, existsSync } from "fs";
 // ── Load .env manually (no dotenv dependency) ──────
 const ALLOWED_ENV_KEYS = new Set([
   "BOT_TOKEN", "PREFIX", "FETCH_INTERVAL", "EMOJI_MODE", "HOYO_API_BASE",
+  "REVOLT_API_BASE", "REVOLT_WS_URL",
 ]);
 
 function loadEnv() {
@@ -49,6 +50,8 @@ export const CONFIG = {
   token: process.env.BOT_TOKEN || "",
   prefix: process.env.PREFIX || "/",
   fetchIntervalMinutes,
+  revoltApiBase: process.env.REVOLT_API_BASE || "https://stoat.chat/api",
+  revoltWsUrl: process.env.REVOLT_WS_URL || "wss://stoat.chat/events",
   hoyoApiBase:
     process.env.HOYO_API_BASE || "https://hoyo-codes.seria.moe/codes",
 };
