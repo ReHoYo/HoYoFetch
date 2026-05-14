@@ -1,6 +1,10 @@
 // api.js — Fetches codes from multiple sources
 // ────────────────────────────────────────────────
 import { CONFIG, GAMES, HI3_SOURCES, getEmojiMap } from "./config.js";
+import { getSourceCache, updateSourceCache } from "./store.js";
+
+const NTE_CACHE_KEY = "nte";
+const NTE_MIN_SCRAPE_INTERVAL_MS = 60 * 60 * 1000;
 
 /**
  * Fetch active codes for a given game.
@@ -16,6 +20,11 @@ export async function fetchCodes(gameKey) {
   // HI3 uses a multi-source fallback chain
   if (game.source === "hi3_multi") {
     return fetchHI3Codes();
+  }
+
+  // NTE is scrape-only, so it has a strict hourly source cache.
+  if (game.source === "nte_scrape") {
+    return fetchNTECodes(game);
   }
 
   // All other games use seria's hoyo-codes API
@@ -210,6 +219,102 @@ async function fetchFromFandomWiki(url) {
 }
 
 // ═══════════════════════════════════════════════════
+//  Source: neverness.gg (strict hourly scrape)
+// ═══════════════════════════════════════════════════
+
+async function fetchNTECodes(game) {
+  const now = Date.now();
+  const cache = getSourceCache(NTE_CACHE_KEY);
+  const lastAttemptAt = Number(cache?.lastAttemptAt || 0);
+  const cachedCodes = getCachedNTECodes(cache);
+
+  if (lastAttemptAt && now - lastAttemptAt < NTE_MIN_SCRAPE_INTERVAL_MS) {
+    if (Array.isArray(cache?.codes)) {
+      console.log("   [NTE] Using cached codes; scrape cooldown is active");
+      return cachedCodes;
+    }
+
+    const retryAt = new Date(lastAttemptAt + NTE_MIN_SCRAPE_INTERVAL_MS).toISOString();
+    throw new Error(
+      `NTE scrape is rate-limited until ${retryAt} and no cached codes are available`
+    );
+  }
+
+  updateSourceCache(NTE_CACHE_KEY, { lastAttemptAt: now });
+
+  try {
+    const res = await fetch(game.sourceUrl, {
+      headers: {
+        Accept: "text/html",
+        "User-Agent": "HoyoFetch-Bot/1.0 (Revolt code fetcher)",
+      },
+      signal: AbortSignal.timeout(20_000),
+    });
+
+    if (!res.ok) throw new Error(`neverness.gg returned HTTP ${res.status}`);
+
+    const html = await res.text();
+    const codes = parseNTECodesFromHTML(html);
+    updateSourceCache(NTE_CACHE_KEY, {
+      lastSuccessAt: Date.now(),
+      codes,
+    });
+
+    return codes;
+  } catch (err) {
+    if (Array.isArray(cache?.codes)) {
+      console.warn(`   [NTE] Scrape failed; using cached codes: ${err.message}`);
+      return cachedCodes;
+    }
+    throw err;
+  }
+}
+
+export function parseNTECodesFromHTML(html) {
+  const activeStart = html.indexOf('id="All_Active_NTE_Codes"');
+  const expiredStart = html.indexOf('id="Expired_NTE_Codes"');
+
+  if (activeStart === -1) {
+    throw new Error("Could not find All Active NTE Codes section");
+  }
+
+  const end = expiredStart > activeStart ? expiredStart : activeStart + 15000;
+  const activeSection = html.slice(activeStart, end);
+  const listMatch = activeSection.match(/<ul[^>]*>([\s\S]*?)<\/ul>/);
+  const listHTML = listMatch ? listMatch[1] : activeSection;
+  const codes = [];
+
+  const itemRegex = /<li[^>]*>([\s\S]*?)<\/li>/g;
+  let itemMatch;
+  while ((itemMatch = itemRegex.exec(listHTML)) !== null) {
+    const itemHTML = itemMatch[1];
+    const codeMatch = itemHTML.match(/<(?:strong|b)[^>]*>\s*([\s\S]*?)\s*<\/(?:strong|b)>/i);
+    if (!codeMatch) continue;
+
+    const code = cleanHTMLText(codeMatch[1]);
+    if (!/^[A-Za-z0-9]{4,40}$/.test(code)) continue;
+
+    const afterCode = itemHTML.slice(itemHTML.indexOf(codeMatch[0]) + codeMatch[0].length);
+    const rewards = cleanHTMLText(
+      afterCode.replace(/^\s*(?:-|–|—|&ndash;|&#8211;|&#x2013;)\s*/i, "")
+    );
+
+    if (!codes.some((entry) => entry.code === code)) {
+      codes.push(normaliseNTE({ code, rewards, source: "neverness.gg" }));
+    }
+  }
+
+  return codes;
+}
+
+function getCachedNTECodes(cache) {
+  if (!Array.isArray(cache?.codes)) return [];
+  return cache.codes
+    .map(normaliseNTE)
+    .filter((entry) => entry.code);
+}
+
+// ═══════════════════════════════════════════════════
 //  Normalisation & reward formatting
 // ═══════════════════════════════════════════════════
 
@@ -220,6 +325,50 @@ function normalise(raw) {
     date: raw.date ?? raw.added_at ?? raw.Date ?? null,
     source: raw.source ?? raw.Source ?? null,
   };
+}
+
+function normaliseNTE(raw) {
+  return {
+    code: String(raw.code ?? raw.Code ?? "").trim(),
+    rewards: raw.rewards ?? raw.reward ?? raw.Rewards ?? null,
+    date: raw.date ?? raw.added_at ?? raw.Date ?? null,
+    source: raw.source ?? raw.Source ?? "neverness.gg",
+  };
+}
+
+function cleanHTMLText(raw) {
+  return decodeHTMLEntities(String(raw ?? ""))
+    .replace(/<[^>]+>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function decodeHTMLEntities(raw) {
+  const named = {
+    amp: "&",
+    apos: "'",
+    hellip: "...",
+    nbsp: " ",
+    ndash: "-",
+    quot: '"',
+  };
+
+  return raw.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity) => {
+    const key = entity.toLowerCase();
+    if (key.startsWith("#x")) {
+      const codePoint = parseInt(key.slice(2), 16);
+      return isValidCodePoint(codePoint) ? String.fromCodePoint(codePoint) : match;
+    }
+    if (key.startsWith("#")) {
+      const codePoint = parseInt(key.slice(1), 10);
+      return isValidCodePoint(codePoint) ? String.fromCodePoint(codePoint) : match;
+    }
+    return named[key] ?? match;
+  });
+}
+
+function isValidCodePoint(value) {
+  return Number.isInteger(value) && value >= 0 && value <= 0x10ffff;
 }
 
 /**

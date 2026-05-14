@@ -154,6 +154,17 @@ export const GAMES = {
     source: "hi3_multi",
     deprecated: false,
   },
+  nte: {
+    key: "nte",
+    apiParam: "nte",
+    name: "Neverness to Everness",
+    colour: "#EE6DCA",
+    icon: "https://neverness.gg/wp-content/uploads/sites/88/2025/12/Neverness-to-Everness-Logo.png",
+    redeemUrl: null,
+    source: "nte_scrape",
+    sourceUrl: "https://neverness.gg/codes/",
+    deprecated: false,
+  },
 };
 
 export const COMMAND_GAME_MAP = {

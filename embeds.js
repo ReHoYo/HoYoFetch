@@ -95,6 +95,10 @@ export function buildHelpEmbed(prefix) {
       "Fetch active **Honkai Impact 3rd** codes",
     ],
     [
+      "!fetchNTE",
+      "Fetch active **Neverness to Everness** codes",
+    ],
+    [
       `${prefix}EnableFetch`,
       "Enable hourly auto-fetch of new codes in this channel",
     ],
@@ -118,7 +122,8 @@ export function buildHelpEmbed(prefix) {
       description +
       "\n\n_All commands are **case-insensitive**._\n" +
       "_GI / HSR / ZZZ codes from [hoyo-codes.seria.moe](https://hoyo-codes.seria.moe)_\n" +
-      "_HI3 codes from [api.ennead.cc](https://api.ennead.cc/mihoyo)_",
+      "_HI3 codes from [api.ennead.cc](https://api.ennead.cc/mihoyo)_\n" +
+      "_NTE codes from [neverness.gg](https://neverness.gg/codes/)_",
     colour: "#5865F2",
     icon_url:
       "https://img-os-static.hoyolab.com/communityWeb/upload/1d7dd8f33c5ccdfdeac86e1e86ddd652.png",
@@ -137,6 +142,9 @@ export function buildStatusEmbed(title, description, colour = "#2ECC71") {
 function getSourceLabel(game) {
   if (game.source === "hi3_multi") {
     return "[ennead API](https://api.ennead.cc/mihoyo)";
+  }
+  if (game.source === "nte_scrape") {
+    return "[neverness.gg](https://neverness.gg/codes/)";
   }
   return "[hoyo-codes](https://hoyo-codes.seria.moe)";
 }

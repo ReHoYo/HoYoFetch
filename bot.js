@@ -91,6 +91,25 @@ client.on("messageCreate", async (message) => {
   // Reject excessively long messages early to avoid unnecessary processing
   if (raw.length > 200) return;
 
+  // Literal NTE command, independent from the configurable HoyoFetch prefix.
+  if (raw.toLowerCase() === "!fetchnte") {
+    try {
+      await handleFetchCommand(message, "nte");
+    } catch (err) {
+      console.error("Command error [!fetchnte]:", err);
+      await safeSend(message.channel, {
+        embeds: [
+          buildStatusEmbed(
+            "⚠️ Error",
+            "Something went wrong while processing your command. Please try again later.",
+            "#E74C3C"
+          ),
+        ],
+      });
+    }
+    return;
+  }
+
   // Must start with the prefix
   if (!raw.toLowerCase().startsWith(CONFIG.prefix.toLowerCase())) return;
 
@@ -158,7 +177,11 @@ async function handleFetchCommand(message, gameKey) {
 
   // Show which API source we're hitting
   const apiLabel =
-    game.source === "hi3_multi" ? "community sources" : "hoyo-codes API";
+    game.source === "hi3_multi"
+      ? "community sources"
+      : game.source === "nte_scrape"
+        ? "neverness.gg codes page"
+        : "hoyo-codes API";
 
   const loadingEmbed = buildStatusEmbed(
     `⏳ Fetching ${game.name} codes…`,

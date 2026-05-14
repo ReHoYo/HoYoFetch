@@ -1,13 +1,13 @@
 # 🎮 HoyoFetch — HoYoverse Code Bot for Revolt / Stoat.chat
 
-Automatically fetches and posts redemption codes for **Genshin Impact**, **Honkai: Star Rail**, **Zenless Zone Zero**, and **Honkai Impact 3rd** in your Revolt server channels.
+Automatically fetches and posts redemption codes for **Genshin Impact**, **Honkai: Star Rail**, **Zenless Zone Zero**, **Honkai Impact 3rd**, and **Neverness to Everness** in your Revolt server channels.
 
 ## ✨ Features
 
 | Feature | Details |
 |---------|---------|
-| **4 games supported** | GI, HSR, ZZZ, and HI3 |
-| **Dual API sources** | [hoyo-codes.seria.moe](https://hoyo-codes.seria.moe) (GI/HSR/ZZZ) + [api.ennead.cc](https://api.ennead.cc/mihoyo) (HI3) |
+| **5 games supported** | GI, HSR, ZZZ, HI3, and NTE |
+| **Multiple sources** | [hoyo-codes.seria.moe](https://hoyo-codes.seria.moe) (GI/HSR/ZZZ), [api.ennead.cc](https://api.ennead.cc/mihoyo) (HI3), and [neverness.gg](https://neverness.gg/codes/) (NTE) |
 | **Rich embeds** | Game-coloured embeds with icons, reward details, and redemption links |
 | **Auto-fetch** | Hourly scan — posts only when **new** codes appear (no spam) |
 | **Custom emoji** | Optional: use your own Revolt emoji hub server for game-themed icons |
@@ -46,6 +46,7 @@ On first boot, the bot seeds all existing codes into memory so it won't announce
 | `/FetchHSR` | Fetch active Honkai: Star Rail codes |
 | `/FetchZZZ` | Fetch active Zenless Zone Zero codes |
 | `/FetchHI3` | Fetch active Honkai Impact 3rd codes |
+| `!fetchNTE` | Fetch active Neverness to Everness codes |
 | `/EnableFetch` | Enable auto-fetch in the current channel |
 | `/DisableFetch` | Disable auto-fetch in the current channel |
 | `/HelpHoyoFetch` | Show all commands |
@@ -60,8 +61,9 @@ On first boot, the bot seeds all existing codes into memory so it won't announce
 | Honkai: Star Rail | hoyo-codes | `https://hoyo-codes.seria.moe/codes?game=hkrpg` |
 | Zenless Zone Zero | hoyo-codes | `https://hoyo-codes.seria.moe/codes?game=nap` |
 | Honkai Impact 3rd | ennead | `https://api.ennead.cc/mihoyo/honkai/codes` |
+| Neverness to Everness | neverness.gg | `https://neverness.gg/codes/` |
 
-The hoyo-codes API returns an array of `{code, rewards, date, source}`. The ennead API returns `{active: [{code, reward: [...]}], inactive: [...]}` with reward arrays. The bot normalises both formats transparently.
+The hoyo-codes API returns an array of `{code, rewards, date, source}`. The ennead API returns `{active: [{code, reward: [...]}], inactive: [...]}` with reward arrays. NTE is scraped from the active-code list and cached so the site is checked at most once per hour. The bot normalises these formats transparently.
 
 ## 🎨 Custom Emoji Hub
 
@@ -124,7 +126,9 @@ API poll (hourly)
   │
   ├─ GI/HSR/ZZZ ──→ hoyo-codes.seria.moe ──→ normalise
   │                                              │
-  └─ HI3 ─────────→ api.ennead.cc ─────────→ normalise
+  ├─ HI3 ─────────→ api.ennead.cc ─────────→ normalise
+  │                                              │
+  └─ NTE ─────────→ neverness.gg hourly cache → normalise
                                                  │
                                     ┌────────────┘
                                     ▼
@@ -149,7 +153,6 @@ All settings are in `.env`:
 | `PREFIX` | `/` | Command prefix |
 | `FETCH_INTERVAL` | `60` | Auto-fetch interval in minutes |
 | `HOYO_API_BASE` | `https://hoyo-codes.seria.moe/codes` | GI/HSR/ZZZ API |
-| `ENNEAD_API_BASE` | `https://api.ennead.cc/mihoyo` | HI3 API |
 
 ## 🚀 Production Deployment
 
