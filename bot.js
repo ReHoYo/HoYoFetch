@@ -45,19 +45,7 @@ if (!CONFIG.token || CONFIG.token === "your_bot_token_here") {
 }
 
 // ── Create client ──────────────────────────────────
-const client = new Client(
-  { baseURL: CONFIG.revoltApiBase },
-  {
-    app: "https://stoat.chat",
-    ws: CONFIG.revoltWsUrl,
-  }
-);
-
-const processedMessageIds = new Set();
-const MAX_PROCESSED_MESSAGES = 500;
-const PERMISSION_BITS = {
-  ManageServer: 2n ** 1n,
-};
+const client = new Client();
 
 // ── Error handler ──────────────────────────────────
 client.on("error", (err) => {
@@ -74,20 +62,14 @@ client.on("error", (err) => {
     process.exit(1);
   }
 
-  const detail =
-    errData?.message ||
-    errData?.error?.message ||
-    errData?.type ||
-    "unknown client error";
-  console.warn(`⚠️  Client error: ${detail}`);
+  // Transient WebSocket errors are normal during connection — just log a warning
+  console.warn("⚠️  Transient client error (usually recovers automatically)");
 });
 
 // ── Ready handler ──────────────────────────────────
 client.on("ready", async () => {
   console.log(`✅  Logged in as ${client.user.username}`);
   console.log(`   Prefix : ${CONFIG.prefix}`);
-  console.log(`   API    : ${CONFIG.revoltApiBase}`);
-  console.log(`   Events : ${CONFIG.revoltWsUrl}`);
   console.log(`   Interval: every ${CONFIG.fetchIntervalMinutes} min`);
   console.log(`   Enabled channels: ${getEnabledChannels().length}`);
 
@@ -98,39 +80,13 @@ client.on("ready", async () => {
   scheduleAutoFetch();
 });
 
-// ── Message handlers (command router) ──────────────
-client.on("messageCreate", (message) => {
-  void routeIncomingMessage(message, "messageCreate");
-});
+// ── Message handler (command router) ───────────────
+client.on("messageCreate", async (message) => {
+  // Ignore own messages and messages without content
+  if (!message.content) return;
+  if (message.authorId === client.user.id) return;
 
-// Stoat has had a few gateway/library mismatches. Listen to raw gateway
-// messages too so commands still route even if hydration skips messageCreate.
-client.events.on("event", (event) => {
-  void routeGatewayEvent(event);
-});
-
-async function routeGatewayEvent(event) {
-  if (event?.type === "Bulk" && Array.isArray(event.v)) {
-    for (const item of event.v) {
-      await routeGatewayEvent(item);
-    }
-    return;
-  }
-
-  if (event?.type === "Message") {
-    await routeIncomingMessage(event, "gateway");
-  }
-}
-
-async function routeIncomingMessage(message, source) {
-  const content = getMessageContent(message);
-  if (!content) return;
-
-  const authorId = getAuthorId(message);
-  if (authorId && authorId === client.user?.id) return;
-
-  const raw = content.trim();
-  if (!raw) return;
+  const raw = message.content.trim();
 
   // Reject excessively long messages early to avoid unnecessary processing
   if (raw.length > 200) return;
@@ -138,19 +94,8 @@ async function routeIncomingMessage(message, source) {
   // Must start with the prefix
   if (!raw.toLowerCase().startsWith(CONFIG.prefix.toLowerCase())) return;
 
-  const messageId = getMessageId(message);
-  if (messageId && markMessageProcessed(messageId)) return;
-
   // Strip prefix and lowercase for matching
   const body = raw.slice(CONFIG.prefix.length).toLowerCase();
-  const channelId = getMessageChannelId(message);
-
-  if (COMMAND_GAME_MAP[body] || isKnownCommand(body)) {
-    console.log(
-      `↪  Command ${CONFIG.prefix}${body} from ${authorId ?? "unknown"} ` +
-      `in ${channelId ?? "unknown channel"} via ${source}`
-    );
-  }
 
   try {
     // ── Game fetch commands ──────────────────────
@@ -161,7 +106,7 @@ async function routeIncomingMessage(message, source) {
 
     // ── EnableFetch ──────────────────────────────
     if (body === "enablefetch") {
-      if (!(await requirePermission(message))) {
+      if (!requirePermission(message)) {
         await sendNoPermission(message);
         return;
       }
@@ -171,7 +116,7 @@ async function routeIncomingMessage(message, source) {
 
     // ── DisableFetch ─────────────────────────────
     if (body === "disablefetch") {
-      if (!(await requirePermission(message))) {
+      if (!requirePermission(message)) {
         await sendNoPermission(message);
         return;
       }
@@ -187,12 +132,12 @@ async function routeIncomingMessage(message, source) {
 
     // ── HarHar ──────────────────────────────────────
     if (body === "harhar") {
-      await safeSend(channelId, { content: ":01KPK39288XJE44RWR495WSZGR:" });
+      await safeSend(message.channel, { content: ":01KPK39288XJE44RWR495WSZGR:" });
       return;
     }
   } catch (err) {
     console.error(`Command error [${body}]:`, err);
-    await safeSend(channelId, {
+    await safeSend(message.channel, {
       embeds: [
         buildStatusEmbed(
           "⚠️ Error",
@@ -202,23 +147,7 @@ async function routeIncomingMessage(message, source) {
       ],
     });
   }
-}
-
-function isKnownCommand(body) {
-  return body === "enablefetch" ||
-    body === "disablefetch" ||
-    body === "helphoyofetch" ||
-    body === "harhar";
-}
-
-function markMessageProcessed(messageId) {
-  if (processedMessageIds.has(messageId)) return true;
-  processedMessageIds.add(messageId);
-  if (processedMessageIds.size > MAX_PROCESSED_MESSAGES) {
-    processedMessageIds.delete(processedMessageIds.values().next().value);
-  }
-  return false;
-}
+});
 
 // ═══════════════════════════════════════════════════
 //  Command handlers
@@ -226,28 +155,23 @@ function markMessageProcessed(messageId) {
 
 async function handleFetchCommand(message, gameKey) {
   const game = GAMES[gameKey];
-  const channelId = getMessageChannelId(message);
 
   // Show which API source we're hitting
   const apiLabel =
-    game.source === "hi3_multi"
-      ? "community sources"
-      : game.source === "nte_scrape"
-        ? "neverness.gg codes page"
-        : "hoyo-codes API";
+    game.source === "hi3_multi" ? "community sources" : "hoyo-codes API";
 
   const loadingEmbed = buildStatusEmbed(
     `⏳ Fetching ${game.name} codes…`,
     `Contacting the ${apiLabel}…`,
     game.colour
   );
-  const loadingMsg = await safeSend(channelId, { embeds: [loadingEmbed] });
+  const loadingMsg = await safeSend(message.channel, { embeds: [loadingEmbed] });
 
   const codes = await fetchCodes(gameKey);
 
   if (!codes.length) {
-    if (loadingMsg?._id) await safeDelete(channelId, loadingMsg._id);
-    await safeSend(channelId, {
+    if (loadingMsg?._id) await safeDelete(message.channel.id, loadingMsg._id);
+    await safeSend(message.channel, {
       embeds: [buildNoCodesEmbed(gameKey)],
     });
     return;
@@ -264,18 +188,18 @@ async function handleFetchCommand(message, gameKey) {
       isAuto: false,
       page: totalBatches > 1 ? `${page}/${totalBatches}` : null,
     });
-    await safeSend(channelId, { embeds: [embed] });
+    await safeSend(message.channel, { embeds: [embed] });
   }
 
   // Delete the loading message now that all code embeds are posted
-  if (loadingMsg?._id) await safeDelete(channelId, loadingMsg._id);
+  if (loadingMsg?._id) await safeDelete(message.channel.id, loadingMsg._id);
 }
 
 async function handleEnableFetch(message) {
-  const channelId = getMessageChannelId(message);
+  const channelId = message.channelId;
 
   if (isChannelEnabled(channelId)) {
-    await safeSend(channelId, {
+    await safeSend(message.channel, {
       embeds: [
         buildStatusEmbed(
           "ℹ️ Already Enabled",
@@ -288,7 +212,7 @@ async function handleEnableFetch(message) {
   }
 
   enableChannel(channelId);
-  await safeSend(channelId, {
+  await safeSend(message.channel, {
     embeds: [
       buildStatusEmbed(
         "✅ Auto-Fetch Enabled",
@@ -301,10 +225,10 @@ async function handleEnableFetch(message) {
 }
 
 async function handleDisableFetch(message) {
-  const channelId = getMessageChannelId(message);
+  const channelId = message.channelId;
 
   if (!isChannelEnabled(channelId)) {
-    await safeSend(channelId, {
+    await safeSend(message.channel, {
       embeds: [
         buildStatusEmbed(
           "ℹ️ Already Disabled",
@@ -317,7 +241,7 @@ async function handleDisableFetch(message) {
   }
 
   disableChannel(channelId);
-  await safeSend(channelId, {
+  await safeSend(message.channel, {
     embeds: [
       buildStatusEmbed(
         "🔕 Auto-Fetch Disabled",
@@ -329,7 +253,7 @@ async function handleDisableFetch(message) {
 }
 
 async function handleHelp(message) {
-  await safeSend(getMessageChannelId(message), {
+  await safeSend(message.channel, {
     embeds: [buildHelpEmbed(CONFIG.prefix)],
   });
 }
@@ -379,7 +303,8 @@ async function runAutoFetch() {
 
       for (const chId of enabledChannels) {
         try {
-          if (!isSafeId(chId)) continue;
+          const channel = client.channels.get(chId);
+          if (!channel) continue;
 
           for (let i = 0; i < newCodeObjects.length; i += BATCH_SIZE) {
             const batch = newCodeObjects.slice(i, i + BATCH_SIZE);
@@ -388,7 +313,11 @@ async function runAutoFetch() {
               isAuto: true,
               page: totalBatches > 1 ? `${page}/${totalBatches}` : null,
             });
-            await safeSend(chId, { embeds: [embed] });
+            if (!isSafeId(chId)) continue;
+            await client.api.post(`/channels/${chId}/messages`, {
+              content: " ",
+              embeds: [embed],
+            });
           }
         } catch (err) {
           console.error(`   Failed to send to channel ${chId}:`, err.message);
@@ -415,7 +344,7 @@ async function seedAllGames() {
       const codeStrings = codes.map((c) => c.code);
       seedKnownCodes(game.key, codeStrings);
       console.log(
-        `   Seeded ${game.name} (${game.source}): ${codeStrings.length} codes`
+        `   Seeded ${game.name} (${game.apiSource}): ${codeStrings.length} codes`
       );
     } catch (err) {
       console.error(`   Seed error for ${game.name}:`, err.message);
@@ -431,22 +360,15 @@ async function seedAllGames() {
  * Check whether the message author has a server-level permission.
  * Returns false if there is no server context (e.g. DMs).
  */
-async function requirePermission(message, permission = "ManageServer") {
+function requirePermission(message, permission = "ManageServer") {
   const member = message.member;
   const server = message.server;
-  if (member?.hasPermission && server) {
-    return member.hasPermission(server, permission);
-  }
-
-  return authorHasServerPermission(
-    getMessageChannelId(message),
-    getAuthorId(message),
-    permission
-  );
+  if (!member || !server) return false;
+  return member.hasPermission(server, permission);
 }
 
 async function sendNoPermission(message) {
-  await safeSend(getMessageChannelId(message), {
+  await safeSend(message.channel, {
     embeds: [
       buildStatusEmbed(
         "🔒 Permission Denied",
@@ -457,84 +379,17 @@ async function sendNoPermission(message) {
   });
 }
 
-async function authorHasServerPermission(channelId, authorId, permission) {
-  if (!channelId || !authorId || !PERMISSION_BITS[permission]) return false;
-
-  try {
-    const channel = await revoltRequest("GET", `/channels/${channelId}`);
-    if (!channel?.server) return false;
-
-    const server = await revoltRequest("GET", `/servers/${channel.server}`);
-    if (server.owner === authorId) return true;
-
-    const member = await revoltRequest(
-      "GET",
-      `/servers/${channel.server}/members/${authorId}`
-    );
-
-    let permissions = BigInt(server.default_permissions ?? 0);
-    const roleIds = member.roles ?? [];
-    const orderedRoles = roleIds
-      .map((id) => ({
-        id,
-        ...(server.roles?.[id] ?? {}),
-      }))
-      .sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0));
-
-    for (const role of orderedRoles) {
-      permissions = applyPermissionOverride(permissions, role.permissions);
-    }
-
-    return hasPermissionBit(permissions, permission);
-  } catch (err) {
-    console.warn(
-      `Permission check failed for ${authorId ?? "unknown user"}:`,
-      err?.message || err
-    );
-    return false;
-  }
-}
-
-function applyPermissionOverride(permissions, override) {
-  if (!override) return permissions;
-  const allow = BigInt(override.a ?? 0);
-  const deny = BigInt(override.d ?? 0);
-  return (permissions | allow) & ~deny;
-}
-
-function hasPermissionBit(permissions, permission) {
-  const bit = PERMISSION_BITS[permission];
-  return Boolean(bit && (permissions & bit) === bit);
-}
-
 // ═══════════════════════════════════════════════════
 //  Utility
 // ═══════════════════════════════════════════════════
 
-function getMessageId(message) {
-  return message?.id ?? message?._id ?? null;
-}
-
-function getMessageContent(message) {
-  return message?.content ?? "";
-}
-
-function getAuthorId(message) {
-  return message?.authorId ?? message?.author ?? null;
-}
-
-function getMessageChannelId(message) {
-  return message?.channelId ?? message?.channel ?? null;
-}
-
 async function safeSend(channel, data) {
-  const channelId = getChannelId(channel);
   try {
-    if (!channelId) {
+    if (!channel?.id) {
       console.warn("safeSend: channel is missing or has no id");
       return;
     }
-    if (!isSafeId(channelId)) {
+    if (!isSafeId(channel.id)) {
       console.warn("safeSend: channel id contains invalid characters");
       return;
     }
@@ -543,15 +398,15 @@ async function safeSend(channel, data) {
       data.content = " ";
     }
     // Use REST API directly to avoid revolt.js hydration bug with solid-js
-    return await revoltRequest("POST", `/channels/${channelId}/messages`, data);
+    return await client.api.post(`/channels/${channel.id}/messages`, data);
   } catch (err) {
     console.error("safeSend error:", err?.message || err);
     // Fallback: try sending as plain text if embed failed
     try {
       const embed = data?.embeds?.[0];
-      if (embed && channelId) {
+      if (embed && channel?.id) {
         const fallback = `**${embed.title || ""}**\n${embed.description || ""}`;
-        await revoltRequest("POST", `/channels/${channelId}/messages`, {
+        await client.api.post(`/channels/${channel.id}/messages`, {
           content: fallback,
         });
       }
@@ -561,54 +416,22 @@ async function safeSend(channel, data) {
   }
 }
 
-function getChannelId(channel) {
-  if (typeof channel === "string") return channel;
-  return channel?.id ?? channel?.channelId ?? null;
-}
-
 async function safeDelete(channelId, messageId) {
   try {
     if (!isSafeId(channelId) || !isSafeId(messageId)) {
       console.warn("safeDelete: ID contains invalid characters");
       return;
     }
-    await revoltRequest("DELETE", `/channels/${channelId}/messages/${messageId}`);
+    const url = `${client.api.baseURL}/channels/${channelId}/messages/${messageId}`;
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: client.api.config.headers,
+    });
+    if (!res.ok) {
+      console.warn(`safeDelete: HTTP ${res.status} ${res.statusText}`);
+    }
   } catch (err) {
     console.warn("safeDelete error:", err?.message || err);
-  }
-}
-
-async function revoltRequest(method, path, data = undefined) {
-  const res = await fetch(`${client.api.baseURL}${path}`, {
-    method,
-    headers: {
-      ...client.api.config.headers,
-      ...(data ? { "Content-Type": "application/json" } : {}),
-    },
-    body: data ? JSON.stringify(data) : undefined,
-  });
-
-  const text = await res.text();
-  const body = text ? parseJSON(text) : null;
-
-  if (!res.ok) {
-    const detail =
-      body?.reason ||
-      body?.error ||
-      body?.type ||
-      text ||
-      `${res.status} ${res.statusText}`;
-    throw new Error(`Revolt API ${method} ${path} failed: ${detail}`);
-  }
-
-  return body;
-}
-
-function parseJSON(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
   }
 }
 

@@ -5,7 +5,6 @@ import { readFileSync, existsSync } from "fs";
 // ── Load .env manually (no dotenv dependency) ──────
 const ALLOWED_ENV_KEYS = new Set([
   "BOT_TOKEN", "PREFIX", "FETCH_INTERVAL", "EMOJI_MODE", "HOYO_API_BASE",
-  "REVOLT_API_BASE", "REVOLT_WS_URL",
 ]);
 
 function loadEnv() {
@@ -50,8 +49,6 @@ export const CONFIG = {
   token: process.env.BOT_TOKEN || "",
   prefix: process.env.PREFIX || "/",
   fetchIntervalMinutes,
-  revoltApiBase: process.env.REVOLT_API_BASE || "https://stoat.chat/api",
-  revoltWsUrl: process.env.REVOLT_WS_URL || "wss://stoat.chat/events",
   hoyoApiBase:
     process.env.HOYO_API_BASE || "https://hoyo-codes.seria.moe/codes",
 };
@@ -157,17 +154,6 @@ export const GAMES = {
     source: "hi3_multi",
     deprecated: false,
   },
-  nte: {
-    key: "nte",
-    apiParam: "nte",
-    name: "Neverness to Everness",
-    colour: "#EE6DCA",
-    icon: "https://neverness.gg/wp-content/uploads/sites/88/2025/12/Neverness-to-Everness-Logo.png",
-    redeemUrl: null,
-    source: "nte_scrape",
-    sourceUrl: "https://neverness.gg/codes/",
-    deprecated: false,
-  },
 };
 
 export const COMMAND_GAME_MAP = {
@@ -175,7 +161,6 @@ export const COMMAND_GAME_MAP = {
   fetchhsr: "hkrpg",
   fetchzzz: "nap",
   fetchhi3: "honkai3rd",
-  fetchnte: "nte",
 };
 
 // ═══════════════════════════════════════════════════

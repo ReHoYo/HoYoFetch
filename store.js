@@ -13,7 +13,6 @@ if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 // ── Paths ──────────────────────────────────────────
 const CHANNELS_PATH = join(DATA_DIR, "channels.json");
 const KNOWN_CODES_PATH = join(DATA_DIR, "known_codes.json");
-const SOURCE_CACHE_PATH = join(DATA_DIR, "source_cache.json");
 
 // ── Helpers ────────────────────────────────────────
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -139,37 +138,4 @@ export function seedKnownCodes(gameKey, codes) {
  */
 export function hasSeenGame(gameKey) {
   return Array.isArray(knownCodes[gameKey]) && knownCodes[gameKey].length > 0;
-}
-
-// ═══════════════════════════════════════════════════
-//  Source cache (to throttle scrape-only sources)
-// ═══════════════════════════════════════════════════
-// Shape: { "<sourceKey>": { lastAttemptAt, lastSuccessAt, codes } }
-
-let sourceCache = readJSON(SOURCE_CACHE_PATH, {});
-
-/**
- * Return cached scrape metadata for a source.
- * @param  {string} sourceKey
- * @return {Object|null}
- */
-export function getSourceCache(sourceKey) {
-  const entry = sourceCache[sourceKey];
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
-  return entry;
-}
-
-/**
- * Merge and persist cache metadata for a scrape source.
- * @param  {string} sourceKey
- * @param  {Object} patch
- * @return {Object}
- */
-export function updateSourceCache(sourceKey, patch) {
-  sourceCache[sourceKey] = {
-    ...(sourceCache[sourceKey] || {}),
-    ...patch,
-  };
-  writeJSON(SOURCE_CACHE_PATH, sourceCache);
-  return sourceCache[sourceKey];
 }
