@@ -13,6 +13,7 @@ if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 // ── Paths ──────────────────────────────────────────
 const CHANNELS_PATH = join(DATA_DIR, "channels.json");
 const KNOWN_CODES_PATH = join(DATA_DIR, "known_codes.json");
+const SOURCE_CACHE_PATH = join(DATA_DIR, "source_cache.json");
 
 // ── Helpers ────────────────────────────────────────
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -49,18 +50,38 @@ function writeJSON(path, data) {
 // ═══════════════════════════════════════════════════
 //  Channel subscriptions
 // ═══════════════════════════════════════════════════
-// Shape: { "<channelId>": { "genshin": true, "hkrpg": true, ... } }
+// Shape: { "<channelId>": { enabled: true, scope: "all" | "hoyo" | "nte" } }
+
+export const AUTO_FETCH_SCOPES = new Set(["all", "hoyo", "nte"]);
 
 let channels = readJSON(CHANNELS_PATH, {});
 
+function normaliseScope(scope) {
+  return AUTO_FETCH_SCOPES.has(scope) ? scope : "all";
+}
+
 /**
- * Enable auto-fetch in a channel for ALL games.
+ * Enable auto-fetch in a channel for the selected game scope.
  * @param {string} channelId
+ * @param {"all"|"hoyo"|"nte"} scope
+ * @return {{wasEnabled: boolean, previousScope: string, currentScope: string, changed: boolean}}
  */
-export function enableChannel(channelId) {
+export function enableChannel(channelId, scope = "all") {
   channels[channelId] = channels[channelId] || {};
+  const previousScope = getChannelScope(channelId);
+  const wasEnabled = channels[channelId].enabled === true;
+  const currentScope = normaliseScope(scope);
+
   channels[channelId].enabled = true;
+  channels[channelId].scope = currentScope;
   writeJSON(CHANNELS_PATH, channels);
+
+  return {
+    wasEnabled,
+    previousScope,
+    currentScope,
+    changed: !wasEnabled || previousScope !== currentScope,
+  };
 }
 
 /**
@@ -84,13 +105,22 @@ export function isChannelEnabled(channelId) {
 }
 
 /**
- * Get an array of all enabled channel IDs.
- * @return {string[]}
+ * Get the enabled channel's auto-fetch scope. Legacy enabled channels default to all.
+ * @param  {string} channelId
+ * @return {"all"|"hoyo"|"nte"}
+ */
+export function getChannelScope(channelId) {
+  return normaliseScope(channels[channelId]?.scope);
+}
+
+/**
+ * Get all enabled channels with their auto-fetch scopes.
+ * @return {{id: string, scope: string}[]}
  */
 export function getEnabledChannels() {
   return Object.entries(channels)
     .filter(([, v]) => v.enabled)
-    .map(([id]) => id);
+    .map(([id]) => ({ id, scope: normaliseScope(channels[id]?.scope) }));
 }
 
 // ═══════════════════════════════════════════════════
@@ -138,4 +168,31 @@ export function seedKnownCodes(gameKey, codes) {
  */
 export function hasSeenGame(gameKey) {
   return Array.isArray(knownCodes[gameKey]) && knownCodes[gameKey].length > 0;
+}
+
+// ═══════════════════════════════════════════════════
+//  Source cache (scrapers with external rate limits)
+// ═══════════════════════════════════════════════════
+// Shape: { "<sourceKey>": { lastAttemptAt, lastSuccessAt, codes } }
+
+let sourceCache = readJSON(SOURCE_CACHE_PATH, {});
+
+/**
+ * Read a cached source payload.
+ * @param  {string} sourceKey
+ * @return {Object|null}
+ */
+export function getSourceCache(sourceKey) {
+  const entry = sourceCache[sourceKey];
+  return entry && typeof entry === "object" ? entry : null;
+}
+
+/**
+ * Persist a cached source payload.
+ * @param {string} sourceKey
+ * @param {Object} entry
+ */
+export function setSourceCache(sourceKey, entry) {
+  sourceCache[sourceKey] = entry;
+  writeJSON(SOURCE_CACHE_PATH, sourceCache);
 }

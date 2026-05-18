@@ -83,6 +83,12 @@ const UNICODE_EMOJI = {
   // ── Honkai Impact 3rd ───────────────────────────
   crystal: "💎", asterite: "🪙", "stamina potion": "⚡",
   coin: "🪙", stamina: "⚡", mithril: "🔷",
+  // ── Neverness to Everness ───────────────────────
+  annulith: "💎", fons: "🪙", "beetle coin": "🪙",
+  "rising hunter guide": "📕", "senior hunter guide": "📕",
+  "elite hunter guide": "📕", "light dye": "🔷",
+  "colorless dye": "🔷", "colourless dye": "🔷", "chaotic dye": "🔮",
+  dynamik: "⚡", "clicky fries": "🍟",
 };
 
 // Fill in your server emoji IDs after uploading icons.
@@ -106,7 +112,12 @@ const CUSTOM_EMOJI = {
 };
 
 export function getEmojiMap() {
-  return EMOJI_MODE === "custom" ? CUSTOM_EMOJI : UNICODE_EMOJI;
+  if (EMOJI_MODE !== "custom") return UNICODE_EMOJI;
+
+  const customOverrides = Object.fromEntries(
+    Object.entries(CUSTOM_EMOJI).filter(([, value]) => value)
+  );
+  return { ...UNICODE_EMOJI, ...customOverrides };
 }
 
 // ═══════════════════════════════════════════════════
@@ -154,13 +165,27 @@ export const GAMES = {
     source: "hi3_multi",
     deprecated: false,
   },
+  nte: {
+    key: "nte",
+    apiParam: "nte",
+    name: "Neverness to Everness",
+    colour: "#00A884",
+    icon: "https://img.game8.co/4490666/fa0365bacaedb0ccc466e4beb8de3c5e.png/show",
+    redeemUrl: null,
+    source: "game8",
+    deprecated: false,
+  },
 };
+
+export const HOYO_GAME_KEYS = ["genshin", "hkrpg", "nap", "honkai3rd"];
+export const NTE_GAME_KEY = "nte";
 
 export const COMMAND_GAME_MAP = {
   fetchgi: "genshin",
   fetchhsr: "hkrpg",
   fetchzzz: "nap",
   fetchhi3: "honkai3rd",
+  fetchnte: "nte",
 };
 
 // ═══════════════════════════════════════════════════
@@ -181,6 +206,17 @@ export const HI3_SOURCES = [
     type: "wiki",
   },
 ];
+
+// ═══════════════════════════════════════════════════
+//  NTE source
+// ═══════════════════════════════════════════════════
+
+export const NTE_SOURCE = {
+  name: "Game8",
+  url: "https://game8.co/games/Neverness-to-Everness/archives/593718",
+  cacheKey: "nte",
+  cacheTtlMs: 60 * 60 * 1000,
+};
 
 // ═══════════════════════════════════════════════════
 //  ASSET DOWNLOAD GUIDE

@@ -42,6 +42,8 @@ export function buildCodesEmbed(gameKey, codes, { isAuto = false, page = null } 
       lines.push(`[🔗 Click to redeem](${game.redeemUrl}${entry.code})`);
     } else if (gameKey === "honkai3rd") {
       lines.push("_⚠️ Redeem in-game: Account → Exchange Rewards_");
+    } else if (gameKey === "nte") {
+      lines.push("_⚠️ Redeem in-game from the Redeem Code menu_");
     }
 
     lines.push(""); // blank separator
@@ -95,8 +97,20 @@ export function buildHelpEmbed(prefix) {
       "Fetch active **Honkai Impact 3rd** codes",
     ],
     [
+      `${prefix}FetchNTE`,
+      "Fetch active **Neverness to Everness** codes",
+    ],
+    [
       `${prefix}EnableFetch`,
-      "Enable hourly auto-fetch of new codes in this channel",
+      "Enable hourly auto-fetch of **HoYoverse + NTE** codes in this channel",
+    ],
+    [
+      `${prefix}EnableFetchHoyo`,
+      "Enable hourly auto-fetch of **HoYoverse-only** codes in this channel",
+    ],
+    [
+      `${prefix}EnableFetchNTE`,
+      "Enable hourly auto-fetch of **NTE-only** codes in this channel",
     ],
     [
       `${prefix}DisableFetch`,
@@ -118,7 +132,8 @@ export function buildHelpEmbed(prefix) {
       description +
       "\n\n_All commands are **case-insensitive**._\n" +
       "_GI / HSR / ZZZ codes from [hoyo-codes.seria.moe](https://hoyo-codes.seria.moe)_\n" +
-      "_HI3 codes from [api.ennead.cc](https://api.ennead.cc/mihoyo)_",
+      "_HI3 codes from [api.ennead.cc](https://api.ennead.cc/mihoyo)_\n" +
+      "_NTE codes from [Game8](https://game8.co/games/Neverness-to-Everness/archives/593718)_",
     colour: "#5865F2",
     icon_url:
       "https://img-os-static.hoyolab.com/communityWeb/upload/1d7dd8f33c5ccdfdeac86e1e86ddd652.png",
@@ -137,6 +152,9 @@ export function buildStatusEmbed(title, description, colour = "#2ECC71") {
 function getSourceLabel(game) {
   if (game.source === "hi3_multi") {
     return "[ennead API](https://api.ennead.cc/mihoyo)";
+  }
+  if (game.source === "game8") {
+    return "[Game8](https://game8.co/games/Neverness-to-Everness/archives/593718)";
   }
   return "[hoyo-codes](https://hoyo-codes.seria.moe)";
 }

@@ -1,6 +1,7 @@
 // api.js — Fetches codes from multiple sources
 // ────────────────────────────────────────────────
-import { CONFIG, GAMES, HI3_SOURCES, getEmojiMap } from "./config.js";
+import { CONFIG, GAMES, HI3_SOURCES, NTE_SOURCE, getEmojiMap } from "./config.js";
+import { getSourceCache, setSourceCache } from "./store.js";
 
 /**
  * Fetch active codes for a given game.
@@ -16,6 +17,11 @@ export async function fetchCodes(gameKey) {
   // HI3 uses a multi-source fallback chain
   if (game.source === "hi3_multi") {
     return fetchHI3Codes();
+  }
+
+  // NTE has no public API yet, so scrape Game8 with a one-hour source cache.
+  if (game.source === "game8") {
+    return fetchNTECodes();
   }
 
   // All other games use seria's hoyo-codes API
@@ -210,12 +216,188 @@ async function fetchFromFandomWiki(url) {
 }
 
 // ═══════════════════════════════════════════════════
+//  Source: Game8 (Neverness to Everness)
+// ═══════════════════════════════════════════════════
+
+export async function fetchNTECodes({
+  now = Date.now(),
+  fetchImpl = fetch,
+  readCache = getSourceCache,
+  writeCache = setSourceCache,
+} = {}) {
+  const cache = readCache(NTE_SOURCE.cacheKey) || {};
+  const lastAttemptAt = Number(cache.lastAttemptAt) || 0;
+  const hasCachedCodes = Array.isArray(cache.codes);
+
+  if (lastAttemptAt > 0 && now - lastAttemptAt < NTE_SOURCE.cacheTtlMs) {
+    if (hasCachedCodes) {
+      return cache.codes.map((entry) => normalise(entry, { preserveCodeCase: true }));
+    }
+    throw new Error("NTE cache is empty and the Game8 retry window has not elapsed");
+  }
+
+  writeCache(NTE_SOURCE.cacheKey, {
+    ...cache,
+    lastAttemptAt: now,
+  });
+
+  try {
+    const codes = await scrapeGame8NTECodes(NTE_SOURCE.url, fetchImpl);
+    writeCache(NTE_SOURCE.cacheKey, {
+      lastAttemptAt: now,
+      lastSuccessAt: now,
+      codes,
+    });
+    return codes;
+  } catch (err) {
+    if (hasCachedCodes) {
+      console.warn(`   [NTE] Game8 failed, serving cached codes: ${err.message}`);
+      return cache.codes.map((entry) => normalise(entry, { preserveCodeCase: true }));
+    }
+    throw err;
+  }
+}
+
+export async function scrapeGame8NTECodes(url, fetchImpl = fetch) {
+  const res = await fetchImpl(url, {
+    headers: {
+      Accept: "text/html",
+      "User-Agent": "HoyoFetch-Bot/1.0 (Revolt code fetcher)",
+    },
+    signal: AbortSignal.timeout(20_000),
+  });
+
+  if (!res.ok) throw new Error(`Game8 returned HTTP ${res.status}`);
+  return parseGame8NTECodes(await res.text());
+}
+
+export function parseGame8NTECodes(html) {
+  const activeSection = getGame8ActiveCodeSection(html);
+  const codes = [];
+  const seen = new Set();
+  const rowRegex = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rowMatch;
+
+  while ((rowMatch = rowRegex.exec(activeSection)) !== null) {
+    const row = rowMatch[1];
+    const code = extractGame8Code(row);
+    if (!code || seen.has(code)) continue;
+
+    const cells = extractTableCells(row);
+    const rewards = cells.length >= 2 ? extractGame8Rewards(cells[1]) : null;
+
+    seen.add(code);
+    codes.push(normalise({
+      code,
+      rewards,
+      source: NTE_SOURCE.name,
+    }, { preserveCodeCase: true }));
+  }
+
+  return codes;
+}
+
+function getGame8ActiveCodeSection(html) {
+  const activeStart = html.indexOf("All Active Redeem Codes");
+  if (activeStart === -1) {
+    throw new Error("Could not find the Game8 active redeem codes section");
+  }
+
+  const endMarkers = [
+    "Neverness to Everness Expired Codes",
+    "Expired Neverness to Everness Codes",
+    "List of All Expired Redeem Codes",
+  ];
+  const activeEnd = endMarkers
+    .map((marker) => html.indexOf(marker, activeStart + 1))
+    .filter((idx) => idx > activeStart)
+    .sort((a, b) => a - b)[0];
+
+  return html.slice(activeStart, activeEnd || activeStart + 20_000);
+}
+
+function extractGame8Code(rowHtml) {
+  const inputs = rowHtml.match(/<input\b[^>]*>/gi) || [];
+  for (const input of inputs) {
+    const className = getHtmlAttr(input, "class") || "";
+    if (!className.split(/\s+/).includes("a-clipboard__textInput")) continue;
+
+    const value = getHtmlAttr(input, "value");
+    if (!value) continue;
+
+    const code = decodeHtml(value).trim();
+    if (code.length >= 4) return code;
+  }
+  return null;
+}
+
+function extractTableCells(rowHtml) {
+  const cells = [];
+  const cellRegex = /<td\b[^>]*>([\s\S]*?)<\/td>/gi;
+  let match;
+  while ((match = cellRegex.exec(rowHtml)) !== null) {
+    cells.push(match[1]);
+  }
+  return cells;
+}
+
+function extractGame8Rewards(cellHtml) {
+  const rewardBlocks = cellHtml.match(/<div\b[^>]*class=['"][^'"]*\balign\b[^'"]*['"][^>]*>[\s\S]*?<\/div>/gi) || [];
+  const parts = (rewardBlocks.length ? rewardBlocks : [cellHtml])
+    .map(htmlToText)
+    .map((part) => part.replace(/^・\s*/, "").trim())
+    .filter(Boolean);
+
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
+function getHtmlAttr(tag, name) {
+  const attrRegex = new RegExp(`${name}\\s*=\\s*(['"])([\\s\\S]*?)\\1`, "i");
+  return tag.match(attrRegex)?.[2] ?? null;
+}
+
+function htmlToText(html) {
+  return decodeHtml(html)
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<img\b[^>]*>/gi, " ")
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/・/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function decodeHtml(text) {
+  const named = {
+    amp: "&",
+    apos: "'",
+    gt: ">",
+    lt: "<",
+    nbsp: " ",
+    quot: "\"",
+  };
+
+  return String(text).replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity) => {
+    const key = entity.toLowerCase();
+    if (key.startsWith("#x")) {
+      return String.fromCodePoint(parseInt(key.slice(2), 16));
+    }
+    if (key.startsWith("#")) {
+      return String.fromCodePoint(parseInt(key.slice(1), 10));
+    }
+    return named[key] ?? match;
+  });
+}
+
+// ═══════════════════════════════════════════════════
 //  Normalisation & reward formatting
 // ═══════════════════════════════════════════════════
 
-function normalise(raw) {
+function normalise(raw, { preserveCodeCase = false } = {}) {
+  const code = String(raw.code ?? raw.Code ?? "").trim();
   return {
-    code: String(raw.code ?? raw.Code ?? "").trim().toUpperCase(),
+    code: preserveCodeCase ? code : code.toUpperCase(),
     rewards: raw.rewards ?? raw.reward ?? raw.Rewards ?? null,
     date: raw.date ?? raw.added_at ?? raw.Date ?? null,
     source: raw.source ?? raw.Source ?? null,
@@ -238,10 +420,21 @@ export function formatRewards(rawRewards, gameKey) {
   // Clean up messy reward strings from APIs
   let cleaned = cleanRewards(safeRewards);
 
-  // Add emoji before matching keywords
-  for (const [keyword, emoji] of Object.entries(emojiMap)) {
-    const regex = new RegExp(`(${escapeRegex(keyword)})`, "gi");
-    cleaned = cleaned.replace(regex, `${emoji} $1`);
+  const emojiEntries = Object.entries(emojiMap)
+    .filter(([, emoji]) => emoji)
+    .sort(([a], [b]) => b.length - a.length);
+
+  // Add emoji before matching reward keywords. One pass avoids double-tagging
+  // phrases such as "Beetle Coin" with both "beetle coin" and "coin".
+  if (emojiEntries.length > 0) {
+    const emojiByKeyword = new Map(
+      emojiEntries.map(([keyword, emoji]) => [keyword.toLowerCase(), emoji])
+    );
+    const keywordPattern = emojiEntries.map(([keyword]) => escapeRegex(keyword)).join("|");
+    const regex = new RegExp(`(^|[^A-Za-z0-9])(${keywordPattern})(?=$|[^A-Za-z0-9])`, "gi");
+    cleaned = cleaned.replace(regex, (full, prefix, keyword) => {
+      return `${prefix}${emojiByKeyword.get(keyword.toLowerCase())} ${keyword}`;
+    });
   }
 
   return cleaned;

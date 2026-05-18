@@ -1,13 +1,13 @@
 # 🎮 HoyoFetch — HoYoverse Code Bot for Revolt / Stoat.chat
 
-Automatically fetches and posts redemption codes for **Genshin Impact**, **Honkai: Star Rail**, **Zenless Zone Zero**, and **Honkai Impact 3rd** in your Revolt server channels.
+Automatically fetches and posts redemption codes for **Genshin Impact**, **Honkai: Star Rail**, **Zenless Zone Zero**, **Honkai Impact 3rd**, and **Neverness to Everness** in your Revolt server channels.
 
 ## ✨ Features
 
 | Feature | Details |
 |---------|---------|
-| **4 games supported** | GI, HSR, ZZZ, and HI3 |
-| **Dual API sources** | [hoyo-codes.seria.moe](https://hoyo-codes.seria.moe) (GI/HSR/ZZZ) + [api.ennead.cc](https://api.ennead.cc/mihoyo) (HI3) |
+| **5 games supported** | GI, HSR, ZZZ, HI3, and NTE |
+| **Multiple code sources** | [hoyo-codes.seria.moe](https://hoyo-codes.seria.moe) (GI/HSR/ZZZ), [api.ennead.cc](https://api.ennead.cc/mihoyo) (HI3), and [Game8](https://game8.co/games/Neverness-to-Everness/archives/593718) (NTE) |
 | **Rich embeds** | Game-coloured embeds with icons, reward details, and redemption links |
 | **Auto-fetch** | Hourly scan — posts only when **new** codes appear (no spam) |
 | **Custom emoji** | Optional: use your own Revolt emoji hub server for game-themed icons |
@@ -46,7 +46,10 @@ On first boot, the bot seeds all existing codes into memory so it won't announce
 | `/FetchHSR` | Fetch active Honkai: Star Rail codes |
 | `/FetchZZZ` | Fetch active Zenless Zone Zero codes |
 | `/FetchHI3` | Fetch active Honkai Impact 3rd codes |
-| `/EnableFetch` | Enable auto-fetch in the current channel |
+| `/FetchNTE` | Fetch active Neverness to Everness codes |
+| `/EnableFetch` | Enable HoYoverse + NTE auto-fetch in the current channel |
+| `/EnableFetchHoyo` | Enable HoYoverse-only auto-fetch in the current channel |
+| `/EnableFetchNTE` | Enable NTE-only auto-fetch in the current channel |
 | `/DisableFetch` | Disable auto-fetch in the current channel |
 | `/HelpHoyoFetch` | Show all commands |
 
@@ -60,8 +63,9 @@ On first boot, the bot seeds all existing codes into memory so it won't announce
 | Honkai: Star Rail | hoyo-codes | `https://hoyo-codes.seria.moe/codes?game=hkrpg` |
 | Zenless Zone Zero | hoyo-codes | `https://hoyo-codes.seria.moe/codes?game=nap` |
 | Honkai Impact 3rd | ennead | `https://api.ennead.cc/mihoyo/honkai/codes` |
+| Neverness to Everness | Game8 scrape | `https://game8.co/games/Neverness-to-Everness/archives/593718` |
 
-The hoyo-codes API returns an array of `{code, rewards, date, source}`. The ennead API returns `{active: [{code, reward: [...]}], inactive: [...]}` with reward arrays. The bot normalises both formats transparently.
+The hoyo-codes API returns an array of `{code, rewards, date, source}`. The ennead API returns `{active: [{code, reward: [...]}], inactive: [...]}` with reward arrays. NTE is scraped from Game8's active redeem-code table and cached for one hour between outbound requests.
 
 ## 🎨 Custom Emoji Hub
 
@@ -106,7 +110,7 @@ In Revolt, custom emoji are globally referenced by their unique ID. A bot can us
 hoyofetch/
 ├── bot.js              Main entry, command router, auto-fetch scheduler
 ├── config.js           Game definitions, API config, custom emoji loader
-├── api.js              Dual-source API integration (hoyo-codes + ennead)
+├── api.js              Code source integration (hoyo-codes + ennead + Game8)
 ├── embeds.js           Revolt SendableEmbed builder
 ├── store.js            JSON persistence (channels, known codes)
 ├── custom_emojis.json  Optional: custom Revolt emoji IDs
@@ -114,7 +118,8 @@ hoyofetch/
 ├── package.json
 └── data/               Runtime data (auto-created, gitignored)
     ├── channels.json
-    └── known_codes.json
+    ├── known_codes.json
+    └── source_cache.json
 ```
 
 ### Data flow
@@ -124,7 +129,9 @@ API poll (hourly)
   │
   ├─ GI/HSR/ZZZ ──→ hoyo-codes.seria.moe ──→ normalise
   │                                              │
-  └─ HI3 ─────────→ api.ennead.cc ─────────→ normalise
+  ├─ HI3 ─────────→ api.ennead.cc ─────────→ normalise
+  │                                              │
+  └─ NTE ─────────→ Game8 scrape/cache ────→ normalise
                                                  │
                                     ┌────────────┘
                                     ▼
@@ -136,7 +143,7 @@ API poll (hourly)
                    buildEmbed()      (silent)
                         │
                         ▼
-                 Send to all enabled channels
+                 Send to subscribed channels
 ```
 
 ## ⚙️ Configuration
@@ -184,6 +191,8 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ### v1.1.0
 
+- Neverness to Everness support via cached Game8 scraping
+- Auto-fetch scopes: all games, HoYoverse-only, or NTE-only
 - **Honkai Impact 3rd support** via [ennead community API](https://github.com/torikushiii/hoyoverse-api) — no longer deprecated!
 - **Custom emoji hub** — use your own Revolt server emoji for reward icons
 - Dual API source architecture (hoyo-codes + ennead)
@@ -202,4 +211,5 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 - [hoyo-codes](https://github.com/seriaati/hoyo-codes) by seriaati — GI/HSR/ZZZ codes API
 - [hoyoverse-api](https://github.com/torikushiii/hoyoverse-api) by torikushiii — HI3 codes via ennead API
+- [Game8](https://game8.co/games/Neverness-to-Everness/archives/593718) — NTE redeem-code source
 - [revolt.js](https://github.com/revoltchat/revolt.js) — Revolt bot framework

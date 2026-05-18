@@ -18,7 +18,7 @@ if (typeof globalThis.WebSocket === "undefined") {
 // ════════════════════════════════════════════════════════════════════
 
 import { Client } from "revolt.js";
-import { CONFIG, GAMES, COMMAND_GAME_MAP } from "./config.js";
+import { CONFIG, GAMES, COMMAND_GAME_MAP, HOYO_GAME_KEYS, NTE_GAME_KEY } from "./config.js";
 import { fetchCodes } from "./api.js";
 import {
   buildCodesEmbed,
@@ -110,7 +110,27 @@ client.on("messageCreate", async (message) => {
         await sendNoPermission(message);
         return;
       }
-      await handleEnableFetch(message);
+      await handleEnableFetch(message, "all");
+      return;
+    }
+
+    // ── EnableFetchHoyo ──────────────────────────
+    if (body === "enablefetchhoyo") {
+      if (!requirePermission(message)) {
+        await sendNoPermission(message);
+        return;
+      }
+      await handleEnableFetch(message, "hoyo");
+      return;
+    }
+
+    // ── EnableFetchNTE ───────────────────────────
+    if (body === "enablefetchnte") {
+      if (!requirePermission(message)) {
+        await sendNoPermission(message);
+        return;
+      }
+      await handleEnableFetch(message, "nte");
       return;
     }
 
@@ -158,7 +178,11 @@ async function handleFetchCommand(message, gameKey) {
 
   // Show which API source we're hitting
   const apiLabel =
-    game.source === "hi3_multi" ? "community sources" : "hoyo-codes API";
+    game.source === "hi3_multi"
+      ? "community sources"
+      : game.source === "game8"
+        ? "Game8"
+        : "hoyo-codes API";
 
   const loadingEmbed = buildStatusEmbed(
     `⏳ Fetching ${game.name} codes…`,
@@ -195,15 +219,17 @@ async function handleFetchCommand(message, gameKey) {
   if (loadingMsg?._id) await safeDelete(message.channel.id, loadingMsg._id);
 }
 
-async function handleEnableFetch(message) {
+async function handleEnableFetch(message, scope = "all") {
   const channelId = message.channelId;
+  const result = enableChannel(channelId, scope);
+  const scopeLabel = getScopeLabel(result.currentScope);
 
-  if (isChannelEnabled(channelId)) {
+  if (result.wasEnabled && !result.changed) {
     await safeSend(message.channel, {
       embeds: [
         buildStatusEmbed(
           "ℹ️ Already Enabled",
-          "Auto-fetch is already active in this channel.",
+          `Auto-fetch is already active in this channel for ${scopeLabel}.`,
           "#3498DB"
         ),
       ],
@@ -211,12 +237,12 @@ async function handleEnableFetch(message) {
     return;
   }
 
-  enableChannel(channelId);
+  const title = result.wasEnabled ? "✅ Auto-Fetch Updated" : "✅ Auto-Fetch Enabled";
   await safeSend(message.channel, {
     embeds: [
       buildStatusEmbed(
-        "✅ Auto-Fetch Enabled",
-        "This channel will now receive new HoYoverse codes automatically every hour.\n" +
+        title,
+        `This channel will now receive new ${scopeLabel} automatically every hour.\n` +
         `Use \`${CONFIG.prefix}DisableFetch\` to stop.`,
         "#2ECC71"
       ),
@@ -278,11 +304,16 @@ async function runAutoFetch() {
     `🔄  Auto-fetch triggered — ${enabledChannels.length} channel(s)`
   );
 
-  // Check ALL non-deprecated games (HI3 is now included!)
-  const activeGames = Object.values(GAMES).filter((g) => !g.deprecated);
+  // Check only games that at least one enabled channel has subscribed to.
+  const activeGames = Object.values(GAMES).filter(
+    (g) => !g.deprecated && enabledChannels.some((ch) => scopeIncludesGame(ch.scope, g.key))
+  );
 
   for (const game of activeGames) {
     try {
+      const subscribedChannels = enabledChannels.filter((ch) =>
+        scopeIncludesGame(ch.scope, game.key)
+      );
       const codes = await fetchCodes(game.key);
       const codeStrings = codes.map((c) => c.code);
 
@@ -301,7 +332,7 @@ async function runAutoFetch() {
       const BATCH_SIZE = 10;
       const totalBatches = Math.ceil(newCodeObjects.length / BATCH_SIZE);
 
-      for (const chId of enabledChannels) {
+      for (const { id: chId } of subscribedChannels) {
         try {
           const channel = client.channels.get(chId);
           if (!channel) continue;
@@ -344,7 +375,7 @@ async function seedAllGames() {
       const codeStrings = codes.map((c) => c.code);
       seedKnownCodes(game.key, codeStrings);
       console.log(
-        `   Seeded ${game.name} (${game.apiSource}): ${codeStrings.length} codes`
+        `   Seeded ${game.name} (${game.source}): ${codeStrings.length} codes`
       );
     } catch (err) {
       console.error(`   Seed error for ${game.name}:`, err.message);
@@ -377,6 +408,18 @@ async function sendNoPermission(message) {
       ),
     ],
   });
+}
+
+function scopeIncludesGame(scope, gameKey) {
+  if (scope === "hoyo") return HOYO_GAME_KEYS.includes(gameKey);
+  if (scope === "nte") return gameKey === NTE_GAME_KEY;
+  return true;
+}
+
+function getScopeLabel(scope) {
+  if (scope === "hoyo") return "HoYoverse codes";
+  if (scope === "nte") return "NTE codes";
+  return "HoYoverse and NTE codes";
 }
 
 // ═══════════════════════════════════════════════════
