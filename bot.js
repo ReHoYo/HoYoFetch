@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // ── WebSocket polyfill for Node < 21 ──────────────
+import { spawn } from "child_process";
 import { WebSocket as _WS } from "ws";
 if (typeof globalThis.WebSocket === "undefined") {
   globalThis.WebSocket = _WS;
@@ -46,6 +47,7 @@ if (!CONFIG.token || CONFIG.token === "your_bot_token_here") {
 
 // ── Create client ──────────────────────────────────
 const client = new Client();
+let restartInProgress = false;
 
 // ── Error handler ──────────────────────────────────
 client.on("error", (err) => {
@@ -141,6 +143,16 @@ client.on("messageCreate", async (message) => {
         return;
       }
       await handleDisableFetch(message);
+      return;
+    }
+
+    // ── Restart ──────────────────────────────────
+    if (body === "restart") {
+      if (!requirePermission(message)) {
+        await sendNoPermission(message);
+        return;
+      }
+      await handleRestart(message);
       return;
     }
 
@@ -284,6 +296,41 @@ async function handleHelp(message) {
   });
 }
 
+async function handleRestart(message) {
+  if (restartInProgress) {
+    await safeSend(message.channel, {
+      embeds: [
+        buildStatusEmbed(
+          "ℹ️ Restart Already Queued",
+          "A restart is already in progress.",
+          "#3498DB"
+        ),
+      ],
+    });
+    return;
+  }
+
+  restartInProgress = true;
+  const supervisorMode = shouldUseSupervisorRestart();
+  const restartMode = supervisorMode ? "the host process manager" : "a new local bot process";
+
+  await safeSend(message.channel, {
+    embeds: [
+      buildStatusEmbed(
+        "🔄 Restarting HoyoFetch",
+        `Restart requested. I will disconnect now and come back through ${restartMode}.`,
+        "#F1C40F"
+      ),
+    ],
+  });
+
+  console.log(
+    `🔄  Restart requested by ${message.authorId}; mode=${supervisorMode ? "supervisor" : "self-spawn"}`
+  );
+
+  setTimeout(() => restartProcess(supervisorMode), 1_000).unref();
+}
+
 // ═══════════════════════════════════════════════════
 //  Auto-fetch scheduler
 // ═══════════════════════════════════════════════════
@@ -420,6 +467,32 @@ function getScopeLabel(scope) {
   if (scope === "hoyo") return "HoYoverse codes";
   if (scope === "nte") return "NTE codes";
   return "HoYoverse and NTE codes";
+}
+
+function shouldUseSupervisorRestart() {
+  return Boolean(
+    process.env.pm_id ||
+    process.env.PM2_HOME ||
+    process.env.INVOCATION_ID ||
+    process.env.KUBERNETES_SERVICE_HOST
+  );
+}
+
+function restartProcess(supervisorMode) {
+  if (!supervisorMode) {
+    const child = spawn(process.execPath, process.argv.slice(1), {
+      cwd: process.cwd(),
+      detached: true,
+      env: {
+        ...process.env,
+        HOYOFETCH_RESTART_CHILD: "1",
+      },
+      stdio: "ignore",
+    });
+    child.unref();
+  }
+
+  process.exit(supervisorMode ? 1 : 0);
 }
 
 // ═══════════════════════════════════════════════════

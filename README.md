@@ -51,6 +51,7 @@ On first boot, the bot seeds all existing codes into memory so it won't announce
 | `/EnableFetchHoyo` | Enable HoYoverse-only auto-fetch in the current channel |
 | `/EnableFetchNTE` | Enable NTE-only auto-fetch in the current channel |
 | `/DisableFetch` | Disable auto-fetch in the current channel |
+| `/Restart` | Restart the bot after deploying updates |
 | `/HelpHoyoFetch` | Show all commands |
 
 > **Note:** Revolt does not support Discord-style slash commands. These are message-based prefix commands using `/` as the prefix. They are fully case-insensitive.
@@ -193,6 +194,7 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 - Neverness to Everness support via cached Game8 scraping
 - Auto-fetch scopes: all games, HoYoverse-only, or NTE-only
+- Remote `/Restart` command for reloading deployed updates
 - **Honkai Impact 3rd support** via [ennead community API](https://github.com/torikushiii/hoyoverse-api) — no longer deprecated!
 - **Custom emoji hub** — use your own Revolt server emoji for reward icons
 - Dual API source architecture (hoyo-codes + ennead)

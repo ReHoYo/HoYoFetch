@@ -117,6 +117,10 @@ export function buildHelpEmbed(prefix) {
       "Disable auto-fetch in this channel",
     ],
     [
+      `${prefix}Restart`,
+      "Restart the bot process after deploying updates",
+    ],
+    [
       `${prefix}HelpHoyoFetch`,
       "Show this help message",
     ],
