@@ -272,23 +272,24 @@ export async function scrapeGame8NTECodes(url, fetchImpl = fetch) {
 }
 
 export function parseGame8NTECodes(html) {
-  const activeSection = getGame8ActiveCodeSection(html);
+  const activeTable = getGame8ActiveCodesTable(html);
   const codes = [];
   const seen = new Set();
   const rowRegex = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
   let rowMatch;
 
-  while ((rowMatch = rowRegex.exec(activeSection)) !== null) {
+  while ((rowMatch = rowRegex.exec(activeTable)) !== null) {
     const row = rowMatch[1];
     const code = extractGame8Code(row);
-    if (!code || seen.has(code)) continue;
+    const codeIdentity = getGame8CodeIdentity(code);
+    if (!codeIdentity || seen.has(codeIdentity)) continue;
 
     const cells = extractTableCells(row);
     const rewards = cells.length >= 2 ? extractGame8Rewards(cells[1]) : null;
 
-    seen.add(code);
+    seen.add(codeIdentity);
     codes.push(normalise({
-      code,
+      code: code.trim(),
       rewards,
       source: NTE_SOURCE.name,
     }, { preserveCodeCase: true }));
@@ -297,38 +298,99 @@ export function parseGame8NTECodes(html) {
   return codes;
 }
 
-function getGame8ActiveCodeSection(html) {
-  const activeStart = html.indexOf("All Active Redeem Codes");
+function getGame8ActiveCodesTable(html) {
+  const activeStart = getPatternIndex(html, /All\s+Active\s+Redeem\s+Codes/i);
   if (activeStart === -1) {
     throw new Error("Could not find the Game8 active redeem codes section");
   }
 
-  const endMarkers = [
-    "Neverness to Everness Expired Codes",
-    "Expired Neverness to Everness Codes",
-    "List of All Expired Redeem Codes",
-  ];
-  const activeEnd = endMarkers
-    .map((marker) => html.indexOf(marker, activeStart + 1))
-    .filter((idx) => idx > activeStart)
-    .sort((a, b) => a - b)[0];
+  const activeEnd = getFirstPatternIndex(html, [
+    /Neverness\s+to\s+Everness\s+Expired\s+Codes/i,
+    /Expired\s+Neverness\s+to\s+Everness\s+Codes/i,
+    /List\s+of\s+All\s+Expired\s+Redeem\s+Codes/i,
+  ], activeStart + 1);
+  const tableStart = html.indexOf("<table", activeStart);
 
-  return html.slice(activeStart, activeEnd || activeStart + 20_000);
+  if (tableStart === -1 || (activeEnd !== -1 && tableStart > activeEnd)) {
+    throw new Error("Could not find the Game8 active redeem codes table");
+  }
+
+  const tableEnd = html.indexOf("</table>", tableStart);
+  if (tableEnd === -1) {
+    throw new Error("Could not find the end of the Game8 active redeem codes table");
+  }
+
+  return html.slice(tableStart, tableEnd + "</table>".length);
 }
 
 function extractGame8Code(rowHtml) {
-  const inputs = rowHtml.match(/<input\b[^>]*>/gi) || [];
+  const preferred = extractGame8InputCode(rowHtml, { requireClipboardClass: true });
+  if (preferred) return preferred;
+
+  const cells = extractTableCells(rowHtml);
+  const codeCell = cells[0] ?? rowHtml;
+  const inputFallback = extractGame8InputCode(codeCell, { requireClipboardClass: false });
+  if (inputFallback) return inputFallback;
+
+  return extractGame8TextCode(codeCell);
+}
+
+function extractGame8InputCode(html, { requireClipboardClass }) {
+  const inputs = html.match(/<input\b[^>]*>/gi) || [];
   for (const input of inputs) {
     const className = getHtmlAttr(input, "class") || "";
-    if (!className.split(/\s+/).includes("a-clipboard__textInput")) continue;
+    if (
+      requireClipboardClass &&
+      !className.split(/\s+/).includes("a-clipboard__textInput")
+    ) {
+      continue;
+    }
 
     const value = getHtmlAttr(input, "value");
     if (!value) continue;
 
-    const code = decodeHtml(value).trim();
-    if (code.length >= 4) return code;
+    const code = cleanGame8CodeCandidate(value);
+    if (code) return code;
   }
   return null;
+}
+
+function extractGame8TextCode(cellHtml) {
+  const ignored = new Set([
+    "active",
+    "code",
+    "codes",
+    "copied",
+    "copy",
+    "date",
+    "expired",
+    "expiry",
+    "new",
+    "redeem",
+    "rewards",
+    "still",
+    "tba",
+  ]);
+  const text = htmlToText(cellHtml);
+  const candidates = text.match(/[A-Za-z0-9][A-Za-z0-9_-]{3,40}/g) || [];
+
+  for (const candidate of candidates) {
+    if (ignored.has(candidate.toLowerCase())) continue;
+    const code = cleanGame8CodeCandidate(candidate);
+    if (code) return code;
+  }
+
+  return null;
+}
+
+function cleanGame8CodeCandidate(value) {
+  const code = decodeHtml(value).trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{3,40}$/.test(code)) return null;
+  return code;
+}
+
+function getGame8CodeIdentity(code) {
+  return typeof code === "string" ? code.trim().toUpperCase() : "";
 }
 
 function extractTableCells(rowHtml) {
@@ -352,8 +414,12 @@ function extractGame8Rewards(cellHtml) {
 }
 
 function getHtmlAttr(tag, name) {
-  const attrRegex = new RegExp(`${name}\\s*=\\s*(['"])([\\s\\S]*?)\\1`, "i");
-  return tag.match(attrRegex)?.[2] ?? null;
+  const attrRegex = new RegExp(
+    `${name}\\s*=\\s*(?:(")([\\s\\S]*?)"|(')([\\s\\S]*?)'|([^\\s"'=<>]+))`,
+    "i"
+  );
+  const match = tag.match(attrRegex);
+  return match?.[2] ?? match?.[4] ?? match?.[5] ?? null;
 }
 
 function htmlToText(html) {
@@ -388,6 +454,19 @@ function decodeHtml(text) {
     }
     return named[key] ?? match;
   });
+}
+
+function getPatternIndex(text, pattern, start = 0) {
+  pattern.lastIndex = 0;
+  const match = pattern.exec(text.slice(start));
+  return match ? start + match.index : -1;
+}
+
+function getFirstPatternIndex(text, patterns, start = 0) {
+  const matches = patterns
+    .map((pattern) => getPatternIndex(text, pattern, start))
+    .filter((idx) => idx !== -1);
+  return matches.length > 0 ? Math.min(...matches) : -1;
 }
 
 // ═══════════════════════════════════════════════════

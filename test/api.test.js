@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fetchNTECodes, parseGame8NTECodes } from "../api.js";
+import { detectFreshCodes } from "../store.js";
 
 const NOW = 1_800_000_000_000;
 const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -14,11 +15,17 @@ const game8Fixture = `
     </tr>
     <tr>
       <td class="center">
-        <input type='text' class='a-clipboard__textInput' value='NTEvtuber200' readonly>
+        <div class='a-clipboard__container'>
+          <input type='text' class='a-clipboard__textInput' value='NTEvtuber200' readonly>
+          <button class='a-clipboard__copyButton'>Copy</button>
+          <div class='a-clipboard__copyMessage'>Copied</div>
+        </div>
+        <span class="gameNav__icon gameNav__icon--new">NEW</span><br>
+        <span class='a-red'>Expiry Date: TBA</span>
       </td>
       <td>
-        <div class='align'>・<a class='a-link'>Fons</a> x10,000</div>
-        <div class='align'>・<a class='a-link'>Beetle Coin</a> x10,000</div>
+        <div class='align'>・<a class='a-link'><img alt='Fons Image'> Fons</a> x10,000</div>
+        <div class='align'>・<a class='a-link'><img alt='Beetle Coin Image'> Beetle Coin</a> x10,000</div>
       </td>
     </tr>
     <tr>
@@ -27,6 +34,14 @@ const game8Fixture = `
       </td>
       <td>
         <div class='align'>・<a class='a-link'>Fons</a> x30,000</div>
+      </td>
+    </tr>
+    <tr>
+      <td class="center">
+        <input type='text' class='a-clipboard__textInput' value='ntefree' readonly>
+      </td>
+      <td>
+        <div class='align'>・Duplicate reward x1</div>
       </td>
     </tr>
   </table>
@@ -39,7 +54,35 @@ const game8Fixture = `
   </table>
 `;
 
-test("parseGame8NTECodes extracts active codes and ignores expired codes", () => {
+const textFallbackFixture = `
+  <h3>All Active Redeem Codes</h3>
+  <table class='a-table'>
+    <tr>
+      <th>Redeem Code</th>
+      <th>Rewards</th>
+    </tr>
+    <tr>
+      <td class="center">
+        <button>Copy</button>
+        <strong>RaceNoLimit</strong>
+        <span>NEW</span>
+        <span>Expiry Date: TBA</span>
+      </td>
+      <td>
+        <div class='align'>・Elite Hunter Guide x2</div>
+      </td>
+    </tr>
+  </table>
+  <h2>Expired Neverness to Everness Codes</h2>
+  <table>
+    <tr>
+      <td><strong>NTEEXPIREDTEXT</strong></td>
+      <td>Expired Reward x1</td>
+    </tr>
+  </table>
+`;
+
+test("parseGame8NTECodes extracts active codes, dedupes casing, and ignores expired codes", () => {
   const codes = parseGame8NTECodes(game8Fixture);
 
   assert.deepEqual(codes.map((entry) => entry.code), [
@@ -50,6 +93,24 @@ test("parseGame8NTECodes extracts active codes and ignores expired codes", () =>
   assert.equal(codes[1].rewards, "Fons x30,000");
   assert.equal(codes[0].source, "Game8");
   assert.ok(!codes.some((entry) => entry.code === "NTEEXPIRED"));
+});
+
+test("parseGame8NTECodes falls back to code-cell text when input markup changes", () => {
+  const codes = parseGame8NTECodes(textFallbackFixture);
+
+  assert.deepEqual(codes.map((entry) => entry.code), ["RaceNoLimit"]);
+  assert.equal(codes[0].rewards, "Elite Hunter Guide x2");
+});
+
+test("detectFreshCodes treats NTE codes as case-insensitive identities only", () => {
+  assert.deepEqual(
+    detectFreshCodes("nte", ["NTEFREE"], ["ntefree", "NTEBRANDNEW"]),
+    ["NTEBRANDNEW"]
+  );
+  assert.deepEqual(
+    detectFreshCodes("genshin", ["GENSHINCODE"], ["genshincode"]),
+    ["genshincode"]
+  );
 });
 
 test("fetchNTECodes returns fresh cache without fetching Game8", async () => {

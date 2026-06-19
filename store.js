@@ -139,14 +139,32 @@ let knownCodes = readJSON(KNOWN_CODES_PATH, {});
  * @return {string[]} — only the NEW codes
  */
 export function detectNewCodes(gameKey, currentCodes) {
-  const previous = new Set(knownCodes[gameKey] || []);
-  const fresh = currentCodes.filter((c) => !previous.has(c));
+  const fresh = detectFreshCodes(gameKey, knownCodes[gameKey] || [], currentCodes);
 
   // Persist the full current set (replaces expired codes too)
   knownCodes[gameKey] = currentCodes;
   writeJSON(KNOWN_CODES_PATH, knownCodes);
 
   return fresh;
+}
+
+/**
+ * Pure helper for comparing current source codes against a previous known set.
+ * NTE is scraped from Game8, so casing drift there should not re-announce codes.
+ *
+ * @param  {string}   gameKey
+ * @param  {string[]} previousCodes
+ * @param  {string[]} currentCodes
+ * @return {string[]} — only codes not represented in previousCodes
+ */
+export function detectFreshCodes(gameKey, previousCodes, currentCodes) {
+  const previous = new Set(previousCodes.map((code) => getCodeIdentity(gameKey, code)));
+  return currentCodes.filter((code) => !previous.has(getCodeIdentity(gameKey, code)));
+}
+
+function getCodeIdentity(gameKey, code) {
+  const value = String(code ?? "").trim();
+  return gameKey === "nte" ? value.toUpperCase() : value;
 }
 
 /**
