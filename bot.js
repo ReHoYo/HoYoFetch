@@ -19,7 +19,15 @@ if (typeof globalThis.WebSocket === "undefined") {
 // ════════════════════════════════════════════════════════════════════
 
 import { Client } from "revolt.js";
-import { CONFIG, GAMES, COMMAND_GAME_MAP, HOYO_GAME_KEYS, NTE_GAME_KEY } from "./config.js";
+import {
+  CONFIG,
+  GAMES,
+  COMMAND_GAME_MAP,
+  HOYO_GAME_KEYS,
+  NTE_GAME_KEY,
+  getEmojiMode,
+  setEmojiMode,
+} from "./config.js";
 import { fetchCodes } from "./api.js";
 import {
   buildCodesEmbed,
@@ -162,6 +170,16 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
+    // ── EmojiMode [unicode|custom] ───────────────
+    if (body === "emojimode" || body.startsWith("emojimode ")) {
+      if (!requirePermission(message)) {
+        await sendNoPermission(message);
+        return;
+      }
+      await handleEmojiMode(message, body.slice("emojimode".length).trim());
+      return;
+    }
+
     // ── HarHar ──────────────────────────────────────
     if (body === "harhar") {
       await safeSend(message.channel, { content: ":01KPK39288XJE44RWR495WSZGR:" });
@@ -185,8 +203,34 @@ client.on("messageCreate", async (message) => {
 //  Command handlers
 // ═══════════════════════════════════════════════════
 
+// Per-channel cooldown for /Fetch* commands to avoid hammering upstream
+// sources when a channel spams the command. Map<channelId, lastFetchMs>.
+const fetchCooldowns = new Map();
+
 async function handleFetchCommand(message, gameKey) {
   const game = GAMES[gameKey];
+
+  // Rate-limit per channel
+  const cooldownMs = CONFIG.fetchCooldownSeconds * 1000;
+  if (cooldownMs > 0) {
+    const channelId = message.channelId;
+    const last = fetchCooldowns.get(channelId) ?? 0;
+    const elapsed = Date.now() - last;
+    if (elapsed < cooldownMs) {
+      const wait = Math.ceil((cooldownMs - elapsed) / 1000);
+      await safeSend(message.channel, {
+        embeds: [
+          buildStatusEmbed(
+            "⏳ Slow down",
+            `Please wait ${wait}s before fetching again.`,
+            "#F39C12"
+          ),
+        ],
+      });
+      return;
+    }
+    fetchCooldowns.set(channelId, Date.now());
+  }
 
   // Show which API source we're hitting
   const apiLabel =
@@ -293,6 +337,46 @@ async function handleDisableFetch(message) {
 async function handleHelp(message) {
   await safeSend(message.channel, {
     embeds: [buildHelpEmbed(CONFIG.prefix)],
+  });
+}
+
+async function handleEmojiMode(message, arg) {
+  // No argument → report the current mode.
+  if (!arg) {
+    await safeSend(message.channel, {
+      embeds: [
+        buildStatusEmbed(
+          "🎨 Emoji Mode",
+          `Current mode: **${getEmojiMode()}**.\n` +
+          `Use \`${CONFIG.prefix}EmojiMode unicode\` or \`${CONFIG.prefix}EmojiMode custom\` to change it.`,
+          "#3498DB"
+        ),
+      ],
+    });
+    return;
+  }
+
+  if (!setEmojiMode(arg)) {
+    await safeSend(message.channel, {
+      embeds: [
+        buildStatusEmbed(
+          "⚠️ Invalid mode",
+          `\`${arg}\` is not valid. Choose **unicode** or **custom**.`,
+          "#E74C3C"
+        ),
+      ],
+    });
+    return;
+  }
+
+  await safeSend(message.channel, {
+    embeds: [
+      buildStatusEmbed(
+        "✅ Emoji Mode Updated",
+        `Emoji rendering is now set to **${getEmojiMode()}**.`,
+        "#2ECC71"
+      ),
+    ],
   });
 }
 

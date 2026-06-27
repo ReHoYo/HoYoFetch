@@ -1,11 +1,12 @@
 // store.js — Lightweight JSON-file persistence for channel config & known codes
 // ──────────────────────────────────────────────────────────────────────────────
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = join(__dirname, "data");
+// Overridable so tests run hermetically and deployments can mount a volume.
+const DATA_DIR = process.env.HOYOFETCH_DATA_DIR || join(__dirname, "data");
 
 // Ensure the data directory exists
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
@@ -43,8 +44,13 @@ function readJSON(path, fallback) {
   }
 }
 
+// Atomic write: serialise to a temp file, then rename over the target.
+// rename() is atomic on the same filesystem, so a crash mid-write can never
+// leave a half-written (corrupt) JSON file behind.
 function writeJSON(path, data) {
-  writeFileSync(path, JSON.stringify(data, null, 2), "utf-8");
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
+  renameSync(tmp, path);
 }
 
 // ═══════════════════════════════════════════════════
@@ -139,6 +145,13 @@ let knownCodes = readJSON(KNOWN_CODES_PATH, {});
  * @return {string[]} — only the NEW codes
  */
 export function detectNewCodes(gameKey, currentCodes) {
+  // An empty list almost always means the source returned nothing this cycle.
+  // Don't let that overwrite our known set — otherwise the next non-empty fetch
+  // would treat every still-active code as "new" and re-announce it.
+  if (!Array.isArray(currentCodes) || currentCodes.length === 0) {
+    return [];
+  }
+
   const fresh = detectFreshCodes(gameKey, knownCodes[gameKey] || [], currentCodes);
 
   // Persist the full current set (replaces expired codes too)

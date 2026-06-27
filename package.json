@@ -7,12 +7,23 @@
   "scripts": {
     "start": "node bot.js",
     "dev": "node --watch bot.js",
-    "test": "node --test"
+    "test": "node --test",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "revolt.js": "^7.0.4",
     "node-fetch": "^3.3.2",
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.29.0",
+    "globals": "^15.0.0",
+    "prettier": "^3.2.0"
   },
   "engines": {
     "node": ">=18.0.0"
