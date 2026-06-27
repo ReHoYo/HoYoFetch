@@ -38,6 +38,16 @@ npm start
 
 On first boot, the bot seeds all existing codes into memory so it won't announce old codes as "new". Only genuinely new codes trigger channel notifications.
 
+### Development
+
+```bash
+npm test          # node:test unit suite (no network needed)
+npm run lint      # ESLint (flat config)
+npm run format    # Prettier — format all files
+```
+
+CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every push and PR.
+
 ## 📋 Commands
 
 | Command | Description |
@@ -51,6 +61,7 @@ On first boot, the bot seeds all existing codes into memory so it won't announce
 | `/EnableFetchHoyo` | Enable HoYoverse-only auto-fetch in the current channel |
 | `/EnableFetchNTE` | Enable NTE-only auto-fetch in the current channel |
 | `/DisableFetch` | Disable auto-fetch in the current channel |
+| `/EmojiMode [unicode\|custom]` | Show or switch reward-emoji rendering at runtime |
 | `/Restart` | Restart the bot after deploying updates |
 | `/HelpHoyoFetch` | Show all commands |
 
@@ -156,8 +167,10 @@ All settings are in `.env`:
 | `BOT_TOKEN` | _(required)_ | Revolt bot token |
 | `PREFIX` | `/` | Command prefix |
 | `FETCH_INTERVAL` | `60` | Auto-fetch interval in minutes |
+| `FETCH_COOLDOWN` | `10` | Min seconds between manual `/Fetch*` commands per channel (`0` disables) |
+| `EMOJI_MODE` | `unicode` | Initial emoji mode (`unicode` or `custom`); switchable at runtime via `/EmojiMode` |
 | `HOYO_API_BASE` | `https://hoyo-codes.seria.moe/codes` | GI/HSR/ZZZ API |
-| `ENNEAD_API_BASE` | `https://api.ennead.cc/mihoyo` | HI3 API |
+| `HOYOFETCH_DATA_DIR` | `./data` | Where `channels.json` / `known_codes.json` / `source_cache.json` are stored |
 
 ## 🚀 Production Deployment
 

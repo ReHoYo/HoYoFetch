@@ -1,6 +1,6 @@
 // embeds.js — Build Revolt SendableEmbed objects for code announcements
 // ────────────────────────────────────────────────────────────────────
-import { GAMES, HI3_SOURCES } from "./config.js";
+import { GAMES } from "./config.js";
 import { formatRewards } from "./api.js";
 
 /**
@@ -115,6 +115,10 @@ export function buildHelpEmbed(prefix) {
     [
       `${prefix}DisableFetch`,
       "Disable auto-fetch in this channel",
+    ],
+    [
+      `${prefix}EmojiMode [unicode|custom]`,
+      "Show or switch how reward emoji are rendered",
     ],
     [
       `${prefix}Restart`,
