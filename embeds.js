@@ -102,19 +102,19 @@ export function buildHelpEmbed(prefix) {
     ],
     [
       `${prefix}EnableFetch`,
-      "Enable hourly auto-fetch of **HoYoverse + NTE** codes in this channel",
+      "Enable hourly auto-fetch of **HoYoverse + NTE** codes in this channel _(admins/mods only)_",
     ],
     [
       `${prefix}EnableFetchHoyo`,
-      "Enable hourly auto-fetch of **HoYoverse-only** codes in this channel",
+      "Enable hourly auto-fetch of **HoYoverse-only** codes in this channel _(admins/mods only)_",
     ],
     [
       `${prefix}EnableFetchNTE`,
-      "Enable hourly auto-fetch of **NTE-only** codes in this channel",
+      "Enable hourly auto-fetch of **NTE-only** codes in this channel _(admins/mods only)_",
     ],
     [
       `${prefix}DisableFetch`,
-      "Disable auto-fetch in this channel",
+      "Disable auto-fetch in this channel _(admins/mods only)_",
     ],
     [
       `${prefix}EmojiMode [unicode|custom]`,
@@ -122,7 +122,7 @@ export function buildHelpEmbed(prefix) {
     ],
     [
       `${prefix}Restart`,
-      "Restart the bot process after deploying updates",
+      "Restart the bot process after deploying updates _(owner/admin only)_",
     ],
     [
       `${prefix}HelpHoyoFetch`,
@@ -139,6 +139,7 @@ export function buildHelpEmbed(prefix) {
     description:
       description +
       "\n\n_All commands are **case-insensitive**._\n" +
+      "_Commands are accepted from human server members only._\n" +
       "_GI / HSR / ZZZ codes from [hoyo-codes.seria.moe](https://hoyo-codes.seria.moe)_\n" +
       "_HI3 codes from [api.ennead.cc](https://api.ennead.cc/mihoyo)_\n" +
       "_NTE codes from [Game8](https://game8.co/games/Neverness-to-Everness/archives/593718)_",

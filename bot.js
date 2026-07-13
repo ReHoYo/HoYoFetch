@@ -30,6 +30,10 @@ import {
 } from "./config.js";
 import { fetchCodes } from "./api.js";
 import {
+  EASTER_EGG_COMMANDS,
+  uploadEasterEggAttachment,
+} from "./easter-eggs.js";
+import {
   buildCodesEmbed,
   buildNoCodesEmbed,
   buildHelpEmbed,
@@ -44,6 +48,16 @@ import {
   seedKnownCodes,
   hasSeenGame,
 } from "./store.js";
+import {
+  auditAlias,
+  authorizeCommand,
+  COMMAND_ACCESS,
+  CommandRateLimiter,
+  getCommandAccess,
+  isSafeId,
+  safeErrorSummary,
+  SingleFlight,
+} from "./security.js";
 
 // ── Validate token ─────────────────────────────────
 if (!CONFIG.token || CONFIG.token === "your_bot_token_here") {
@@ -56,6 +70,8 @@ if (!CONFIG.token || CONFIG.token === "your_bot_token_here") {
 // ── Create client ──────────────────────────────────
 const client = new Client();
 let restartInProgress = false;
+const commandRateLimiter = new CommandRateLimiter();
+const codeFetchSingleFlight = new SingleFlight();
 
 // ── Error handler ──────────────────────────────────
 client.on("error", (err) => {
@@ -106,8 +122,40 @@ client.on("messageCreate", async (message) => {
 
   // Strip prefix and lowercase for matching
   const body = raw.slice(CONFIG.prefix.length).toLowerCase();
+  const access = getCommandAccess(body, COMMAND_GAME_MAP);
+  if (!access) return;
+
+  const authorization = authorizeCommand(message, access);
+  if (!authorization.authorId) return;
+
+  const rateLimit = commandRateLimiter.check(authorization.authorId);
+  if (!rateLimit.allowed) {
+    if (rateLimit.notify && authorization.channel) {
+      await sendRateLimited(authorization.channel, rateLimit.retryAfterMs);
+    }
+    logCommandAudit(body, authorization, "rate_limited");
+    return;
+  }
+
+  if (!authorization.allowed) {
+    if (authorization.reason === "insufficient_permission") {
+      await sendNoPermission(message, access);
+      logCommandAudit(body, authorization, "denied");
+    }
+    return;
+  }
+
+  if (access !== COMMAND_ACCESS.MEMBER) {
+    logCommandAudit(body, authorization, "allowed");
+  }
 
   try {
+    // ── Hidden image easter eggs ─────────────────
+    if (EASTER_EGG_COMMANDS[body]) {
+      await handleEasterEggCommand(message, EASTER_EGG_COMMANDS[body]);
+      return;
+    }
+
     // ── Game fetch commands ──────────────────────
     if (COMMAND_GAME_MAP[body]) {
       await handleFetchCommand(message, COMMAND_GAME_MAP[body]);
@@ -116,50 +164,30 @@ client.on("messageCreate", async (message) => {
 
     // ── EnableFetch ──────────────────────────────
     if (body === "enablefetch") {
-      if (!requirePermission(message)) {
-        await sendNoPermission(message);
-        return;
-      }
       await handleEnableFetch(message, "all");
       return;
     }
 
     // ── EnableFetchHoyo ──────────────────────────
     if (body === "enablefetchhoyo") {
-      if (!requirePermission(message)) {
-        await sendNoPermission(message);
-        return;
-      }
       await handleEnableFetch(message, "hoyo");
       return;
     }
 
     // ── EnableFetchNTE ───────────────────────────
     if (body === "enablefetchnte") {
-      if (!requirePermission(message)) {
-        await sendNoPermission(message);
-        return;
-      }
       await handleEnableFetch(message, "nte");
       return;
     }
 
     // ── DisableFetch ─────────────────────────────
     if (body === "disablefetch") {
-      if (!requirePermission(message)) {
-        await sendNoPermission(message);
-        return;
-      }
       await handleDisableFetch(message);
       return;
     }
 
     // ── Restart ──────────────────────────────────
     if (body === "restart") {
-      if (!requirePermission(message)) {
-        await sendNoPermission(message);
-        return;
-      }
       await handleRestart(message);
       return;
     }
@@ -172,10 +200,6 @@ client.on("messageCreate", async (message) => {
 
     // ── EmojiMode [unicode|custom] ───────────────
     if (body === "emojimode" || body.startsWith("emojimode ")) {
-      if (!requirePermission(message)) {
-        await sendNoPermission(message);
-        return;
-      }
       await handleEmojiMode(message, body.slice("emojimode".length).trim());
       return;
     }
@@ -186,7 +210,10 @@ client.on("messageCreate", async (message) => {
       return;
     }
   } catch (err) {
-    console.error(`Command error [${body}]:`, err);
+    console.error(
+      `Command error [${body}] actor=${auditAlias(message.authorId)} ` +
+      `channel=${auditAlias(message.channelId)} ${safeErrorSummary(err)}`
+    );
     await safeSend(message.channel, {
       embeds: [
         buildStatusEmbed(
@@ -206,6 +233,20 @@ client.on("messageCreate", async (message) => {
 // Per-channel cooldown for /Fetch* commands to avoid hammering upstream
 // sources when a channel spams the command. Map<channelId, lastFetchMs>.
 const fetchCooldowns = new Map();
+
+async function handleEasterEggCommand(message, asset) {
+  const attachmentId = await uploadEasterEggAttachment({
+    asset,
+    autumnUrl: client.configuration?.features?.autumn?.url,
+    authenticationHeader: client.authenticationHeader,
+  });
+  const sent = await safeSend(message.channel, {
+    attachments: [attachmentId],
+  });
+  if (!sent) {
+    throw new Error("Easter egg image could not be posted.");
+  }
+}
 
 async function handleFetchCommand(message, gameKey) {
   const game = GAMES[gameKey];
@@ -247,7 +288,7 @@ async function handleFetchCommand(message, gameKey) {
   );
   const loadingMsg = await safeSend(message.channel, { embeds: [loadingEmbed] });
 
-  const codes = await fetchCodes(gameKey);
+  const codes = await fetchCodesOnce(gameKey);
 
   if (!codes.length) {
     if (loadingMsg?._id) await safeDelete(message.channel.id, loadingMsg._id);
@@ -409,7 +450,8 @@ async function handleRestart(message) {
   });
 
   console.log(
-    `🔄  Restart requested by ${message.authorId}; mode=${supervisorMode ? "supervisor" : "self-spawn"}`
+    `🔄  Restart requested actor=${auditAlias(message.authorId)}; ` +
+    `mode=${supervisorMode ? "supervisor" : "self-spawn"}`
   );
 
   setTimeout(() => restartProcess(supervisorMode), 1_000).unref();
@@ -445,7 +487,7 @@ async function runAutoFetch() {
       const subscribedChannels = enabledChannels.filter((ch) =>
         scopeIncludesGame(ch.scope, game.key)
       );
-      const codes = await fetchCodes(game.key);
+      const codes = await fetchCodesOnce(game.key);
       const codeStrings = codes.map((c) => c.code);
 
       const newCodes = detectNewCodes(game.key, codeStrings);
@@ -482,11 +524,15 @@ async function runAutoFetch() {
             });
           }
         } catch (err) {
-          console.error(`   Failed to send to channel ${chId}:`, err.message);
+          console.error(
+            `   Failed to send channel=${auditAlias(chId)}: ${safeErrorSummary(err)}`
+          );
         }
       }
     } catch (err) {
-      console.error(`   Auto-fetch error for ${game.name}:`, err.message);
+      console.error(
+        `   Auto-fetch error for ${game.name}: ${safeErrorSummary(err)}`
+      );
     }
   }
 }
@@ -502,43 +548,61 @@ async function seedAllGames() {
     if (hasSeenGame(game.key)) continue;
 
     try {
-      const codes = await fetchCodes(game.key);
+      const codes = await fetchCodesOnce(game.key);
       const codeStrings = codes.map((c) => c.code);
       seedKnownCodes(game.key, codeStrings);
       console.log(
         `   Seeded ${game.name} (${game.source}): ${codeStrings.length} codes`
       );
     } catch (err) {
-      console.error(`   Seed error for ${game.name}:`, err.message);
+      console.error(`   Seed error for ${game.name}: ${safeErrorSummary(err)}`);
     }
   }
 }
 
 // ═══════════════════════════════════════════════════
-//  Permissions
+//  Command security
 // ═══════════════════════════════════════════════════
 
-/**
- * Check whether the message author has a server-level permission.
- * Returns false if there is no server context (e.g. DMs).
- */
-function requirePermission(message, permission = "ManageServer") {
-  const member = message.member;
-  const server = message.server;
-  if (!member || !server) return false;
-  return member.hasPermission(server, permission);
-}
-
-async function sendNoPermission(message) {
+async function sendNoPermission(message, access) {
+  const description =
+    access === COMMAND_ACCESS.ADMIN
+      ? "Only the server owner or members with **Manage Server** permission can use this command."
+      : "Only server administrators or members with moderation permissions can use this command.";
   await safeSend(message.channel, {
     embeds: [
       buildStatusEmbed(
         "🔒 Permission Denied",
-        "You need the **Manage Server** permission to use this command.",
+        description,
         "#E74C3C"
       ),
     ],
   });
+}
+
+async function sendRateLimited(channel, retryAfterMs) {
+  const retryAfterSeconds = Math.max(1, Math.ceil(retryAfterMs / 1_000));
+  await safeSend(channel, {
+    embeds: [
+      buildStatusEmbed(
+        "⏳ Slow Down",
+        `Too many commands were sent. Try again in ${retryAfterSeconds} seconds.`,
+        "#E67E22"
+      ),
+    ],
+  });
+}
+
+function logCommandAudit(command, authorization, outcome) {
+  console.log(
+    `🔐  command=${command} outcome=${outcome} reason=${authorization.reason} ` +
+    `actor=${auditAlias(authorization.authorId)} ` +
+    `channel=${auditAlias(authorization.channelId)}`
+  );
+}
+
+function fetchCodesOnce(gameKey) {
+  return codeFetchSingleFlight.run(gameKey, () => fetchCodes(gameKey));
 }
 
 function scopeIncludesGame(scope, gameKey) {
@@ -600,7 +664,9 @@ async function safeSend(channel, data) {
     // Use REST API directly to avoid revolt.js hydration bug with solid-js
     return await client.api.post(`/channels/${channel.id}/messages`, data);
   } catch (err) {
-    console.error("safeSend error:", err?.message || err);
+    console.error(
+      `safeSend error channel=${auditAlias(channel?.id)}: ${safeErrorSummary(err)}`
+    );
     // Fallback: try sending as plain text if embed failed
     try {
       const embed = data?.embeds?.[0];
@@ -611,7 +677,10 @@ async function safeSend(channel, data) {
         });
       }
     } catch (fallbackErr) {
-      console.error("safeSend fallback error:", fallbackErr?.message || fallbackErr);
+      console.error(
+        `safeSend fallback error channel=${auditAlias(channel?.id)}: ` +
+        safeErrorSummary(fallbackErr)
+      );
     }
   }
 }
@@ -631,16 +700,10 @@ async function safeDelete(channelId, messageId) {
       console.warn(`safeDelete: HTTP ${res.status} ${res.statusText}`);
     }
   } catch (err) {
-    console.warn("safeDelete error:", err?.message || err);
+    console.warn(
+      `safeDelete error channel=${auditAlias(channelId)}: ${safeErrorSummary(err)}`
+    );
   }
-}
-
-/**
- * Validate that an ID string contains only alphanumeric characters.
- * Prevents path traversal / URL injection when interpolating into API paths.
- */
-function isSafeId(id) {
-  return typeof id === "string" && /^[A-Za-z0-9]+$/.test(id);
 }
 
 // ── Graceful shutdown ──────────────────────────────
