@@ -22,6 +22,15 @@ import {
   startArchiveMaintenance,
   archiveSize,
 } from "./message-archive.js";
+import { uploadAttachmentBytes } from "./easter-eggs.js";
+import {
+  saveEvidence,
+  readEvidence,
+  isEvidenceEnabled,
+  perFileCapBytes,
+  evidenceStats,
+  startEvidenceMaintenance,
+} from "./evidence-store.js";
 
 const UNBAN_POLL_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_PENDING_SENDS = 50;
@@ -30,6 +39,9 @@ const DEBUG = process.env.AUDITLOG_DEBUG === "1";
 
 // Set by initAuditLog so runAuditLogTest can reuse the real send pipeline.
 let sendRef = null;
+// Downloads (evidence capture) and uploads (re-hosting on delete) go through
+// this so tests can inject a fake without touching the network.
+let fetchImplRef = fetch;
 
 function debugLog(message) {
   if (DEBUG) console.log(`[auditlog] ${message}`);
@@ -40,7 +52,7 @@ let chain = Promise.resolve();
 let pending = 0;
 const failureCounts = new Map(); // serverId -> consecutive failure count
 
-function queueSend(serverId, channelId, send, embed) {
+function queueSend(serverId, channelId, send, embed, attachments) {
   if (pending >= MAX_PENDING_SENDS) {
     console.warn(`auditlog: send queue full, dropping an event for server ${serverId}`);
     return;
@@ -48,7 +60,9 @@ function queueSend(serverId, channelId, send, embed) {
   pending++;
   chain = chain.then(async () => {
     try {
-      const result = await send(channelId, { embeds: [embed] });
+      const payload = { embeds: [embed] };
+      if (attachments?.length) payload.attachments = attachments;
+      const result = await send(channelId, payload);
       if (result === undefined) {
         bumpFailure(serverId);
       } else {
@@ -75,7 +89,7 @@ function bumpFailure(serverId) {
   }
 }
 
-function emitAudit(send, serverId, embed) {
+function emitAudit(send, serverId, embed, attachments) {
   if (!serverId) return;
   const channelId = getAuditLogChannel(serverId);
   if (!channelId) {
@@ -83,7 +97,7 @@ function emitAudit(send, serverId, embed) {
     return;
   }
   debugLog(`emitAudit: queueing "${embed.title}" → channel ${channelId}`);
-  queueSend(serverId, channelId, send, embed);
+  queueSend(serverId, channelId, send, embed, attachments);
 }
 
 /**
@@ -95,12 +109,16 @@ function emitAudit(send, serverId, embed) {
  */
 export function runAuditLogTest(serverId) {
   const channelId = getAuditLogChannel(serverId);
+  const evidence = evidenceStats();
   const status = {
     enabled: Boolean(channelId),
     channelId,
     archivedCount: archiveSize(),
     consecutiveFailures: failureCounts.get(serverId) ?? 0,
     queuedTest: false,
+    evidenceFiles: evidence.files,
+    evidenceBytes: evidence.bytes,
+    evidenceBudgetBytes: evidence.budgetBytes,
   };
   if (!channelId || !sendRef) return status;
 
@@ -109,6 +127,7 @@ export function runAuditLogTest(serverId) {
     [
       "If you can read this, the audit pipeline is delivering events to this channel.",
       `**Messages currently archived:** ${status.archivedCount}`,
+      `**Evidence stored:** ${status.evidenceFiles} file(s), ${humanReadableSize(status.evidenceBytes)} / ${humanReadableSize(status.evidenceBudgetBytes)}`,
     ],
     "#3498DB"
   );
@@ -129,41 +148,170 @@ function formatContent(content) {
   return truncate(content);
 }
 
-function formatArchivedContent(entry) {
-  const attachmentNote =
-    entry.attachments > 0
-      ? ` *(${entry.attachments} attachment${entry.attachments > 1 ? "s" : ""})*`
-      : "";
-  if (!entry.content) {
-    return attachmentNote ? attachmentNote.trim() : "*(no text)*";
-  }
-  return truncate(entry.content) + attachmentNote;
-}
-
 function formatUser(client, userId) {
   if (!userId) return "Unknown user";
   const user = client.users.get(userId);
   return user ? `@${user.username} (${userId})` : `Unknown user (${userId})`;
 }
 
+function humanReadableSize(bytes) {
+  if (!bytes || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
+  }
+  const decimals = unitIndex > 0 && value < 10 ? 1 : 0;
+  return `${value.toFixed(decimals)} ${units[unitIndex]}`;
+}
+
+function isTrustedAttachmentUrl(client, url) {
+  const autumnBase = client.configuration?.features?.autumn?.url;
+  return Boolean(autumnBase) && typeof url === "string" && url.startsWith(autumnBase);
+}
+
+async function downloadAttachmentBytes(url, maxBytes) {
+  let response;
+  try {
+    response = await fetchImplRef(url);
+  } catch {
+    return null;
+  }
+  if (!response?.ok) return null;
+
+  try {
+    const buffer = Buffer.from(await response.arrayBuffer());
+    return buffer.length <= maxBytes ? buffer : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build attachment descriptors for a freshly created message, downloading
+ * and locally caching bytes for attachments that qualify as evidence.
+ */
+async function buildAttachmentDescriptors(client, messageId, attachments) {
+  if (!attachments?.length) return [];
+
+  const descriptors = [];
+  for (let i = 0; i < attachments.length; i++) {
+    const att = attachments[i];
+    const descriptor = {
+      id: att.id,
+      filename: att.filename || "file",
+      size: att.size ?? 0,
+      contentType: att.contentType || "application/octet-stream",
+      url: att.url ?? null,
+      evidencePath: null,
+    };
+
+    const qualifies =
+      isEvidenceEnabled() &&
+      descriptor.url &&
+      isTrustedAttachmentUrl(client, descriptor.url) &&
+      descriptor.size > 0 &&
+      descriptor.size <= perFileCapBytes();
+
+    if (qualifies) {
+      try {
+        const bytes = await downloadAttachmentBytes(descriptor.url, perFileCapBytes());
+        if (bytes) {
+          descriptor.evidencePath = saveEvidence(messageId, i, bytes, descriptor.contentType);
+          debugLog(`evidence captured for ${descriptor.id} (${bytes.length} bytes)`);
+        } else {
+          debugLog(`evidence download unavailable/too large for ${descriptor.id}`);
+        }
+      } catch (err) {
+        debugLog(`evidence capture error for ${descriptor.id}: ${err?.message || err}`);
+      }
+    }
+
+    descriptors.push(descriptor);
+  }
+  return descriptors;
+}
+
+/**
+ * For a deleted message's archived attachments, re-upload any locally saved
+ * evidence and describe what happened to each attachment for the embed body.
+ * @return {{lines: string[], ids: string[]}}
+ */
+async function resolveAttachmentEvidence(client, entry) {
+  const lines = [];
+  const ids = [];
+  if (!entry) return { lines, ids };
+
+  const attachments = entry.attachments;
+  if (typeof attachments === "number") {
+    if (attachments > 0) {
+      lines.push(
+        `_(${attachments} attachment${attachments > 1 ? "s" : ""} — recorded before evidence capture existed)_`
+      );
+    }
+    return { lines, ids };
+  }
+  if (!Array.isArray(attachments) || !attachments.length) return { lines, ids };
+
+  for (const att of attachments) {
+    const sizeLabel = humanReadableSize(att.size);
+    if (!att.evidencePath) {
+      lines.push(`⚠️ \`${att.filename}\` (${sizeLabel}) — not preserved (too large or evidence capture was disabled)`);
+      continue;
+    }
+
+    const bytes = readEvidence(att.evidencePath);
+    if (!bytes) {
+      lines.push(`⚠️ \`${att.filename}\` (${sizeLabel}) — evidence copy was evicted before this deletion`);
+      continue;
+    }
+
+    try {
+      const newId = await uploadAttachmentBytes({
+        bytes,
+        filename: att.filename,
+        contentType: att.contentType,
+        autumnUrl: client.configuration?.features?.autumn?.url,
+        authenticationHeader: client.authenticationHeader,
+        fetchImpl: fetchImplRef,
+      });
+      ids.push(newId);
+      lines.push(`✅ \`${att.filename}\` (${sizeLabel}) — preserved, attached below`);
+    } catch (err) {
+      debugLog(`evidence re-upload failed for ${att.id}: ${err?.message || err}`);
+      lines.push(`⚠️ \`${att.filename}\` (${sizeLabel}) — preserved locally but re-upload failed`);
+    }
+  }
+
+  return { lines, ids };
+}
+
 // ═══════════════════════════════════════════════════
 //  Event wiring
 // ═══════════════════════════════════════════════════
 
-export function initAuditLog(client, { send }) {
+export function initAuditLog(client, { send, fetchImpl }) {
   const isSelf = (userId) => userId === client.user?.id;
 
   sendRef = send;
+  fetchImplRef = fetchImpl ?? fetch;
   startArchiveMaintenance();
+  startEvidenceMaintenance();
 
   // ── Message archive recorder ────────────────────
   // Record every message in audit-enabled servers so deletes/edits can always
   // show the original content, even across restarts. The bot's own messages
   // are archived too — otherwise deleting them (e.g. its own loading embeds)
-  // would be logged as "unknown message deleted".
-  client.on("messageCreate", (message) => {
+  // would be logged as "unknown message deleted". Qualifying attachments are
+  // downloaded and cached locally here (§evidence-store.js) since Stoat is
+  // likely to purge the CDN copy the moment the message is deleted.
+  client.on("messageCreate", async (message) => {
     const serverId = client.channels.get(message.channelId)?.serverId;
     if (!serverId || !isAuditLogEnabled(serverId)) return;
+
+    const attachments = await buildAttachmentDescriptors(client, message.id, message.attachments);
 
     recordMessage({
       id: message.id,
@@ -171,7 +319,7 @@ export function initAuditLog(client, { send }) {
       serverId,
       authorId: message.authorId,
       content: message.content ?? "",
-      attachments: message.attachments?.length ?? 0,
+      attachments,
     });
   });
 
@@ -180,10 +328,10 @@ export function initAuditLog(client, { send }) {
   // its in-memory cache (anything sent before this process started). The raw
   // gateway stream always carries {id, channel}, so we listen at that layer
   // and use the archive for author/content.
-  client.events.on("event", (event) => {
+  client.events.on("event", async (event) => {
     try {
       if (event.type === "MessageDelete") {
-        handleRawMessageDelete(client, send, event);
+        await handleRawMessageDelete(client, send, event);
       } else if (event.type === "MessageUpdate") {
         handleRawMessageUpdate(client, send, event);
       } else if (event.type === "BulkMessageDelete") {
@@ -194,7 +342,7 @@ export function initAuditLog(client, { send }) {
     }
   });
 
-  function handleRawMessageDelete(client, send, event) {
+  async function handleRawMessageDelete(client, send, event) {
     const serverId = client.channels.get(event.channel)?.serverId;
     if (!serverId) {
       debugLog(`MessageDelete ${event.id}: skipped (no server for channel ${event.channel})`);
@@ -208,18 +356,24 @@ export function initAuditLog(client, { send }) {
     }
 
     debugLog(`MessageDelete ${event.id}: logging (archived=${Boolean(entry)})`);
-    const embed = buildAuditEmbed(
-      "🗑️ Message Deleted",
-      [
-        `**Author:** ${entry ? formatUser(client, entry.authorId) : "*unknown*"}`,
-        `**Channel:** <#${event.channel}>`,
-        `**Content:** ${entry ? formatArchivedContent(entry) : "*unknown — message predates the archive or was sent while I was offline*"}`,
-        "_Deleter unknown — Stoat does not report who deleted a message._",
-        "_It's safe to assume it was either the message author or an admin/mod — only they have permission to delete it._",
-      ],
-      "#E74C3C"
+
+    const { lines: attachmentLines, ids: preservedAttachmentIds } = await resolveAttachmentEvidence(client, entry);
+
+    const bodyLines = [
+      `**Author:** ${entry ? formatUser(client, entry.authorId) : "*unknown*"}`,
+      `**Channel:** <#${event.channel}>`,
+      `**Content:** ${entry ? formatContent(entry.content) : "*unknown — message predates the archive or was sent while I was offline*"}`,
+    ];
+    if (attachmentLines.length) {
+      bodyLines.push("", "**Attachments:**", ...attachmentLines);
+    }
+    bodyLines.push(
+      "_Deleter unknown — Stoat does not report who deleted a message._",
+      "_It's safe to assume it was either the message author or an admin/mod — only they have permission to delete it._"
     );
-    emitAudit(send, serverId, embed);
+
+    const embed = buildAuditEmbed("🗑️ Message Deleted", bodyLines, "#E74C3C");
+    emitAudit(send, serverId, embed, preservedAttachmentIds);
   }
 
   function handleRawMessageUpdate(client, send, event) {

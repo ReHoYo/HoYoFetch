@@ -37,16 +37,6 @@ export async function uploadEasterEggAttachment({
     throw new Error("Easter egg asset configuration is invalid.");
   }
 
-  const uploadUrl = getAttachmentUploadUrl(autumnUrl);
-  const [headerName, headerValue] = authenticationHeader ?? [];
-  if (
-    !["X-Bot-Token", "X-Session-Token"].includes(headerName) ||
-    typeof headerValue !== "string" ||
-    !headerValue
-  ) {
-    throw new Error("Easter egg upload authentication is unavailable.");
-  }
-
   let bytes;
   try {
     bytes = await readFileImpl(asset.url);
@@ -54,12 +44,54 @@ export async function uploadEasterEggAttachment({
     throw new Error("Easter egg asset is unavailable.");
   }
 
+  try {
+    return await uploadAttachmentBytes({
+      bytes,
+      filename: asset.filename,
+      contentType: asset.contentType,
+      autumnUrl,
+      authenticationHeader,
+      fetchImpl,
+    });
+  } catch (err) {
+    throw new Error(
+      (err?.message || "Easter egg upload failed.").replace(/^Attachment /, "Easter egg ")
+    );
+  }
+}
+
+/**
+ * Upload raw bytes to the Autumn attachments bucket and return the new
+ * attachment id. Shared by easter eggs and audit-log evidence re-hosting.
+ * @param {{bytes: Buffer|Uint8Array, filename: string, contentType: string,
+ *          autumnUrl: string, authenticationHeader: [string, string],
+ *          fetchImpl?: Function}} opts
+ * @return {Promise<string>} the new Autumn attachment id
+ */
+export async function uploadAttachmentBytes({
+  bytes,
+  filename,
+  contentType,
+  autumnUrl,
+  authenticationHeader,
+  fetchImpl = fetch,
+}) {
+  if (!bytes || !filename || !contentType) {
+    throw new Error("Attachment upload configuration is invalid.");
+  }
+
+  const uploadUrl = getAttachmentUploadUrl(autumnUrl);
+  const [headerName, headerValue] = authenticationHeader ?? [];
+  if (
+    !["X-Bot-Token", "X-Session-Token"].includes(headerName) ||
+    typeof headerValue !== "string" ||
+    !headerValue
+  ) {
+    throw new Error("Attachment upload authentication is unavailable.");
+  }
+
   const body = new FormData();
-  body.append(
-    "file",
-    new Blob([bytes], { type: asset.contentType }),
-    asset.filename
-  );
+  body.append("file", new Blob([bytes], { type: contentType }), filename);
 
   let response;
   try {
@@ -69,28 +101,25 @@ export async function uploadEasterEggAttachment({
       body,
     });
   } catch {
-    throw new Error("Easter egg upload request failed.");
+    throw new Error("Attachment upload request failed.");
   }
 
   if (!response?.ok) {
     const status = Number.isInteger(response?.status)
       ? response.status
       : "unknown";
-    throw new Error(`Easter egg upload failed (HTTP ${status}).`);
+    throw new Error(`Attachment upload failed (HTTP ${status}).`);
   }
 
   let data;
   try {
     data = await response.json();
   } catch {
-    throw new Error("Easter egg upload returned an invalid response.");
+    throw new Error("Attachment upload returned an invalid response.");
   }
 
-  if (
-    typeof data?.id !== "string" ||
-    !ATTACHMENT_ID_PATTERN.test(data.id)
-  ) {
-    throw new Error("Easter egg upload returned an invalid attachment ID.");
+  if (typeof data?.id !== "string" || !ATTACHMENT_ID_PATTERN.test(data.id)) {
+    throw new Error("Attachment upload returned an invalid attachment ID.");
   }
 
   return data.id;
