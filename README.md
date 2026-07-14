@@ -10,6 +10,7 @@ Automatically fetches and posts redemption codes for **Genshin Impact**, **Honka
 | **Multiple code sources** | [hoyo-codes.seria.moe](https://hoyo-codes.seria.moe) (GI/HSR/ZZZ), [api.ennead.cc](https://api.ennead.cc/mihoyo) (HI3), and [Game8](https://game8.co/games/Neverness-to-Everness/archives/593718) (NTE) |
 | **Rich embeds** | Game-coloured embeds with icons, reward details, and redemption links |
 | **Auto-fetch** | Hourly scan — posts only when **new** codes appear (no spam) |
+| **Audit log** | Stoat has no native audit log — `/Enable-AuditLog` relays server actions (deletes, edits, joins/leaves, bans, role/channel changes) to a channel of your choice |
 | **Custom emoji** | Optional: use your own Revolt emoji hub server for game-themed icons |
 | **Case-insensitive** | `/fetchgi`, `/FETCHGI`, `/FetchGI` all work |
 | **Zero external deps** | Only `revolt.js` + `node-fetch`; no database needed |
@@ -63,6 +64,8 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/DisableFetch` | Disable auto-fetch in the current channel (admins/mods only) |
 | `/EmojiMode [unicode\|custom]` | Show or switch reward-emoji rendering at runtime (owner/admin only) |
 | `/Restart` | Restart the bot after deploying updates (owner/admin only) |
+| `/Enable-AuditLog` | Post a live audit log of server actions to the current channel (admins/mods only) |
+| `/Disable-AuditLog` | Turn off audit logging for the server (admins/mods only) |
 | `/HelpHoyoFetch` | Show all commands |
 
 > **Note:** Revolt does not support Discord-style slash commands. These are message-based prefix commands using `/` as the prefix. They are fully case-insensitive.
@@ -74,6 +77,21 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 - A moderator can manage auto-fetch when they have **Kick Members**, **Ban Members**, **Timeout Members**, or **Manage Messages** in the current channel. Role names are not trusted; Stoat's effective permissions are used.
 - `/Restart` is restricted to the server owner and members with **Manage Server** permission.
 - Each member can trigger up to five recognised commands in 30 seconds. Concurrent requests for the same game's codes share one upstream fetch.
+
+### Audit log
+
+Stoat/Revolt has no built-in audit log, so `/Enable-AuditLog` turns the current channel into one: the bot relays message edits/deletes (with original content), bulk deletes, channel/role/server changes, member joins/leaves, bans, unbans, timeouts, nickname/role changes, and emoji changes.
+
+To always show what was deleted or edited — Stoat only reports the *id* of a deleted message — the bot records every message in audit-enabled servers to a local archive (`data/message_archive.jsonl`, kept **30 days**, capped at 100k messages). This survives restarts.
+
+The bot needs the **Ban Members** permission to detect bans (checked when a member leaves) and unbans (ban-list poll every ~5 minutes).
+
+**Platform limitations that cannot be worked around:**
+
+- The gateway never reports **who** deleted/edited a message or changed a channel/role — only the change itself is logged.
+- A kick is indistinguishable from a voluntary leave.
+- Messages sent before audit logging was enabled, or while the bot was offline, can't have their content recovered.
+- Invites, webhooks, permission-override details, and voice actions produce no usable gateway events.
 
 ## 🔌 API Sources
 
