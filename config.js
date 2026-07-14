@@ -5,6 +5,7 @@ import { readFileSync, existsSync } from "fs";
 // ── Load .env manually (no dotenv dependency) ──────
 const ALLOWED_ENV_KEYS = new Set([
   "BOT_TOKEN", "PREFIX", "FETCH_INTERVAL", "FETCH_COOLDOWN", "EMOJI_MODE", "HOYO_API_BASE",
+  "AUDITLOG_DEBUG",
 ]);
 
 function loadEnv() {

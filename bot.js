@@ -62,7 +62,7 @@ import {
   safeErrorSummary,
   SingleFlight,
 } from "./security.js";
-import { initAuditLog, startUnbanPolling } from "./auditlog.js";
+import { initAuditLog, startUnbanPolling, runAuditLogTest } from "./auditlog.js";
 
 // ── Validate token ─────────────────────────────────
 if (!CONFIG.token || CONFIG.token === "your_bot_token_here") {
@@ -216,6 +216,12 @@ client.on("messageCreate", async (message) => {
     // ── Disable-AuditLog ─────────────────────────
     if (body === "disable-auditlog" || body === "disableauditlog") {
       await handleDisableAuditLog(message);
+      return;
+    }
+
+    // ── Test-AuditLog ────────────────────────────
+    if (body === "test-auditlog" || body === "testauditlog") {
+      await handleTestAuditLog(message);
       return;
     }
 
@@ -453,6 +459,39 @@ async function handleDisableAuditLog(message) {
         "#E67E22"
       ),
     ],
+  });
+}
+
+async function handleTestAuditLog(message) {
+  const status = runAuditLogTest(message.server.id);
+
+  if (!status.enabled) {
+    await safeSend(message.channel, {
+      embeds: [
+        buildStatusEmbed(
+          "ℹ️ Audit Log Not Enabled",
+          `Audit logging is not active in this server. Run \`${CONFIG.prefix}Enable-AuditLog\` in the channel that should receive the log.`,
+          "#3498DB"
+        ),
+      ],
+    });
+    return;
+  }
+
+  const lines = [
+    `Test event queued — a 🧪 embed should appear in <#${status.channelId}> within a few seconds.`,
+    `**Messages currently archived:** ${status.archivedCount}`,
+  ];
+  if (status.consecutiveFailures > 0) {
+    lines.push(
+      `⚠️ **${status.consecutiveFailures} recent send failure(s)** — if the test embed does not appear, ` +
+      "check that I can send messages and embeds in the log channel."
+    );
+  }
+  lines.push("If no 🧪 embed appears, the send pipeline is broken — check my channel permissions and console logs.");
+
+  await safeSend(message.channel, {
+    embeds: [buildStatusEmbed("🧪 Audit Log Test Queued", lines.join("\n"), "#3498DB")],
   });
 }
 

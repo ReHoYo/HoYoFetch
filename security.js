@@ -19,6 +19,8 @@ const AUDIT_LOG_COMMANDS = new Set([
   "enableauditlog",
   "disable-auditlog",
   "disableauditlog",
+  "test-auditlog",
+  "testauditlog",
 ]);
 
 const PUBLIC_UTILITY_COMMANDS = new Set([

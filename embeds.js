@@ -133,6 +133,10 @@ export function buildHelpEmbed(prefix) {
       "Turn off audit logging for this server",
     ],
     [
+      `${prefix}Test-AuditLog`,
+      "Send a test event through the audit log to verify it is working",
+    ],
+    [
       `${prefix}HelpHoyoFetch`,
       "Show this help message",
     ],

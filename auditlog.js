@@ -20,11 +20,20 @@ import {
   getArchivedMessage,
   applyEdit,
   startArchiveMaintenance,
+  archiveSize,
 } from "./message-archive.js";
 
 const UNBAN_POLL_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_PENDING_SENDS = 50;
 const MAX_CONSECUTIVE_FAILURES = 5;
+const DEBUG = process.env.AUDITLOG_DEBUG === "1";
+
+// Set by initAuditLog so runAuditLogTest can reuse the real send pipeline.
+let sendRef = null;
+
+function debugLog(message) {
+  if (DEBUG) console.log(`[auditlog] ${message}`);
+}
 
 // ── Send queue (serialised so bursts don't hit the API concurrently) ──
 let chain = Promise.resolve();
@@ -69,8 +78,43 @@ function bumpFailure(serverId) {
 function emitAudit(send, serverId, embed) {
   if (!serverId) return;
   const channelId = getAuditLogChannel(serverId);
-  if (!channelId) return;
+  if (!channelId) {
+    debugLog(`emitAudit: audit log not enabled for server ${serverId}, dropping "${embed.title}"`);
+    return;
+  }
+  debugLog(`emitAudit: queueing "${embed.title}" → channel ${channelId}`);
   queueSend(serverId, channelId, send, embed);
+}
+
+/**
+ * Push a synthetic test event through the real emitAudit → queue → send
+ * pipeline so mods can verify end-to-end delivery from inside Stoat.
+ * @param  {string} serverId
+ * @return {{enabled: boolean, channelId: string|null, archivedCount: number,
+ *           consecutiveFailures: number, queuedTest: boolean}}
+ */
+export function runAuditLogTest(serverId) {
+  const channelId = getAuditLogChannel(serverId);
+  const status = {
+    enabled: Boolean(channelId),
+    channelId,
+    archivedCount: archiveSize(),
+    consecutiveFailures: failureCounts.get(serverId) ?? 0,
+    queuedTest: false,
+  };
+  if (!channelId || !sendRef) return status;
+
+  const embed = buildAuditEmbed(
+    "🧪 Audit Log Test",
+    [
+      "If you can read this, the audit pipeline is delivering events to this channel.",
+      `**Messages currently archived:** ${status.archivedCount}`,
+    ],
+    "#3498DB"
+  );
+  emitAudit(sendRef, serverId, embed);
+  status.queuedTest = true;
+  return status;
 }
 
 // ── Formatting helpers ─────────────────────────────
@@ -109,6 +153,7 @@ function formatUser(client, userId) {
 export function initAuditLog(client, { send }) {
   const isSelf = (userId) => userId === client.user?.id;
 
+  sendRef = send;
   startArchiveMaintenance();
 
   // ── Message archive recorder ────────────────────
@@ -151,18 +196,18 @@ export function initAuditLog(client, { send }) {
 
   function handleRawMessageDelete(client, send, event) {
     const serverId = client.channels.get(event.channel)?.serverId;
-    if (!serverId) return; // DM or unknown channel
+    if (!serverId) {
+      debugLog(`MessageDelete ${event.id}: skipped (no server for channel ${event.channel})`);
+      return; // DM or unknown channel
+    }
 
     const entry = getArchivedMessage(event.id);
-    if (entry && isSelf(entry.authorId)) return; // bot's own message
-
-    const inAuditChannel = event.channel === getAuditLogChannel(serverId);
-    if (!entry && inAuditChannel) {
-      // Unarchived deletes in the log channel are almost certainly the bot's
-      // own audit embeds being cleaned up — logging them would be noise.
+    if (entry && isSelf(entry.authorId)) {
+      debugLog(`MessageDelete ${event.id}: skipped (bot's own message)`);
       return;
     }
 
+    debugLog(`MessageDelete ${event.id}: logging (archived=${Boolean(entry)})`);
     const embed = buildAuditEmbed(
       "🗑️ Message Deleted",
       [
@@ -184,11 +229,18 @@ export function initAuditLog(client, { send }) {
     if (!serverId) return;
 
     const entry = getArchivedMessage(event.id);
-    if (entry && isSelf(entry.authorId)) return;
-    if (!entry && event.channel === getAuditLogChannel(serverId)) return;
+    if (entry && isSelf(entry.authorId)) {
+      debugLog(`MessageUpdate ${event.id}: skipped (bot's own message)`);
+      return;
+    }
 
     const before = entry?.content;
-    if (before === after) return; // no visible change
+    if (before === after) {
+      debugLog(`MessageUpdate ${event.id}: skipped (content unchanged)`);
+      return; // no visible change
+    }
+
+    debugLog(`MessageUpdate ${event.id}: logging (archived=${Boolean(entry)})`);
 
     const embed = buildAuditEmbed(
       "✏️ Message Edited",

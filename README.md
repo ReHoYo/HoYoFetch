@@ -66,6 +66,7 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/Restart` | Restart the bot after deploying updates (owner/admin only) |
 | `/Enable-AuditLog` | Post a live audit log of server actions to the current channel (admins/mods only) |
 | `/Disable-AuditLog` | Turn off audit logging for the server (admins/mods only) |
+| `/Test-AuditLog` | Send a test event through the audit pipeline to verify delivery (admins/mods only) |
 | `/HelpHoyoFetch` | Show all commands |
 
 > **Note:** Revolt does not support Discord-style slash commands. These are message-based prefix commands using `/` as the prefix. They are fully case-insensitive.
@@ -85,6 +86,8 @@ Stoat/Revolt has no built-in audit log, so `/Enable-AuditLog` turns the current 
 To always show what was deleted or edited — Stoat only reports the *id* of a deleted message — the bot records every message in audit-enabled servers to a local archive (`data/message_archive.jsonl`, kept **30 days**, capped at 100k messages). This survives restarts.
 
 The bot needs the **Ban Members** permission to detect bans (checked when a member leaves) and unbans (ban-list poll every ~5 minutes).
+
+**Troubleshooting:** run `/Test-AuditLog` — it pushes a 🧪 test event through the real delivery pipeline and reports how many messages are archived. For verbose per-event console logging, set `AUDITLOG_DEBUG=1` in `.env`. Deletes of messages sent before audit logging was enabled are logged with "content unknown" (Stoat only transmits the message id on delete).
 
 **Platform limitations that cannot be worked around:**
 
