@@ -14,6 +14,13 @@ const FETCH_MANAGEMENT_COMMANDS = new Set([
   "disablefetch",
 ]);
 
+const AUDIT_LOG_COMMANDS = new Set([
+  "enable-auditlog",
+  "enableauditlog",
+  "disable-auditlog",
+  "disableauditlog",
+]);
+
 const PUBLIC_UTILITY_COMMANDS = new Set([
   "helphoyofetch",
   "harhar",
@@ -31,7 +38,7 @@ const AUDIT_SALT = randomBytes(16);
 
 export function getCommandAccess(body, commandGameMap = {}) {
   if (Object.hasOwn(commandGameMap, body)) return COMMAND_ACCESS.MEMBER;
-  if (FETCH_MANAGEMENT_COMMANDS.has(body)) {
+  if (FETCH_MANAGEMENT_COMMANDS.has(body) || AUDIT_LOG_COMMANDS.has(body)) {
     return COMMAND_ACCESS.FETCH_MANAGER;
   }
   if (body === "emojimode" || body.startsWith("emojimode ")) {
