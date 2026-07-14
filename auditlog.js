@@ -13,7 +13,14 @@ import {
   getKnownBans,
   setKnownBans,
   disableAuditLog,
+  isAuditLogEnabled,
 } from "./store.js";
+import {
+  recordMessage,
+  getArchivedMessage,
+  applyEdit,
+  startArchiveMaintenance,
+} from "./message-archive.js";
 
 const UNBAN_POLL_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_PENDING_SENDS = 50;
@@ -78,6 +85,17 @@ function formatContent(content) {
   return truncate(content);
 }
 
+function formatArchivedContent(entry) {
+  const attachmentNote =
+    entry.attachments > 0
+      ? ` *(${entry.attachments} attachment${entry.attachments > 1 ? "s" : ""})*`
+      : "";
+  if (!entry.content) {
+    return attachmentNote ? attachmentNote.trim() : "*(no text)*";
+  }
+  return truncate(entry.content) + attachmentNote;
+}
+
 function formatUser(client, userId) {
   if (!userId) return "Unknown user";
   const user = client.users.get(userId);
@@ -91,73 +109,125 @@ function formatUser(client, userId) {
 export function initAuditLog(client, { send }) {
   const isSelf = (userId) => userId === client.user?.id;
 
-  // ── Messages ────────────────────────────────────
-  client.on("messageDelete", (msg) => {
-    if (isSelf(msg.authorId)) return;
-    const channel = client.channels.get(msg.channelId);
-    const serverId = channel?.serverId;
-    if (!serverId) return; // DM or uncached channel
-    if (msg.channelId === getAuditLogChannel(serverId)) return;
+  startArchiveMaintenance();
+
+  // ── Message archive recorder ────────────────────
+  // Record every message in audit-enabled servers so deletes/edits can always
+  // show the original content, even across restarts. The bot's own messages
+  // are archived too — otherwise deleting them (e.g. its own loading embeds)
+  // would be logged as "unknown message deleted".
+  client.on("messageCreate", (message) => {
+    const serverId = client.channels.get(message.channelId)?.serverId;
+    if (!serverId || !isAuditLogEnabled(serverId)) return;
+
+    recordMessage({
+      id: message.id,
+      channelId: message.channelId,
+      serverId,
+      authorId: message.authorId,
+      content: message.content ?? "",
+      attachments: message.attachments?.length ?? 0,
+    });
+  });
+
+  // ── Messages: raw gateway events ────────────────
+  // revolt.js drops MessageDelete/MessageUpdate for messages that are not in
+  // its in-memory cache (anything sent before this process started). The raw
+  // gateway stream always carries {id, channel}, so we listen at that layer
+  // and use the archive for author/content.
+  client.events.on("event", (event) => {
+    try {
+      if (event.type === "MessageDelete") {
+        handleRawMessageDelete(client, send, event);
+      } else if (event.type === "MessageUpdate") {
+        handleRawMessageUpdate(client, send, event);
+      } else if (event.type === "BulkMessageDelete") {
+        handleRawBulkDelete(client, send, event);
+      }
+    } catch (err) {
+      console.error("auditlog: raw event error:", err?.message || err);
+    }
+  });
+
+  function handleRawMessageDelete(client, send, event) {
+    const serverId = client.channels.get(event.channel)?.serverId;
+    if (!serverId) return; // DM or unknown channel
+
+    const entry = getArchivedMessage(event.id);
+    if (entry && isSelf(entry.authorId)) return; // bot's own message
+
+    const inAuditChannel = event.channel === getAuditLogChannel(serverId);
+    if (!entry && inAuditChannel) {
+      // Unarchived deletes in the log channel are almost certainly the bot's
+      // own audit embeds being cleaned up — logging them would be noise.
+      return;
+    }
 
     const embed = buildAuditEmbed(
       "🗑️ Message Deleted",
       [
-        `**Author:** ${formatUser(client, msg.authorId)}`,
-        `**Channel:** <#${msg.channelId}>`,
-        `**Content:** ${formatContent(msg.content)}`,
+        `**Author:** ${entry ? formatUser(client, entry.authorId) : "*unknown*"}`,
+        `**Channel:** <#${event.channel}>`,
+        `**Content:** ${entry ? formatArchivedContent(entry) : "*unknown — message predates the archive or was sent while I was offline*"}`,
         "_Deleter unknown — Stoat does not report who deleted a message._",
       ],
       "#E74C3C"
     );
     emitAudit(send, serverId, embed);
-  });
+  }
 
-  client.on("messageUpdate", (message, previousMessage) => {
-    if (isSelf(message.authorId)) return;
-    const channelId = message.channelId;
-    if (!channelId) return;
-    const channel = client.channels.get(channelId);
-    const serverId = channel?.serverId;
+  function handleRawMessageUpdate(client, send, event) {
+    const after = event.data?.content;
+    if (typeof after !== "string") return; // embed-only update (e.g. link unfurl)
+
+    const serverId = client.channels.get(event.channel)?.serverId;
     if (!serverId) return;
-    if (channelId === getAuditLogChannel(serverId)) return;
 
-    const before = previousMessage.content;
-    const after = message.content;
-    if (before === after) return; // e.g. link-embed unfurl (MessageAppend), not a real edit
+    const entry = getArchivedMessage(event.id);
+    if (entry && isSelf(entry.authorId)) return;
+    if (!entry && event.channel === getAuditLogChannel(serverId)) return;
+
+    const before = entry?.content;
+    if (before === after) return; // no visible change
 
     const embed = buildAuditEmbed(
       "✏️ Message Edited",
       [
-        `**Author:** ${formatUser(client, message.authorId)}`,
-        `**Channel:** <#${channelId}>`,
-        `**Before:** ${formatContent(before)}`,
+        `**Author:** ${entry ? formatUser(client, entry.authorId) : "*unknown*"}`,
+        `**Channel:** <#${event.channel}>`,
+        `**Before:** ${entry ? formatContent(before) : "*unknown — message predates the archive*"}`,
         `**After:** ${formatContent(after)}`,
       ],
       "#F1C40F"
     );
     emitAudit(send, serverId, embed);
-  });
 
-  client.on("messageDeleteBulk", (messages, channel) => {
-    const serverId = channel?.serverId;
+    // Keep the archive current so the next edit diffs against this one
+    applyEdit(event.id, after);
+  }
+
+  function handleRawBulkDelete(client, send, event) {
+    const serverId = client.channels.get(event.channel)?.serverId;
     if (!serverId) return;
-    if (channel.id === getAuditLogChannel(serverId)) return;
 
-    const relevant = messages.filter((m) => !isSelf(m.authorId));
+    const entries = (event.ids ?? []).map((id) => ({ id, entry: getArchivedMessage(id) }));
+    const relevant = entries.filter(({ entry }) => !entry || !isSelf(entry.authorId));
     if (!relevant.length) return;
 
-    const shown = relevant.slice(0, 10).map(
-      (m) => `${formatUser(client, m.authorId)}: ${truncate(m.content || "*(no content)*", 150)}`
+    const shown = relevant.slice(0, 10).map(({ entry }) =>
+      entry
+        ? `${formatUser(client, entry.authorId)}: ${truncate(entry.content || "*(no content)*", 150)}`
+        : "*unknown message (not archived)*"
     );
     if (relevant.length > 10) shown.push(`_…and ${relevant.length - 10} more_`);
 
     const embed = buildAuditEmbed(
       "🗑️ Bulk Message Delete",
-      [`**Channel:** <#${channel.id}>`, `**Count:** ${relevant.length}`, "", ...shown],
+      [`**Channel:** <#${event.channel}>`, `**Count:** ${relevant.length}`, "", ...shown],
       "#E74C3C"
     );
     emitAudit(send, serverId, embed);
-  });
+  }
 
   // ── Channels ────────────────────────────────────
   client.on("channelCreate", (channel) => {

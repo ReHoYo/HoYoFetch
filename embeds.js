@@ -195,8 +195,7 @@ export function buildAuditLogEnabledEmbed(prefix, { moved = false, previousChann
       "- Deletes/edits never say **who** performed them — only the change itself is shown.\n" +
       "- A kick and a voluntary leave look identical — logged as \"left or was kicked\".\n" +
       "- Bans are detected when a member leaves; unbans are detected by periodic polling (up to ~5 min delay).\n" +
-      "- Deleted/edited message content is only available if I was online to see it originally.\n" +
-      "- No history before this moment is logged.\n" +
+      "- Message content is recorded from this moment on and kept for **30 days**, so deletes/edits show the original text even after I restart. Messages sent before enablement or while I was offline can't be recovered.\n" +
       "- Invites, webhooks, permission overrides, and voice actions aren't reported by the platform at all.\n\n" +
       `Use \`${prefix}Disable-AuditLog\` to turn this off.`,
     colour: "#2ECC71",
