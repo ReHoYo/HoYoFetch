@@ -169,6 +169,44 @@ export function buildStatusEmbed(title, description, colour = "#2ECC71") {
   return { title, description, colour };
 }
 
+// Revolt's embed description cap; leave headroom for the notice itself.
+const MAX_DESCRIPTION_LENGTH = 2000;
+
+/**
+ * Build the tamper notice appended to a restored audit-log message.
+ * @param  {number} count — restoration number (1-indexed)
+ * @return {string}
+ */
+export function buildTamperNotice(count) {
+  return `🔒 **Restored** — audit log entries cannot be deleted. Restoration #${count}`;
+}
+
+/**
+ * Re-derive the restored version of a pristine audit-log embed. Always
+ * builds from the original embed (never from a previously-restored one) so
+ * notices never stack across repeated deletions.
+ *
+ * @param  {Object} originalEmbed — pristine embed, as originally sent
+ * @param  {number} count — restoration number (1-indexed)
+ * @return {Object} a new embed object; originalEmbed is never mutated
+ */
+export function buildRestoredEmbed(originalEmbed, count) {
+  const notice = buildTamperNotice(count);
+  const originalDescription = originalEmbed.description || "";
+
+  // Reserve room for the notice + separating blank line so it always survives.
+  const budget = MAX_DESCRIPTION_LENGTH - notice.length - 2;
+  const truncated =
+    originalDescription.length > budget
+      ? `${originalDescription.slice(0, Math.max(0, budget - 1))}…`
+      : originalDescription;
+
+  return {
+    ...originalEmbed,
+    description: `${truncated}\n\n${notice}`,
+  };
+}
+
 /**
  * Build an audit-log embed with a trailing timestamp line.
  * @param  {string}   title
