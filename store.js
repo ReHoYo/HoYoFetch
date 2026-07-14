@@ -14,6 +14,7 @@ if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 const CHANNELS_PATH = join(DATA_DIR, "channels.json");
 const KNOWN_CODES_PATH = join(DATA_DIR, "known_codes.json");
 const SOURCE_CACHE_PATH = join(DATA_DIR, "source_cache.json");
+const PROTECTED_PATH = join(DATA_DIR, "protected_messages.json");
 
 // ── Helpers ────────────────────────────────────────
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -213,4 +214,185 @@ export function getSourceCache(sourceKey) {
 export function setSourceCache(sourceKey, entry) {
   sourceCache[sourceKey] = entry;
   writeJSON(SOURCE_CACHE_PATH, sourceCache);
+}
+
+// ═══════════════════════════════════════════════════
+//  Tamper protection (audit-log messages)
+// ═══════════════════════════════════════════════════
+// Shape: { "<recordId>": {
+//   recordId, channelId, messageId, payload,
+//   restorations, createdAt, lastVerifiedAt,
+//   failures, nextAttemptAt, channelMissing
+// } }
+//
+// recordId is the ORIGINAL message id and never changes. messageId is the
+// CURRENT live id and is rewritten on every restoration — this is what lets
+// a deleted restoration itself be detected and restored again.
+
+let protectedMessages = readJSON(PROTECTED_PATH, {});
+
+// In-memory index: live messageId -> recordId, rebuilt on load for O(1)
+// lookup from delete events.
+let messageIdIndex = new Map(
+  Object.values(protectedMessages).map((r) => [r.messageId, r.recordId])
+);
+
+function persistProtectedMessages() {
+  writeJSON(PROTECTED_PATH, protectedMessages);
+}
+
+/**
+ * Begin tracking a newly-sent audit-log message so a future delete triggers
+ * a restoration.
+ *
+ * @param {string} channelId
+ * @param {string} messageId
+ * @param {{content?: string, embeds?: object[]}} payload — pristine payload, no tamper notice
+ * @return {Object} the created record
+ */
+export function addProtectedMessage(channelId, messageId, payload) {
+  const record = {
+    recordId: messageId,
+    channelId,
+    messageId,
+    payload,
+    restorations: 0,
+    createdAt: Date.now(),
+    lastVerifiedAt: Date.now(),
+    failures: 0,
+    nextAttemptAt: 0,
+    channelMissing: false,
+  };
+  protectedMessages[record.recordId] = record;
+  messageIdIndex.set(messageId, record.recordId);
+  persistProtectedMessages();
+  return record;
+}
+
+/**
+ * Look up a protected-message record by its CURRENT live message id.
+ * @param  {string} messageId
+ * @return {Object|undefined}
+ */
+export function getProtectedMessageByMessageId(messageId) {
+  const recordId = messageIdIndex.get(messageId);
+  return recordId ? protectedMessages[recordId] : undefined;
+}
+
+/**
+ * Shallow-merge a patch into a protected-message record and persist.
+ * Keeps the messageId index in sync when messageId changes (i.e. on a
+ * successful restoration).
+ *
+ * @param  {string} recordId
+ * @param  {Object} patch
+ * @return {Object|undefined} the updated record
+ */
+export function updateProtectedMessage(recordId, patch) {
+  const record = protectedMessages[recordId];
+  if (!record) return undefined;
+
+  if (patch.messageId && patch.messageId !== record.messageId) {
+    messageIdIndex.delete(record.messageId);
+    messageIdIndex.set(patch.messageId, recordId);
+  }
+
+  Object.assign(record, patch);
+  persistProtectedMessages();
+  return record;
+}
+
+/**
+ * Stop tracking a record entirely (only for bot-initiated deletes of
+ * protected content — never used for user tamper attempts).
+ * @param {string} recordId
+ */
+export function removeProtectedMessage(recordId) {
+  const record = protectedMessages[recordId];
+  if (!record) return;
+  messageIdIndex.delete(record.messageId);
+  delete protectedMessages[recordId];
+  persistProtectedMessages();
+}
+
+/**
+ * @return {Object[]} every tracked record
+ */
+export function getAllProtectedMessages() {
+  return Object.values(protectedMessages);
+}
+
+/**
+ * Mark every record in a channel as un-repostable because the channel
+ * itself is gone. Records are kept — they remain the audit content — but
+ * the sweep stops burning API budget trying to repost into a dead channel.
+ * @param {string} channelId
+ */
+export function markChannelMissing(channelId) {
+  let changed = false;
+  for (const record of Object.values(protectedMessages)) {
+    if (record.channelId === channelId && !record.channelMissing) {
+      record.channelMissing = true;
+      changed = true;
+    }
+  }
+  if (changed) persistProtectedMessages();
+}
+
+// ── Pure helpers (unit-testable, no I/O) ────────────
+
+const BASE_BACKOFF_MS = 2_000;
+const MAX_BACKOFF_MS = 15 * 60 * 1000;
+
+/**
+ * Exponential backoff with jitter, capped, for retrying a failed repost.
+ * @param  {number} failures — consecutive failure count (>= 1)
+ * @return {number} delay in ms before the next attempt
+ */
+export function computeBackoffMs(failures) {
+  const exp = Math.min(BASE_BACKOFF_MS * 2 ** Math.max(0, failures - 1), MAX_BACKOFF_MS);
+  const jitter = 0.8 + Math.random() * 0.4; // 0.8x .. 1.2x
+  return Math.round(Math.min(exp * jitter, MAX_BACKOFF_MS));
+}
+
+/**
+ * Age-tiered re-verification cadence: freshly-created records are checked
+ * every sweep, older ones progressively less often. Keeps sweep cost O(1)
+ * regardless of how many records have accumulated.
+ *
+ * @param  {Object} record
+ * @param  {number} now
+ * @return {boolean}
+ */
+export function shouldVerify(record, now) {
+  if (record.channelMissing) return false;
+  if (record.nextAttemptAt && now < record.nextAttemptAt) return false;
+
+  const age = now - record.createdAt;
+  const sinceVerified = now - record.lastVerifiedAt;
+
+  let cadenceMs;
+  if (age < 24 * 60 * 60 * 1000) cadenceMs = 0; // < 1 day old: every sweep
+  else if (age < 7 * 24 * 60 * 60 * 1000) cadenceMs = 60 * 60 * 1000; // < 1 week: hourly
+  else if (age < 30 * 24 * 60 * 60 * 1000) cadenceMs = 6 * 60 * 60 * 1000; // < 1 month: every 6h
+  else cadenceMs = 24 * 60 * 60 * 1000; // older: daily
+
+  return sinceVerified >= cadenceMs;
+}
+
+/**
+ * Pick which due records to verify this sweep, bounded by a budget so sweep
+ * cost stays O(1) regardless of total record count. Least-recently-verified
+ * first.
+ *
+ * @param  {Object[]} records
+ * @param  {number}   now
+ * @param  {number}   budget — max records to return
+ * @return {Object[]}
+ */
+export function selectDueRecords(records, now, budget) {
+  return records
+    .filter((r) => shouldVerify(r, now))
+    .sort((a, b) => a.lastVerifiedAt - b.lastVerifiedAt)
+    .slice(0, budget);
 }
