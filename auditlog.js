@@ -278,7 +278,7 @@ async function resolveAttachmentEvidence(client, entry) {
         fetchImpl: fetchImplRef,
       });
       ids.push(newId);
-      lines.push(`✅ \`${att.filename}\` (${sizeLabel}) — preserved, attached below`);
+      lines.push(`✅ \`${att.filename}\` (${sizeLabel}) — preserved, attached above`);
     } catch (err) {
       debugLog(`evidence re-upload failed for ${att.id}: ${err?.message || err}`);
       lines.push(`⚠️ \`${att.filename}\` (${sizeLabel}) — preserved locally but re-upload failed`);
