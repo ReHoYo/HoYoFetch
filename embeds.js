@@ -125,6 +125,14 @@ export function buildHelpEmbed(prefix) {
       "Restart the bot process after deploying updates _(owner/admin only)_",
     ],
     [
+      `${prefix}Enable-AuditLog`,
+      "**Mods only.** Post a live log of server actions (deletes, edits, joins/leaves, bans, channel/role changes) to this channel",
+    ],
+    [
+      `${prefix}Disable-AuditLog`,
+      "Turn off audit logging for this server",
+    ],
+    [
       `${prefix}HelpHoyoFetch`,
       "Show this help message",
     ],
@@ -154,6 +162,45 @@ export function buildHelpEmbed(prefix) {
  */
 export function buildStatusEmbed(title, description, colour = "#2ECC71") {
   return { title, description, colour };
+}
+
+/**
+ * Build an audit-log embed with a trailing timestamp line.
+ * @param  {string}   title
+ * @param  {string[]} lines   — body lines, joined with newlines
+ * @param  {string}   colour
+ * @return {Object}   SendableEmbed
+ */
+export function buildAuditEmbed(title, lines, colour) {
+  const description = [...lines, "", `_${new Date().toUTCString()}_`].join("\n");
+  return { title, description, colour };
+}
+
+/**
+ * Build the confirmation embed shown when audit logging is enabled,
+ * including the platform limitations that can't be worked around.
+ */
+export function buildAuditLogEnabledEmbed(prefix, { moved = false, previousChannelId = null } = {}) {
+  const intro = moved
+    ? `Audit logging has been **moved** here from <#${previousChannelId}>.`
+    : "Audit logging is now **active** in this channel.";
+
+  return {
+    title: "✅ Audit Log Enabled",
+    description:
+      `${intro}\n\n` +
+      "I will post a record of server actions here: message edits/deletes, channel/role/server changes, " +
+      "member joins/leaves, bans, timeouts, nickname and role changes, and emoji changes.\n\n" +
+      "**⚠️ Platform limitations (Stoat has no native audit log, so these can't be worked around):**\n" +
+      "- Deletes/edits never say **who** performed them — only the change itself is shown.\n" +
+      "- A kick and a voluntary leave look identical — logged as \"left or was kicked\".\n" +
+      "- Bans are detected when a member leaves; unbans are detected by periodic polling (up to ~5 min delay).\n" +
+      "- Deleted/edited message content is only available if I was online to see it originally.\n" +
+      "- No history before this moment is logged.\n" +
+      "- Invites, webhooks, permission overrides, and voice actions aren't reported by the platform at all.\n\n" +
+      `Use \`${prefix}Disable-AuditLog\` to turn this off.`,
+    colour: "#2ECC71",
+  };
 }
 
 // ── Helpers ────────────────────────────────────────

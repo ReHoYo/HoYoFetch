@@ -15,6 +15,7 @@ if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 const CHANNELS_PATH = join(DATA_DIR, "channels.json");
 const KNOWN_CODES_PATH = join(DATA_DIR, "known_codes.json");
 const SOURCE_CACHE_PATH = join(DATA_DIR, "source_cache.json");
+const AUDITLOG_PATH = join(DATA_DIR, "auditlog.json");
 
 // ── Helpers ────────────────────────────────────────
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -226,4 +227,101 @@ export function getSourceCache(sourceKey) {
 export function setSourceCache(sourceKey, entry) {
   sourceCache[sourceKey] = entry;
   writeJSON(SOURCE_CACHE_PATH, sourceCache);
+}
+
+// ═══════════════════════════════════════════════════
+//  Audit log (server → channel mapping)
+// ═══════════════════════════════════════════════════
+// Shape: { "<serverId>": { enabled, channelId, enabledAt, knownBans: string[] } }
+// Stoat/Revolt has no native audit log — this workaround relays moderation
+// events to a channel chosen by an admin/mod via /enable-auditlog.
+
+let auditLogs = readJSON(AUDITLOG_PATH, {});
+
+/**
+ * Enable audit logging for a server, directing it to a channel.
+ * @param  {string} serverId
+ * @param  {string} channelId
+ * @return {{wasEnabled: boolean, previousChannelId: string|null, changed: boolean}}
+ */
+export function enableAuditLog(serverId, channelId) {
+  const existing = auditLogs[serverId];
+  const wasEnabled = existing?.enabled === true;
+  const previousChannelId = wasEnabled ? existing.channelId : null;
+
+  auditLogs[serverId] = {
+    enabled: true,
+    channelId,
+    enabledAt: new Date().toISOString(),
+    knownBans: existing?.knownBans ?? [],
+  };
+  writeJSON(AUDITLOG_PATH, auditLogs);
+
+  return {
+    wasEnabled,
+    previousChannelId,
+    changed: !wasEnabled || previousChannelId !== channelId,
+  };
+}
+
+/**
+ * Disable audit logging for a server.
+ * @param {string} serverId
+ */
+export function disableAuditLog(serverId) {
+  if (auditLogs[serverId]) {
+    auditLogs[serverId].enabled = false;
+  }
+  writeJSON(AUDITLOG_PATH, auditLogs);
+}
+
+/**
+ * Whether audit logging is enabled for a server.
+ * @param  {string} serverId
+ * @return {boolean}
+ */
+export function isAuditLogEnabled(serverId) {
+  return auditLogs[serverId]?.enabled === true;
+}
+
+/**
+ * Get the channel audit events should be posted to for a server.
+ * @param  {string} serverId
+ * @return {string|null}
+ */
+export function getAuditLogChannel(serverId) {
+  const entry = auditLogs[serverId];
+  return entry?.enabled ? entry.channelId : null;
+}
+
+/**
+ * List all servers with audit logging currently enabled.
+ * @return {{serverId: string, channelId: string}[]}
+ */
+export function getAuditLogServers() {
+  return Object.entries(auditLogs)
+    .filter(([, v]) => v.enabled)
+    .map(([serverId, v]) => ({ serverId, channelId: v.channelId }));
+}
+
+/**
+ * Get the last-known set of banned user IDs for a server (for unban diffing).
+ * @param  {string} serverId
+ * @return {string[]}
+ */
+export function getKnownBans(serverId) {
+  return Array.isArray(auditLogs[serverId]?.knownBans)
+    ? auditLogs[serverId].knownBans
+    : [];
+}
+
+/**
+ * Persist a fresh snapshot of banned user IDs for a server.
+ * @param {string}   serverId
+ * @param {string[]} userIds
+ */
+export function setKnownBans(serverId, userIds) {
+  if (!auditLogs[serverId]) return;
+  auditLogs[serverId].knownBans = userIds;
+  writeJSON(AUDITLOG_PATH, auditLogs);
 }

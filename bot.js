@@ -38,6 +38,7 @@ import {
   buildNoCodesEmbed,
   buildHelpEmbed,
   buildStatusEmbed,
+  buildAuditLogEnabledEmbed,
 } from "./embeds.js";
 import {
   enableChannel,
@@ -47,6 +48,9 @@ import {
   detectNewCodes,
   seedKnownCodes,
   hasSeenGame,
+  enableAuditLog,
+  disableAuditLog,
+  isAuditLogEnabled,
 } from "./store.js";
 import {
   auditAlias,
@@ -58,6 +62,7 @@ import {
   safeErrorSummary,
   SingleFlight,
 } from "./security.js";
+import { initAuditLog, startUnbanPolling } from "./auditlog.js";
 
 // ── Validate token ─────────────────────────────────
 if (!CONFIG.token || CONFIG.token === "your_bot_token_here") {
@@ -72,6 +77,11 @@ const client = new Client();
 let restartInProgress = false;
 const commandRateLimiter = new CommandRateLimiter();
 const codeFetchSingleFlight = new SingleFlight();
+
+// ── Audit log ───────────────────────────────────────
+initAuditLog(client, {
+  send: (channelId, data) => safeSend({ id: channelId }, data),
+});
 
 // ── Error handler ──────────────────────────────────
 client.on("error", (err) => {
@@ -104,6 +114,11 @@ client.on("ready", async () => {
 
   // Start the auto-fetch loop
   scheduleAutoFetch();
+
+  // Start polling for unbans (no gateway event exists for these)
+  startUnbanPolling(client, {
+    send: (channelId, data) => safeSend({ id: channelId }, data),
+  });
 });
 
 // ── Message handler (command router) ───────────────
@@ -189,6 +204,18 @@ client.on("messageCreate", async (message) => {
     // ── Restart ──────────────────────────────────
     if (body === "restart") {
       await handleRestart(message);
+      return;
+    }
+
+    // ── Enable-AuditLog ──────────────────────────
+    if (body === "enable-auditlog" || body === "enableauditlog") {
+      await handleEnableAuditLog(message);
+      return;
+    }
+
+    // ── Disable-AuditLog ─────────────────────────
+    if (body === "disable-auditlog" || body === "disableauditlog") {
+      await handleDisableAuditLog(message);
       return;
     }
 
@@ -369,6 +396,60 @@ async function handleDisableFetch(message) {
       buildStatusEmbed(
         "🔕 Auto-Fetch Disabled",
         "This channel will no longer receive automatic code updates.",
+        "#E67E22"
+      ),
+    ],
+  });
+}
+
+async function handleEnableAuditLog(message) {
+  const result = enableAuditLog(message.server.id, message.channelId);
+
+  if (result.wasEnabled && !result.changed) {
+    await safeSend(message.channel, {
+      embeds: [
+        buildStatusEmbed(
+          "ℹ️ Already Enabled",
+          "Audit logging is already active in this channel.",
+          "#3498DB"
+        ),
+      ],
+    });
+    return;
+  }
+
+  await safeSend(message.channel, {
+    embeds: [
+      buildAuditLogEnabledEmbed(CONFIG.prefix, {
+        moved: result.wasEnabled,
+        previousChannelId: result.previousChannelId,
+      }),
+    ],
+  });
+}
+
+async function handleDisableAuditLog(message) {
+  const serverId = message.server.id;
+
+  if (!isAuditLogEnabled(serverId)) {
+    await safeSend(message.channel, {
+      embeds: [
+        buildStatusEmbed(
+          "ℹ️ Already Disabled",
+          "Audit logging is not active in this server.",
+          "#3498DB"
+        ),
+      ],
+    });
+    return;
+  }
+
+  disableAuditLog(serverId);
+  await safeSend(message.channel, {
+    embeds: [
+      buildStatusEmbed(
+        "🔕 Audit Log Disabled",
+        "This server will no longer receive audit log messages.",
         "#E67E22"
       ),
     ],
