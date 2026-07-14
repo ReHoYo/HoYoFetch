@@ -38,8 +38,6 @@ import {
   buildNoCodesEmbed,
   buildHelpEmbed,
   buildStatusEmbed,
-  buildRestoredEmbed,
-  buildTamperNotice,
   buildAuditLogEnabledEmbed,
 } from "./embeds.js";
 import {
@@ -50,14 +48,6 @@ import {
   detectNewCodes,
   seedKnownCodes,
   hasSeenGame,
-  addProtectedMessage,
-  getProtectedMessageByMessageId,
-  updateProtectedMessage,
-  removeProtectedMessage,
-  getAllProtectedMessages,
-  markChannelMissing,
-  computeBackoffMs,
-  selectDueRecords,
   enableAuditLog,
   disableAuditLog,
   isAuditLogEnabled,
@@ -73,6 +63,7 @@ import {
   SingleFlight,
 } from "./security.js";
 import { initAuditLog, startUnbanPolling, runAuditLogTest } from "./auditlog.js";
+import { createTamperProtection } from "./tamper-protection.js";
 
 // ── Validate token ─────────────────────────────────
 if (!CONFIG.token || CONFIG.token === "your_bot_token_here") {
@@ -87,10 +78,14 @@ const client = new Client();
 let restartInProgress = false;
 const commandRateLimiter = new CommandRateLimiter();
 const codeFetchSingleFlight = new SingleFlight();
+const tamperProtection = createTamperProtection(client, {
+  send: (channelId, data) => safeSend({ id: channelId }, data),
+  request: apiRequest,
+});
 
 // ── Audit log ───────────────────────────────────────
 initAuditLog(client, {
-  send: (channelId, data) => safeSend({ id: channelId }, data),
+  sendProtected: tamperProtection.sendProtected,
 });
 
 // ── Error handler ──────────────────────────────────
@@ -126,16 +121,11 @@ client.on("ready", async () => {
   scheduleAutoFetch();
 
   // Tamper protection: reconcile immediately, then on a fixed interval.
-  await sweepProtectedMessages();
-  setInterval(() => {
-    sweepProtectedMessages().catch((err) =>
-      console.error("Tamper-protection sweep error:", err)
-    );
-  }, SWEEP_INTERVAL_MS);
+  await tamperProtection.start();
 
   // Start polling for unbans (no gateway event exists for these)
   startUnbanPolling(client, {
-    send: (channelId, data) => safeSend({ id: channelId }, data),
+    sendProtected: tamperProtection.sendProtected,
   });
 });
 
@@ -360,7 +350,7 @@ async function handleFetchCommand(message, gameKey) {
       isAuto: false,
       page: totalBatches > 1 ? `${page}/${totalBatches}` : null,
     });
-    await sendProtected(message.channel, { embeds: [embed] });
+    await tamperProtection.sendProtected(message.channel, { embeds: [embed] });
   }
 
   // Delete the loading message now that all code embeds are posted
@@ -373,7 +363,7 @@ async function handleEnableFetch(message, scope = "all") {
   const scopeLabel = getScopeLabel(result.currentScope);
 
   if (result.wasEnabled && !result.changed) {
-    await sendProtected(message.channel, {
+    await tamperProtection.sendProtected(message.channel, {
       embeds: [
         buildStatusEmbed(
           "ℹ️ Already Enabled",
@@ -386,7 +376,7 @@ async function handleEnableFetch(message, scope = "all") {
   }
 
   const title = result.wasEnabled ? "✅ Auto-Fetch Updated" : "✅ Auto-Fetch Enabled";
-  await sendProtected(message.channel, {
+  await tamperProtection.sendProtected(message.channel, {
     embeds: [
       buildStatusEmbed(
         title,
@@ -402,7 +392,7 @@ async function handleDisableFetch(message) {
   const channelId = message.channelId;
 
   if (!isChannelEnabled(channelId)) {
-    await sendProtected(message.channel, {
+    await tamperProtection.sendProtected(message.channel, {
       embeds: [
         buildStatusEmbed(
           "ℹ️ Already Disabled",
@@ -415,7 +405,7 @@ async function handleDisableFetch(message) {
   }
 
   disableChannel(channelId);
-  await sendProtected(message.channel, {
+  await tamperProtection.sendProtected(message.channel, {
     embeds: [
       buildStatusEmbed(
         "🔕 Auto-Fetch Disabled",
@@ -660,7 +650,7 @@ async function runAutoFetch() {
               page: totalBatches > 1 ? `${page}/${totalBatches}` : null,
             });
             if (!isSafeId(chId)) continue;
-            await sendProtected(channel, { embeds: [embed] });
+            await tamperProtection.sendProtected(channel, { embeds: [embed] });
           }
         } catch (err) {
           console.error(
@@ -824,33 +814,27 @@ async function safeSend(channel, data) {
   }
 }
 
-// Message ids currently being deleted by the bot itself. Checked by the
-// messageDelete listener so a bot-initiated delete of a protected message
-// (should one ever occur) can never trigger a repost loop against itself.
-const selfDeleting = new Set();
-
 async function safeDelete(channelId, messageId) {
   try {
     if (!isSafeId(channelId) || !isSafeId(messageId)) {
       console.warn("safeDelete: ID contains invalid characters");
       return;
     }
-    untrackIfProtected(messageId);
-    selfDeleting.add(messageId);
-    const url = `${client.api.baseURL}/channels/${channelId}/messages/${messageId}`;
-    const res = await fetch(url, {
-      method: "DELETE",
-      headers: client.api.config.headers,
+    await tamperProtection.runIntentionalDelete(messageId, async () => {
+      const url = `${client.api.baseURL}/channels/${channelId}/messages/${messageId}`;
+      const res = await fetch(url, {
+        method: "DELETE",
+        headers: client.api.config.headers,
+      });
+      if (!res.ok) {
+        console.warn(`safeDelete: HTTP ${res.status} ${res.statusText}`);
+      }
+      return res.ok;
     });
-    if (!res.ok) {
-      console.warn(`safeDelete: HTTP ${res.status} ${res.statusText}`);
-    }
   } catch (err) {
     console.warn(
       `safeDelete error channel=${auditAlias(channelId)}: ${safeErrorSummary(err)}`
     );
-  } finally {
-    selfDeleting.delete(messageId);
   }
 }
 
@@ -879,196 +863,6 @@ async function apiRequest(method, path, body) {
     return { ok: res.ok, status: res.status, data };
   } catch (err) {
     return { ok: false, status: 0, data: undefined, err };
-  }
-}
-
-function untrackIfProtected(messageId) {
-  const record = getProtectedMessageByMessageId(messageId);
-  if (record) removeProtectedMessage(record.recordId);
-}
-
-// ═══════════════════════════════════════════════════
-//  Tamper protection — audit-log messages always come back
-// ═══════════════════════════════════════════════════
-//
-// Two mechanisms, because neither alone covers the other's blind spot:
-//  - Fast path: messageDelete/messageDeleteBulk listeners. Only fires for
-//    messages revolt.js still has cached, i.e. sent since this process
-//    started — the cache is empty on every boot and never backfills.
-//  - Slow path (primary): a persistent record + periodic sweep that
-//    re-verifies tracked messages over HTTP. Catches offline deletes,
-//    pre-restart deletes, and uncached bulk deletes.
-// There is no toggle for this. It is always on.
-
-/**
- * Send an audit-log message and begin tracking it for tamper protection.
- * Any future deletion — detected by event or by the reconciliation sweep —
- * causes it to be reposted, indefinitely.
- */
-async function sendProtected(channel, payload) {
-  const trackedPayload = structuredClone(payload);
-  const result = await safeSend(channel, payload);
-  if (result?._id && channel?.id) {
-    addProtectedMessage(channel.id, result._id, trackedPayload);
-  }
-  return result;
-}
-
-// Repost queue — serialized, because client.api has no rate-limit handling
-// of any kind. Never run reposts in parallel.
-const repostQueue = [];
-const queuedRecordIds = new Set();
-let repostQueueRunning = false;
-
-// Per-record floor between consecutive restorations, so a mod deleting
-// restorations in a tight loop can't burn the entire rate-limit budget.
-// The protection itself is still infinite — just not at full throttle.
-const RESTORE_FLOOR_MS = 1_500;
-const lastRestoredAt = new Map();
-
-function queueRepost(recordId) {
-  if (queuedRecordIds.has(recordId)) return;
-  queuedRecordIds.add(recordId);
-  repostQueue.push(recordId);
-  if (!repostQueueRunning) runRepostQueue();
-}
-
-async function runRepostQueue() {
-  repostQueueRunning = true;
-  try {
-    while (repostQueue.length > 0) {
-      const recordId = repostQueue.shift();
-      queuedRecordIds.delete(recordId);
-      await repostRecord(recordId);
-    }
-  } finally {
-    repostQueueRunning = false;
-  }
-}
-
-async function repostRecord(recordId) {
-  const record = getAllProtectedMessages().find((r) => r.recordId === recordId);
-  if (!record || record.channelMissing) return;
-
-  if (!isSafeId(record.channelId)) return;
-
-  const now = Date.now();
-  if (record.nextAttemptAt && now < record.nextAttemptAt) {
-    // Still on backoff — defer the requeue rather than spinning the queue.
-    setTimeout(() => queueRepost(recordId), record.nextAttemptAt - now).unref();
-    return;
-  }
-
-  const floorRemaining = RESTORE_FLOOR_MS - (now - (lastRestoredAt.get(recordId) || 0));
-  if (floorRemaining > 0) {
-    await new Promise((r) => setTimeout(r, floorRemaining));
-  }
-
-  const restorationCount = record.restorations + 1;
-  const payload = { ...record.payload };
-  if (payload.embeds?.length) {
-    // Always derive from the pristine original embed so notices never
-    // stack across repeated restorations.
-    payload.embeds = [
-      buildRestoredEmbed(record.payload.embeds[0], restorationCount),
-      ...record.payload.embeds.slice(1),
-    ];
-  } else if (payload.content) {
-    payload.content = `${record.payload.content}\n\n${buildTamperNotice(restorationCount)}`;
-  }
-
-  const res = await apiRequest("POST", `/channels/${record.channelId}/messages`, payload);
-
-  if (res.ok && res.data?._id) {
-    lastRestoredAt.set(recordId, Date.now());
-    updateProtectedMessage(recordId, {
-      messageId: res.data._id,
-      restorations: restorationCount,
-      lastVerifiedAt: Date.now(),
-      failures: 0,
-      nextAttemptAt: 0,
-    });
-    console.log(`🔒  Restored protected message ${recordId} (restoration #${restorationCount})`);
-    return;
-  }
-
-  if (res.status === 404) {
-    // The channel itself is gone — reposting is impossible. Keep the
-    // record (it's still the audit content) but stop burning API budget.
-    markChannelMissing(record.channelId);
-    console.warn(`🔒  Channel ${record.channelId} is gone; ${recordId} kept but un-repostable`);
-    return;
-  }
-
-  const failures = record.failures + 1;
-  updateProtectedMessage(recordId, {
-    failures,
-    nextAttemptAt: Date.now() + computeBackoffMs(failures),
-  });
-  console.warn(
-    `🔒  Repost of ${recordId} failed (status ${res.status}); retrying with backoff`
-  );
-}
-
-client.on("messageDelete", (message) => {
-  if (!message?.id || selfDeleting.has(message.id)) return;
-  const record = getProtectedMessageByMessageId(message.id);
-  if (record) queueRepost(record.recordId);
-});
-
-client.on("messageDeleteBulk", (messages) => {
-  for (const message of messages) {
-    if (!message?.id || selfDeleting.has(message.id)) continue;
-    const record = getProtectedMessageByMessageId(message.id);
-    if (record) queueRepost(record.recordId);
-  }
-});
-
-client.on("channelDelete", (channel) => {
-  if (channel?.id) markChannelMissing(channel.id);
-});
-
-const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
-const SWEEP_BUDGET = 40;
-
-/**
- * Reconciliation sweep — the primary tamper-detection mechanism. Verifies
- * a bounded batch of tracked messages over HTTP (least-recently-verified
- * first) so cost stays O(1) per sweep no matter how many records have
- * accumulated. Catches every delete the event listeners can't see: offline
- * deletes, pre-restart deletes, and uncached bulk deletes.
- */
-async function sweepProtectedMessages() {
-  const due = selectDueRecords(getAllProtectedMessages(), Date.now(), SWEEP_BUDGET);
-
-  for (const record of due) {
-    if (!isSafeId(record.channelId) || !isSafeId(record.messageId)) continue;
-
-    const res = await apiRequest(
-      "GET",
-      `/channels/${record.channelId}/messages/${record.messageId}`
-    );
-
-    if (res.ok && res.data?._id) {
-      updateProtectedMessage(record.recordId, { lastVerifiedAt: Date.now() });
-      // Warm revolt.js's cache so the fast-path listener re-arms for this
-      // old message even though this process never sent it itself.
-      try {
-        client.messages.getOrCreate(res.data._id, res.data, false);
-      } catch {
-        // best-effort cache warm; the sweep remains the source of truth
-      }
-      continue;
-    }
-
-    if (res.status === 404) {
-      queueRepost(record.recordId);
-      continue;
-    }
-
-    // Any other failure (network error, 5xx, rate limit) — leave the
-    // record's lastVerifiedAt untouched so it stays due for a retry on the
-    // next sweep, without treating it as a confirmed deletion.
   }
 }
 

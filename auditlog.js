@@ -292,7 +292,11 @@ async function resolveAttachmentEvidence(client, entry) {
 //  Event wiring
 // ═══════════════════════════════════════════════════
 
-export function initAuditLog(client, { send, fetchImpl }) {
+export function initAuditLog(client, { sendProtected, fetchImpl }) {
+  if (typeof sendProtected !== "function") {
+    throw new TypeError("Audit logging requires a protected sender.");
+  }
+  const send = sendProtected;
   const isSelf = (userId) => userId === client.user?.id;
 
   sendRef = send;
@@ -661,8 +665,14 @@ export function initAuditLog(client, { send, fetchImpl }) {
 //  unbans have none at all, so we diff the ban list periodically)
 // ═══════════════════════════════════════════════════
 
-export function startUnbanPolling(client, { send }) {
-  setInterval(() => pollUnbans(client, send), UNBAN_POLL_INTERVAL_MS);
+export function startUnbanPolling(client, { sendProtected }) {
+  if (typeof sendProtected !== "function") {
+    throw new TypeError("Audit-log polling requires a protected sender.");
+  }
+  setInterval(
+    () => pollUnbans(client, sendProtected),
+    UNBAN_POLL_INTERVAL_MS
+  );
 }
 
 async function pollUnbans(client, send) {

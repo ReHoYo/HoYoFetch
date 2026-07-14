@@ -1,17 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computeBackoffMs, shouldVerify, selectDueRecords } from "../store.js";
-import { buildTamperNotice, buildRestoredEmbed } from "../embeds.js";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+// Load every application module only after assigning a hermetic data dir.
+process.env.HOYOFETCH_DATA_DIR = mkdtempSync(
+  join(tmpdir(), "hoyofetch-tamper-")
+);
+process.env.AUDITLOG_EVIDENCE_BUDGET_MB = "0";
+
+const storeModule = await import("../store.js");
+const { buildTamperNotice, buildRestoredEmbed } = await import("../embeds.js");
+const { createTamperProtection } = await import("../tamper-protection.js");
+const { initAuditLog, runAuditLogTest } = await import("../auditlog.js");
 
 const NOW = 1_800_000_000_000;
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
+const silentLogger = { log() {}, warn() {}, error() {} };
 
 function makeRecord(overrides = {}) {
   return {
-    recordId: "rec1",
-    channelId: "chan1",
-    messageId: "msg1",
+    recordId: "REC1",
+    channelId: "CHANNEL1",
+    messageId: "MESSAGE1",
     payload: { embeds: [{ title: "t", description: "d" }] },
     restorations: 0,
     createdAt: NOW,
@@ -23,78 +36,487 @@ function makeRecord(overrides = {}) {
   };
 }
 
+function makeMemoryStore({ clock = () => NOW, backoffMs = 10 } = {}) {
+  const records = new Map();
+  const messageIndex = new Map();
+
+  return {
+    addProtectedMessage(channelId, messageId, payload) {
+      const record = makeRecord({
+        recordId: messageId,
+        channelId,
+        messageId,
+        payload: structuredClone(payload),
+        createdAt: clock(),
+        lastVerifiedAt: clock(),
+      });
+      records.set(record.recordId, record);
+      messageIndex.set(messageId, record.recordId);
+      return record;
+    },
+    getProtectedMessageByMessageId(messageId) {
+      return records.get(messageIndex.get(messageId));
+    },
+    updateProtectedMessage(recordId, patch) {
+      const record = records.get(recordId);
+      if (!record) return undefined;
+      if (patch.messageId && patch.messageId !== record.messageId) {
+        messageIndex.delete(record.messageId);
+        messageIndex.set(patch.messageId, recordId);
+      }
+      Object.assign(record, patch);
+      return record;
+    },
+    removeProtectedMessage(recordId) {
+      const record = records.get(recordId);
+      if (!record) return;
+      messageIndex.delete(record.messageId);
+      records.delete(recordId);
+    },
+    getAllProtectedMessages() {
+      return [...records.values()];
+    },
+    markChannelMissing(channelId) {
+      for (const record of records.values()) {
+        if (record.channelId === channelId) record.channelMissing = true;
+      }
+    },
+    computeBackoffMs() {
+      return backoffMs;
+    },
+    selectDueRecords: storeModule.selectDueRecords,
+  };
+}
+
+function makeClient() {
+  const rawListeners = [];
+  const listeners = new Map();
+  return {
+    user: { id: "BOT1" },
+    users: new Map(),
+    channels: new Map(),
+    configuration: { features: { autumn: { url: "https://autumn.test" } } },
+    authenticationHeader: ["X-Bot-Token", "secret"],
+    events: {
+      on(name, listener) {
+        if (name === "event") rawListeners.push(listener);
+      },
+    },
+    on(name, listener) {
+      const existing = listeners.get(name) ?? [];
+      existing.push(listener);
+      listeners.set(name, existing);
+    },
+    emitRaw(event) {
+      for (const listener of rawListeners) listener(event);
+    },
+  };
+}
+
+async function waitFor(predicate, timeoutMs = 1_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for state");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 test("computeBackoffMs is monotonic across failure counts and capped", () => {
-  const samples = [1, 2, 3, 4, 5, 10, 20].map((f) => computeBackoffMs(f));
+  const samples = [1, 2, 3, 4, 5, 10, 20].map((failures) =>
+    storeModule.computeBackoffMs(failures)
+  );
   for (const ms of samples) {
     assert.ok(ms > 0);
     assert.ok(ms <= 15 * 60 * 1000);
   }
-  // Loosely monotonic: later failure counts shouldn't produce a *lower*
-  // backoff than the very first, even accounting for jitter.
   assert.ok(samples[samples.length - 1] >= samples[0] * 0.5);
 });
 
-test("shouldVerify excludes channelMissing and records still on backoff", () => {
-  assert.equal(shouldVerify(makeRecord({ channelMissing: true }), NOW + DAY), false);
+test("shouldVerify excludes missing channels and records still on backoff", () => {
   assert.equal(
-    shouldVerify(makeRecord({ nextAttemptAt: NOW + 1000 }), NOW + 500),
+    storeModule.shouldVerify(makeRecord({ channelMissing: true }), NOW + DAY),
+    false
+  );
+  assert.equal(
+    storeModule.shouldVerify(
+      makeRecord({ nextAttemptAt: NOW + 1_000 }),
+      NOW + 500
+    ),
     false
   );
 });
 
 test("shouldVerify checks fresh records every sweep but throttles old ones", () => {
-  const fresh = makeRecord({ createdAt: NOW, lastVerifiedAt: NOW });
-  assert.equal(shouldVerify(fresh, NOW + 1000), true);
-
+  assert.equal(storeModule.shouldVerify(makeRecord(), NOW + 1_000), true);
   const monthOld = makeRecord({
     createdAt: NOW - 40 * DAY,
-    lastVerifiedAt: NOW - 1000,
+    lastVerifiedAt: NOW - 1_000,
   });
-  assert.equal(shouldVerify(monthOld, NOW), false);
-  assert.equal(shouldVerify(monthOld, NOW - 1000 + DAY), true);
+  assert.equal(storeModule.shouldVerify(monthOld, NOW), false);
+  assert.equal(storeModule.shouldVerify(monthOld, NOW - 1_000 + DAY), true);
 });
 
-test("selectDueRecords respects the budget and orders least-recently-verified first", () => {
+test("selectDueRecords respects its budget and verification order", () => {
   const records = [
-    makeRecord({ recordId: "a", lastVerifiedAt: NOW - 3000 }),
-    makeRecord({ recordId: "b", lastVerifiedAt: NOW - 1000 }),
-    makeRecord({ recordId: "c", lastVerifiedAt: NOW - 5000 }),
-    makeRecord({ recordId: "d", channelMissing: true, lastVerifiedAt: NOW - 9000 }),
+    makeRecord({ recordId: "A", lastVerifiedAt: NOW - 3_000 }),
+    makeRecord({ recordId: "B", lastVerifiedAt: NOW - 1_000 }),
+    makeRecord({ recordId: "C", lastVerifiedAt: NOW - 5_000 }),
+    makeRecord({
+      recordId: "D",
+      channelMissing: true,
+      lastVerifiedAt: NOW - 9_000,
+    }),
   ];
-
-  const due = selectDueRecords(records, NOW, 2);
-  assert.deepEqual(due.map((r) => r.recordId), ["c", "a"]);
+  assert.deepEqual(
+    storeModule
+      .selectDueRecords(records, NOW, 2)
+      .map((record) => record.recordId),
+    ["C", "A"]
+  );
 });
 
-test("buildTamperNotice includes the restoration count", () => {
+test("restoration formatting preserves pristine embeds and one notice", () => {
   assert.match(buildTamperNotice(3), /Restoration #3/);
-});
-
-test("buildRestoredEmbed appends a notice without mutating the original", () => {
   const original = { title: "Codes", description: "line one", colour: "#fff" };
-  const restored = buildRestoredEmbed(original, 1);
-
-  assert.equal(original.description, "line one");
-  assert.equal(restored.title, "Codes");
-  assert.equal(restored.colour, "#fff");
-  assert.match(restored.description, /line one/);
-  assert.match(restored.description, /Restoration #1/);
-});
-
-test("buildRestoredEmbed does not stack notices when applied twice to the same original", () => {
-  const original = { title: "Codes", description: "line one" };
   const first = buildRestoredEmbed(original, 1);
   const second = buildRestoredEmbed(original, 2);
 
+  assert.equal(original.description, "line one");
+  assert.equal(first.title, "Codes");
+  assert.equal(first.colour, "#fff");
   assert.equal((first.description.match(/Restoration #/g) || []).length, 1);
   assert.equal((second.description.match(/Restoration #/g) || []).length, 1);
   assert.match(second.description, /Restoration #2/);
 });
 
-test("buildRestoredEmbed truncates an overlong description but keeps the notice intact", () => {
-  const original = { title: "Codes", description: "x".repeat(2500) };
-  const restored = buildRestoredEmbed(original, 5);
-
-  assert.ok(restored.description.length <= 2000);
+test("restoration formatting retains its notice under the embed limit", () => {
+  const restored = buildRestoredEmbed(
+    { title: "Codes", description: "x".repeat(2_500) },
+    5
+  );
+  assert.ok(restored.description.length <= 2_000);
   assert.match(restored.description, /Restoration #5/);
+});
+
+test("protected sends persist the exact wire payload", async () => {
+  const memoryStore = makeMemoryStore();
+  const sent = [];
+  const protection = createTamperProtection(makeClient(), {
+    store: memoryStore,
+    send: async (channelId, payload) => {
+      sent.push({ channelId, payload });
+      return { _id: "MESSAGE1" };
+    },
+    request: async () => ({ ok: true, status: 200, data: {} }),
+    logger: silentLogger,
+  });
+
+  await protection.sendProtected("CHANNEL1", {
+    embeds: [{ title: "Audit entry", description: "evidence" }],
+  });
+
+  assert.equal(sent[0].payload.content, " ");
+  const record = memoryStore.getProtectedMessageByMessageId("MESSAGE1");
+  assert.equal(record.channelId, "CHANNEL1");
+  assert.deepEqual(record.payload, sent[0].payload);
+});
+
+test("a send without a valid message id is reported as unprotected", async () => {
+  const memoryStore = makeMemoryStore();
+  const protection = createTamperProtection(makeClient(), {
+    store: memoryStore,
+    send: async () => ({}),
+    request: async () => ({ ok: true, status: 200, data: {} }),
+    logger: silentLogger,
+  });
+
+  const result = await protection.sendProtected("CHANNEL1", {
+    content: "audit",
+  });
+  assert.equal(result, undefined);
+  assert.equal(memoryStore.getAllProtectedMessages().length, 0);
+});
+
+test("raw deletes restore uncached messages repeatedly and replace the live id", async () => {
+  const memoryStore = makeMemoryStore();
+  const client = makeClient();
+  const restoredPayloads = [];
+  const replacementIds = ["MESSAGE2", "MESSAGE3"];
+  const protection = createTamperProtection(client, {
+    store: memoryStore,
+    send: async () => ({ _id: "MESSAGE1" }),
+    request: async (method, _path, payload) => {
+      assert.equal(method, "POST");
+      restoredPayloads.push(payload);
+      return { ok: true, status: 200, data: { _id: replacementIds.shift() } };
+    },
+    restoreFloorMs: 0,
+    logger: silentLogger,
+  });
+
+  await protection.sendProtected("CHANNEL1", {
+    embeds: [{ title: "Audit entry", description: "original" }],
+  });
+  client.emitRaw({
+    type: "MessageDelete",
+    id: "MESSAGE1",
+    channel: "CHANNEL1",
+  });
+  await waitFor(
+    () =>
+      memoryStore.getProtectedMessageByMessageId("MESSAGE2")?.restorations === 1
+  );
+
+  client.emitRaw({
+    type: "MessageDelete",
+    id: "MESSAGE2",
+    channel: "CHANNEL1",
+  });
+  await waitFor(
+    () =>
+      memoryStore.getProtectedMessageByMessageId("MESSAGE3")?.restorations === 2
+  );
+
+  assert.equal(restoredPayloads.length, 2);
+  assert.match(restoredPayloads[0].embeds[0].description, /Restoration #1/);
+  assert.match(restoredPayloads[1].embeds[0].description, /Restoration #2/);
+  assert.equal(
+    (restoredPayloads[1].embeds[0].description.match(/Restoration #/g) || [])
+      .length,
+    1
+  );
+});
+
+test("raw bulk deletes restore each protected record once", async () => {
+  const memoryStore = makeMemoryStore();
+  const posts = [];
+  let sendNumber = 0;
+  const protection = createTamperProtection(makeClient(), {
+    store: memoryStore,
+    send: async () => ({ _id: `MESSAGE${++sendNumber}` }),
+    request: async (_method, path) => {
+      posts.push(path);
+      return {
+        ok: true,
+        status: 200,
+        data: { _id: `RESTORED${posts.length}` },
+      };
+    },
+    restoreFloorMs: 0,
+    logger: silentLogger,
+  });
+
+  await protection.sendProtected("CHANNEL1", { content: "first" });
+  await protection.sendProtected("CHANNEL1", { content: "second" });
+  await protection.handleRawEvent({
+    type: "BulkMessageDelete",
+    channel: "CHANNEL1",
+    ids: ["MESSAGE1", "MESSAGE1", "UNKNOWN", "MESSAGE2"],
+  });
+
+  assert.equal(posts.length, 2);
+  assert.equal(memoryStore.getAllProtectedMessages()[0].restorations, 1);
+  assert.equal(memoryStore.getAllProtectedMessages()[1].restorations, 1);
+});
+
+test("intentional bot deletes are neither restored nor left tracked", async () => {
+  const memoryStore = makeMemoryStore();
+  let reposts = 0;
+  const protection = createTamperProtection(makeClient(), {
+    store: memoryStore,
+    send: async () => ({ _id: "MESSAGE1" }),
+    request: async () => {
+      reposts++;
+      return { ok: true, status: 200, data: { _id: "MESSAGE2" } };
+    },
+    logger: silentLogger,
+  });
+
+  await protection.sendProtected("CHANNEL1", { content: "temporary" });
+  await protection.runIntentionalDelete("MESSAGE1", async () => {
+    await protection.handleRawEvent({
+      type: "MessageDelete",
+      id: "MESSAGE1",
+      channel: "CHANNEL1",
+    });
+    return true;
+  });
+
+  assert.equal(reposts, 0);
+  assert.equal(memoryStore.getAllProtectedMessages().length, 0);
+});
+
+test("failed reposts retain state and retry after backoff", async () => {
+  let currentTime = NOW;
+  const memoryStore = makeMemoryStore({
+    clock: () => currentTime,
+    backoffMs: 10,
+  });
+  const scheduled = [];
+  let attempts = 0;
+  const protection = createTamperProtection(makeClient(), {
+    store: memoryStore,
+    send: async () => ({ _id: "MESSAGE1" }),
+    request: async () => {
+      attempts++;
+      return attempts === 1
+        ? { ok: false, status: 500 }
+        : { ok: true, status: 200, data: { _id: "MESSAGE2" } };
+    },
+    now: () => currentTime,
+    scheduleTimeout(callback, delay) {
+      scheduled.push({ callback, delay, unref() {} });
+      return scheduled.at(-1);
+    },
+    restoreFloorMs: 0,
+    logger: silentLogger,
+  });
+
+  await protection.sendProtected("CHANNEL1", { content: "audit" });
+  await protection.handleRawEvent({ type: "MessageDelete", id: "MESSAGE1" });
+  const failed = memoryStore.getProtectedMessageByMessageId("MESSAGE1");
+  assert.equal(failed.failures, 1);
+  assert.equal(failed.nextAttemptAt, NOW + 10);
+  assert.equal(scheduled[0].delay, 10);
+
+  currentTime += 10;
+  scheduled[0].callback();
+  await waitFor(() => memoryStore.getProtectedMessageByMessageId("MESSAGE2"));
+  assert.equal(attempts, 2);
+});
+
+test("reconciliation restores offline deletes but not transient API failures", async () => {
+  let currentTime = NOW;
+  const memoryStore = makeMemoryStore({ clock: () => currentTime });
+  let mode = "missing";
+  let posts = 0;
+  const protection = createTamperProtection(makeClient(), {
+    store: memoryStore,
+    send: async () => ({ _id: "MESSAGE1" }),
+    request: async (method) => {
+      if (method === "POST") {
+        posts++;
+        return { ok: true, status: 200, data: { _id: "MESSAGE2" } };
+      }
+      return mode === "missing"
+        ? { ok: false, status: 404 }
+        : { ok: false, status: 503 };
+    },
+    now: () => currentTime,
+    scheduleInterval() {
+      return { unref() {} };
+    },
+    restoreFloorMs: 0,
+    logger: silentLogger,
+  });
+
+  await protection.sendProtected("CHANNEL1", { content: "audit" });
+  currentTime += 1;
+  await protection.start();
+  assert.equal(posts, 1);
+  assert.ok(memoryStore.getProtectedMessageByMessageId("MESSAGE2"));
+
+  mode = "unavailable";
+  currentTime += 1;
+  await protection.sweepNow();
+  assert.equal(posts, 1, "503 is not proof that the message was deleted");
+});
+
+test("existing protected-message records reload without migration", async () => {
+  storeModule.addProtectedMessage("CHANNEL9", "PERSISTED1", {
+    embeds: [{ title: "Older audit entry", description: "kept" }],
+  });
+
+  const reloaded = await import("../store.js?tamper-reload=1");
+  const record = reloaded.getProtectedMessageByMessageId("PERSISTED1");
+  assert.equal(record.recordId, "PERSISTED1");
+  assert.equal(record.channelId, "CHANNEL9");
+  assert.equal(record.payload.embeds[0].title, "Older audit entry");
+});
+
+test("legacy embed records restore with a valid wire payload", async () => {
+  const memoryStore = makeMemoryStore();
+  memoryStore.addProtectedMessage("CHANNEL1", "LEGACY1", {
+    embeds: [{ title: "Old entry", description: "before canonicalisation" }],
+  });
+  let restoredPayload;
+  const protection = createTamperProtection(makeClient(), {
+    store: memoryStore,
+    send: async () => ({ _id: "UNUSED1" }),
+    request: async (_method, _path, payload) => {
+      restoredPayload = payload;
+      return { ok: true, status: 200, data: { _id: "LEGACY2" } };
+    },
+    restoreFloorMs: 0,
+    logger: silentLogger,
+  });
+
+  await protection.handleRawEvent({ type: "MessageDelete", id: "LEGACY1" });
+  assert.equal(restoredPayload.content, " ");
+  assert.match(restoredPayload.embeds[0].description, /Restoration #1/);
+});
+
+test("tamper diagnostics never expose raw message or channel ids", async () => {
+  const memoryStore = makeMemoryStore();
+  const output = [];
+  const logger = {
+    log(message) {
+      output.push(message);
+    },
+    warn(message) {
+      output.push(message);
+    },
+    error(message) {
+      output.push(message);
+    },
+  };
+  const protection = createTamperProtection(makeClient(), {
+    store: memoryStore,
+    send: async () => ({ _id: "SECRETMESSAGE1" }),
+    request: async () => ({
+      ok: true,
+      status: 200,
+      data: { _id: "SECRETMESSAGE2" },
+    }),
+    restoreFloorMs: 0,
+    logger,
+  });
+
+  await protection.sendProtected("SECRETCHANNEL1", { content: "audit" });
+  await protection.handleRawEvent({
+    type: "MessageDelete",
+    id: "SECRETMESSAGE1",
+  });
+
+  const combined = output.join("\n");
+  assert.doesNotMatch(combined, /SECRETMESSAGE1|SECRETMESSAGE2|SECRETCHANNEL1/);
+  assert.match(combined, /record=[a-f0-9]{12}/);
+  assert.match(combined, /channel=[a-f0-9]{12}/);
+});
+
+test("the audit pipeline requires and uses a protected sender", async () => {
+  const client = makeClient();
+  assert.throws(
+    () => initAuditLog(client, { send: async () => ({ _id: "WRONG" }) }),
+    /protected sender/i
+  );
+
+  let nextId = 0;
+  const protection = createTamperProtection(client, {
+    send: async () => ({ _id: `AUDITMESSAGE${++nextId}` }),
+    request: async () => ({ ok: true, status: 200, data: {} }),
+    logger: silentLogger,
+  });
+  storeModule.enableAuditLog("SERVER1", "CHANNEL1");
+  initAuditLog(client, { sendProtected: protection.sendProtected });
+
+  const status = runAuditLogTest("SERVER1");
+  assert.equal(status.queuedTest, true);
+  await waitFor(() =>
+    storeModule
+      .getAllProtectedMessages()
+      .some(
+        (record) => record.payload.embeds?.[0]?.title === "🧪 Audit Log Test"
+      )
+  );
 });
