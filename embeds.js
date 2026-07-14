@@ -1,7 +1,8 @@
 // embeds.js — Build Revolt SendableEmbed objects for code announcements
 // ────────────────────────────────────────────────────────────────────
-import { GAMES, HI3_SOURCES } from "./config.js";
+import { GAMES } from "./config.js";
 import { formatRewards } from "./api.js";
+import { isEvidenceEnabled, perFileCapBytes } from "./evidence-store.js";
 
 /**
  * Build an embed for a batch of codes for one game.
@@ -102,23 +103,39 @@ export function buildHelpEmbed(prefix) {
     ],
     [
       `${prefix}EnableFetch`,
-      "Enable hourly auto-fetch of **HoYoverse + NTE** codes in this channel",
+      "Enable hourly auto-fetch of **HoYoverse + NTE** codes in this channel _(admins/mods only)_",
     ],
     [
       `${prefix}EnableFetchHoyo`,
-      "Enable hourly auto-fetch of **HoYoverse-only** codes in this channel",
+      "Enable hourly auto-fetch of **HoYoverse-only** codes in this channel _(admins/mods only)_",
     ],
     [
       `${prefix}EnableFetchNTE`,
-      "Enable hourly auto-fetch of **NTE-only** codes in this channel",
+      "Enable hourly auto-fetch of **NTE-only** codes in this channel _(admins/mods only)_",
     ],
     [
       `${prefix}DisableFetch`,
-      "Disable auto-fetch in this channel",
+      "Disable auto-fetch in this channel _(admins/mods only)_",
+    ],
+    [
+      `${prefix}EmojiMode [unicode|custom]`,
+      "Show or switch how reward emoji are rendered",
     ],
     [
       `${prefix}Restart`,
-      "Restart the bot process after deploying updates",
+      "Restart the bot process after deploying updates _(owner/admin only)_",
+    ],
+    [
+      `${prefix}Enable-AuditLog`,
+      "**Mods only.** Post a live log of server actions (deletes, edits, joins/leaves, bans, channel/role changes) to this channel",
+    ],
+    [
+      `${prefix}Disable-AuditLog`,
+      "Turn off audit logging for this server",
+    ],
+    [
+      `${prefix}Test-AuditLog`,
+      "Send a test event through the audit log to verify it is working",
     ],
     [
       `${prefix}HelpHoyoFetch`,
@@ -135,6 +152,7 @@ export function buildHelpEmbed(prefix) {
     description:
       description +
       "\n\n_All commands are **case-insensitive**._\n" +
+      "_Commands are accepted from human server members only._\n" +
       "_GI / HSR / ZZZ codes from [hoyo-codes.seria.moe](https://hoyo-codes.seria.moe)_\n" +
       "_HI3 codes from [api.ennead.cc](https://api.ennead.cc/mihoyo)_\n" +
       "_NTE codes from [Game8](https://game8.co/games/Neverness-to-Everness/archives/593718)_",
@@ -186,6 +204,49 @@ export function buildRestoredEmbed(originalEmbed, count) {
   return {
     ...originalEmbed,
     description: `${truncated}\n\n${notice}`,
+  };
+}
+
+/**
+ * Build an audit-log embed with a trailing timestamp line.
+ * @param  {string}   title
+ * @param  {string[]} lines   — body lines, joined with newlines
+ * @param  {string}   colour
+ * @return {Object}   SendableEmbed
+ */
+export function buildAuditEmbed(title, lines, colour) {
+  const description = [...lines, "", `_${new Date().toUTCString()}_`].join("\n");
+  return { title, description, colour };
+}
+
+/**
+ * Build the confirmation embed shown when audit logging is enabled,
+ * including the platform limitations that can't be worked around.
+ */
+export function buildAuditLogEnabledEmbed(prefix, { moved = false, previousChannelId = null } = {}) {
+  const intro = moved
+    ? `Audit logging has been **moved** here from <#${previousChannelId}>.`
+    : "Audit logging is now **active** in this channel.";
+
+  const evidenceBullet = isEvidenceEnabled()
+    ? `- Attachments up to **${Math.round(perFileCapBytes() / (1024 * 1024))} MB** are downloaded and kept as evidence when their message is deleted, so the file itself — not just a link — shows up in the delete log. Evidence and message content are both kept for **30 days**.`
+    : "- Message content is recorded from this moment on and kept for **30 days**, so deletes/edits show the original text even after I restart. Attachment evidence capture is currently **disabled**.";
+
+  return {
+    title: "✅ Audit Log Enabled",
+    description:
+      `${intro}\n\n` +
+      "I will post a record of server actions here: message edits/deletes, channel/role/server changes, " +
+      "member joins/leaves, bans, timeouts, nickname and role changes, and emoji changes.\n\n" +
+      "**⚠️ Platform limitations (Stoat has no native audit log, so these can't be worked around):**\n" +
+      "- Deletes/edits never say **who** performed them — only the change itself is shown.\n" +
+      "- A kick and a voluntary leave look identical — logged as \"left or was kicked\".\n" +
+      "- Bans are detected when a member leaves; unbans are detected by periodic polling (up to ~5 min delay).\n" +
+      `${evidenceBullet}\n` +
+      "- Messages sent before enablement or while I was offline can't be recovered.\n" +
+      "- Invites, webhooks, permission overrides, and voice actions aren't reported by the platform at all.\n\n" +
+      `Use \`${prefix}Disable-AuditLog\` to turn this off.`,
+    colour: "#2ECC71",
   };
 }
 

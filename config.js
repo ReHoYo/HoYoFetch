@@ -4,7 +4,8 @@ import { readFileSync, existsSync } from "fs";
 
 // ── Load .env manually (no dotenv dependency) ──────
 const ALLOWED_ENV_KEYS = new Set([
-  "BOT_TOKEN", "PREFIX", "FETCH_INTERVAL", "EMOJI_MODE", "HOYO_API_BASE",
+  "BOT_TOKEN", "PREFIX", "FETCH_INTERVAL", "FETCH_COOLDOWN", "EMOJI_MODE", "HOYO_API_BASE",
+  "AUDITLOG_DEBUG", "AUDITLOG_EVIDENCE_MAX_MB", "AUDITLOG_EVIDENCE_BUDGET_MB",
 ]);
 
 function loadEnv() {
@@ -45,10 +46,16 @@ if (fetchIntervalMinutes !== rawInterval) {
   );
 }
 
+const rawCooldown = parseInt(process.env.FETCH_COOLDOWN || "10", 10);
+const fetchCooldownSeconds = Number.isFinite(rawCooldown) && rawCooldown >= 0
+  ? Math.min(rawCooldown, 3600)
+  : 10;
+
 export const CONFIG = {
   token: process.env.BOT_TOKEN || "",
   prefix: process.env.PREFIX || "/",
   fetchIntervalMinutes,
+  fetchCooldownSeconds,
   hoyoApiBase:
     process.env.HOYO_API_BASE || "https://hoyo-codes.seria.moe/codes",
 };
@@ -66,7 +73,23 @@ export const CONFIG = {
 //   4. Replace the placeholder IDs in CUSTOM_EMOJI below
 //   5. Set EMOJI_MODE=custom in your .env file
 
-export const EMOJI_MODE = process.env.EMOJI_MODE || "unicode";
+// Runtime-mutable emoji mode (seeded from .env, toggleable via /EmojiMode).
+let emojiMode = process.env.EMOJI_MODE === "custom" ? "custom" : "unicode";
+
+export function getEmojiMode() {
+  return emojiMode;
+}
+
+/**
+ * Switch emoji rendering mode at runtime.
+ * @param  {string}  mode — "unicode" or "custom"
+ * @return {boolean} true if the mode was valid and applied
+ */
+export function setEmojiMode(mode) {
+  if (mode !== "unicode" && mode !== "custom") return false;
+  emojiMode = mode;
+  return true;
+}
 
 const UNICODE_EMOJI = {
   // ── Genshin Impact ──────────────────────────────
@@ -112,7 +135,7 @@ const CUSTOM_EMOJI = {
 };
 
 export function getEmojiMap() {
-  if (EMOJI_MODE !== "custom") return UNICODE_EMOJI;
+  if (emojiMode !== "custom") return UNICODE_EMOJI;
 
   const customOverrides = Object.fromEntries(
     Object.entries(CUSTOM_EMOJI).filter(([, value]) => value)

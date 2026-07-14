@@ -1,11 +1,12 @@
 // store.js — Lightweight JSON-file persistence for channel config & known codes
 // ──────────────────────────────────────────────────────────────────────────────
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = join(__dirname, "data");
+// Overridable so tests run hermetically and deployments can mount a volume.
+export const DATA_DIR = process.env.HOYOFETCH_DATA_DIR || join(__dirname, "data");
 
 // Ensure the data directory exists
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
@@ -15,6 +16,7 @@ const CHANNELS_PATH = join(DATA_DIR, "channels.json");
 const KNOWN_CODES_PATH = join(DATA_DIR, "known_codes.json");
 const SOURCE_CACHE_PATH = join(DATA_DIR, "source_cache.json");
 const PROTECTED_PATH = join(DATA_DIR, "protected_messages.json");
+const AUDITLOG_PATH = join(DATA_DIR, "auditlog.json");
 
 // ── Helpers ────────────────────────────────────────
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -44,8 +46,13 @@ function readJSON(path, fallback) {
   }
 }
 
+// Atomic write: serialise to a temp file, then rename over the target.
+// rename() is atomic on the same filesystem, so a crash mid-write can never
+// leave a half-written (corrupt) JSON file behind.
 function writeJSON(path, data) {
-  writeFileSync(path, JSON.stringify(data, null, 2), "utf-8");
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
+  renameSync(tmp, path);
 }
 
 // ═══════════════════════════════════════════════════
@@ -140,6 +147,13 @@ let knownCodes = readJSON(KNOWN_CODES_PATH, {});
  * @return {string[]} — only the NEW codes
  */
 export function detectNewCodes(gameKey, currentCodes) {
+  // An empty list almost always means the source returned nothing this cycle.
+  // Don't let that overwrite our known set — otherwise the next non-empty fetch
+  // would treat every still-active code as "new" and re-announce it.
+  if (!Array.isArray(currentCodes) || currentCodes.length === 0) {
+    return [];
+  }
+
   const fresh = detectFreshCodes(gameKey, knownCodes[gameKey] || [], currentCodes);
 
   // Persist the full current set (replaces expired codes too)
@@ -395,4 +409,101 @@ export function selectDueRecords(records, now, budget) {
     .filter((r) => shouldVerify(r, now))
     .sort((a, b) => a.lastVerifiedAt - b.lastVerifiedAt)
     .slice(0, budget);
+}
+
+// ═══════════════════════════════════════════════════
+//  Audit log (server → channel mapping)
+// ═══════════════════════════════════════════════════
+// Shape: { "<serverId>": { enabled, channelId, enabledAt, knownBans: string[] } }
+// Stoat/Revolt has no native audit log — this workaround relays moderation
+// events to a channel chosen by an admin/mod via /enable-auditlog.
+
+let auditLogs = readJSON(AUDITLOG_PATH, {});
+
+/**
+ * Enable audit logging for a server, directing it to a channel.
+ * @param  {string} serverId
+ * @param  {string} channelId
+ * @return {{wasEnabled: boolean, previousChannelId: string|null, changed: boolean}}
+ */
+export function enableAuditLog(serverId, channelId) {
+  const existing = auditLogs[serverId];
+  const wasEnabled = existing?.enabled === true;
+  const previousChannelId = wasEnabled ? existing.channelId : null;
+
+  auditLogs[serverId] = {
+    enabled: true,
+    channelId,
+    enabledAt: new Date().toISOString(),
+    knownBans: existing?.knownBans ?? [],
+  };
+  writeJSON(AUDITLOG_PATH, auditLogs);
+
+  return {
+    wasEnabled,
+    previousChannelId,
+    changed: !wasEnabled || previousChannelId !== channelId,
+  };
+}
+
+/**
+ * Disable audit logging for a server.
+ * @param {string} serverId
+ */
+export function disableAuditLog(serverId) {
+  if (auditLogs[serverId]) {
+    auditLogs[serverId].enabled = false;
+  }
+  writeJSON(AUDITLOG_PATH, auditLogs);
+}
+
+/**
+ * Whether audit logging is enabled for a server.
+ * @param  {string} serverId
+ * @return {boolean}
+ */
+export function isAuditLogEnabled(serverId) {
+  return auditLogs[serverId]?.enabled === true;
+}
+
+/**
+ * Get the channel audit events should be posted to for a server.
+ * @param  {string} serverId
+ * @return {string|null}
+ */
+export function getAuditLogChannel(serverId) {
+  const entry = auditLogs[serverId];
+  return entry?.enabled ? entry.channelId : null;
+}
+
+/**
+ * List all servers with audit logging currently enabled.
+ * @return {{serverId: string, channelId: string}[]}
+ */
+export function getAuditLogServers() {
+  return Object.entries(auditLogs)
+    .filter(([, v]) => v.enabled)
+    .map(([serverId, v]) => ({ serverId, channelId: v.channelId }));
+}
+
+/**
+ * Get the last-known set of banned user IDs for a server (for unban diffing).
+ * @param  {string} serverId
+ * @return {string[]}
+ */
+export function getKnownBans(serverId) {
+  return Array.isArray(auditLogs[serverId]?.knownBans)
+    ? auditLogs[serverId].knownBans
+    : [];
+}
+
+/**
+ * Persist a fresh snapshot of banned user IDs for a server.
+ * @param {string}   serverId
+ * @param {string[]} userIds
+ */
+export function setKnownBans(serverId, userIds) {
+  if (!auditLogs[serverId]) return;
+  auditLogs[serverId].knownBans = userIds;
+  writeJSON(AUDITLOG_PATH, auditLogs);
 }
