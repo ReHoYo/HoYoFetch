@@ -2,6 +2,7 @@
 // ────────────────────────────────────────────────────────────────────
 import { GAMES } from "./config.js";
 import { formatRewards } from "./api.js";
+import { isEvidenceEnabled, perFileCapBytes } from "./evidence-store.js";
 
 /**
  * Build an embed for a batch of codes for one game.
@@ -189,6 +190,10 @@ export function buildAuditLogEnabledEmbed(prefix, { moved = false, previousChann
     ? `Audit logging has been **moved** here from <#${previousChannelId}>.`
     : "Audit logging is now **active** in this channel.";
 
+  const evidenceBullet = isEvidenceEnabled()
+    ? `- Attachments up to **${Math.round(perFileCapBytes() / (1024 * 1024))} MB** are downloaded and kept as evidence when their message is deleted, so the file itself — not just a link — shows up in the delete log. Evidence and message content are both kept for **30 days**.`
+    : "- Message content is recorded from this moment on and kept for **30 days**, so deletes/edits show the original text even after I restart. Attachment evidence capture is currently **disabled**.";
+
   return {
     title: "✅ Audit Log Enabled",
     description:
@@ -199,7 +204,8 @@ export function buildAuditLogEnabledEmbed(prefix, { moved = false, previousChann
       "- Deletes/edits never say **who** performed them — only the change itself is shown.\n" +
       "- A kick and a voluntary leave look identical — logged as \"left or was kicked\".\n" +
       "- Bans are detected when a member leaves; unbans are detected by periodic polling (up to ~5 min delay).\n" +
-      "- Message content is recorded from this moment on and kept for **30 days**, so deletes/edits show the original text even after I restart. Messages sent before enablement or while I was offline can't be recovered.\n" +
+      `${evidenceBullet}\n` +
+      "- Messages sent before enablement or while I was offline can't be recovered.\n" +
       "- Invites, webhooks, permission overrides, and voice actions aren't reported by the platform at all.\n\n" +
       `Use \`${prefix}Disable-AuditLog\` to turn this off.`,
     colour: "#2ECC71",

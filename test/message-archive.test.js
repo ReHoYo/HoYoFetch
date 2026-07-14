@@ -27,14 +27,18 @@ before(async () => {
   archive = await import("../message-archive.js");
 });
 
-test("record → lookup round trip with attachment count", () => {
+test("record → lookup round trip with attachment descriptors", () => {
+  const descriptors = [
+    { id: "att1", filename: "a.png", size: 100, contentType: "image/png", url: "https://x/a.png", evidencePath: null },
+    { id: "att2", filename: "b.png", size: 200, contentType: "image/png", url: "https://x/b.png", evidencePath: "/data/evidence/msg1_1.png" },
+  ];
   archive.recordMessage({
     id: "msg1",
     channelId: "chanA",
     serverId: "srv1",
     authorId: "userA",
     content: "hello world",
-    attachments: 2,
+    attachments: descriptors,
   });
 
   const entry = archive.getArchivedMessage("msg1");
@@ -42,8 +46,39 @@ test("record → lookup round trip with attachment count", () => {
   assert.equal(entry.channelId, "chanA");
   assert.equal(entry.serverId, "srv1");
   assert.equal(entry.authorId, "userA");
-  assert.equal(entry.attachments, 2);
+  assert.deepEqual(entry.attachments, descriptors);
   assert.equal(archive.getArchivedMessage("nope"), null);
+});
+
+test("recordMessage defaults attachments to an empty array", () => {
+  archive.recordMessage({
+    id: "msgNoAttachments",
+    channelId: "chanA",
+    serverId: "srv1",
+    authorId: "userA",
+    content: "no files here",
+  });
+  assert.deepEqual(archive.getArchivedMessage("msgNoAttachments").attachments, []);
+});
+
+test("legacy numeric attachment counts survive journal replay unchanged", async () => {
+  appendFileSync(
+    archivePath,
+    JSON.stringify({
+      op: "create",
+      id: "legacyMsg",
+      channelId: "chanA",
+      serverId: "srv1",
+      authorId: "userA",
+      content: "old format",
+      attachments: 3,
+      createdAt: Date.now(),
+    }) + "\n",
+    "utf-8"
+  );
+
+  const rebooted = await reimportArchive();
+  assert.equal(rebooted.getArchivedMessage("legacyMsg").attachments, 3);
 });
 
 test("applyEdit returns previous content and updates the entry", () => {

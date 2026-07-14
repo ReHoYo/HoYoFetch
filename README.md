@@ -85,9 +85,11 @@ Stoat/Revolt has no built-in audit log, so `/Enable-AuditLog` turns the current 
 
 To always show what was deleted or edited — Stoat only reports the *id* of a deleted message — the bot records every message in audit-enabled servers to a local archive (`data/message_archive.jsonl`, kept **30 days**, capped at 100k messages). This survives restarts.
 
+**Attachment evidence.** Stoat's file storage almost certainly purges an attachment the moment its message is deleted, so a saved link would 404 exactly when it's needed. Instead, the bot downloads qualifying attachments (any type, up to `AUDITLOG_EVIDENCE_MAX_MB` — default 20 MB, Stoat's own upload limit) the moment they're posted and keeps a local copy under `data/evidence/`, bounded by a hard total-size budget (`AUDITLOG_EVIDENCE_BUDGET_MB`, default 1 GB) — the oldest evidence is evicted first once the budget is full, so disk use can never exceed what you configure. When a message with saved evidence is deleted, the bot re-uploads the file and attaches it to the log entry. This means every qualifying attachment is downloaded once at post-time (a bandwidth cost), not just on deletion. Set `AUDITLOG_EVIDENCE_BUDGET_MB=0` to disable evidence capture entirely and fall back to metadata-only ("not preserved") notices.
+
 The bot needs the **Ban Members** permission to detect bans (checked when a member leaves) and unbans (ban-list poll every ~5 minutes).
 
-**Troubleshooting:** run `/Test-AuditLog` — it pushes a 🧪 test event through the real delivery pipeline and reports how many messages are archived. For verbose per-event console logging, set `AUDITLOG_DEBUG=1` in `.env`. Deletes of messages sent before audit logging was enabled are logged with "content unknown" (Stoat only transmits the message id on delete).
+**Troubleshooting:** run `/Test-AuditLog` — it pushes a 🧪 test event through the real delivery pipeline and reports how many messages are archived plus current evidence storage usage. For verbose per-event console logging, set `AUDITLOG_DEBUG=1` in `.env`. Deletes of messages sent before audit logging was enabled are logged with "content unknown" (Stoat only transmits the message id on delete).
 
 **Platform limitations that cannot be worked around:**
 

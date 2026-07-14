@@ -478,9 +478,13 @@ async function handleTestAuditLog(message) {
     return;
   }
 
+  const evidenceMB = (status.evidenceBytes / (1024 * 1024)).toFixed(1);
+  const evidenceBudgetMB = Math.round(status.evidenceBudgetBytes / (1024 * 1024));
   const lines = [
     `Test event queued — a 🧪 embed should appear in <#${status.channelId}> within a few seconds.`,
     `**Messages currently archived:** ${status.archivedCount}`,
+    `**Attachment evidence stored:** ${status.evidenceFiles} file(s), ${evidenceMB} MB / ${evidenceBudgetMB} MB` +
+      (status.evidenceBudgetBytes === 0 ? " (evidence capture disabled)" : ""),
   ];
   if (status.consecutiveFailures > 0) {
     lines.push(

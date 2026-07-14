@@ -10,6 +10,14 @@
 //   {"op":"create", id, channelId, serverId, authorId, content, attachments, createdAt}
 //   {"op":"edit",   id, content, editedAt}
 //
+// `attachments` is an array of descriptors:
+//   {id, filename, size, contentType, url, evidencePath}
+// `evidencePath` points into evidence-store.js's local byte cache, or is
+// null if the attachment didn't qualify (too large, capture failed, or
+// evidence capture is disabled). Journals written before this field existed
+// carry a plain number (attachment count) — callers must accept both shapes
+// (`Array.isArray(entry.attachments)` vs a legacy count).
+//
 // Appends are cheap (no full-file rewrite); the journal is compacted when it
 // grows well past the live set. Entries expire after RETENTION_MS.
 import {
@@ -68,7 +76,7 @@ function loadArchive() {
         serverId: op.serverId,
         authorId: op.authorId,
         content: op.content,
-        attachments: op.attachments ?? 0,
+        attachments: op.attachments ?? [], // legacy journals may carry a plain count
         createdAt: op.createdAt,
       });
     } else if (op.op === "edit" && typeof op.id === "string") {
@@ -85,7 +93,10 @@ function loadArchive() {
 /**
  * Record a newly created message.
  * @param {{id: string, channelId: string, serverId: string, authorId: string,
- *          content: string, attachments?: number, createdAt?: number}} entry
+ *          content: string,
+ *          attachments?: Array<{id: string, filename: string, size: number,
+ *            contentType: string, url: string, evidencePath: string|null}>,
+ *          createdAt?: number}} entry
  */
 export function recordMessage(entry) {
   if (!entry?.id) return;
@@ -95,7 +106,7 @@ export function recordMessage(entry) {
     serverId: entry.serverId,
     authorId: entry.authorId,
     content: entry.content ?? "",
-    attachments: entry.attachments ?? 0,
+    attachments: entry.attachments ?? [],
     createdAt: entry.createdAt ?? Date.now(),
   };
   messages.set(entry.id, record);
