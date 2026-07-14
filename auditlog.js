@@ -215,6 +215,7 @@ export function initAuditLog(client, { send }) {
         `**Channel:** <#${event.channel}>`,
         `**Content:** ${entry ? formatArchivedContent(entry) : "*unknown — message predates the archive or was sent while I was offline*"}`,
         "_Deleter unknown — Stoat does not report who deleted a message._",
+        "_It's safe to assume it was either the message author or an admin/mod — only they have permission to delete it._",
       ],
       "#E74C3C"
     );
