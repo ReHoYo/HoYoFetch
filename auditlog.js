@@ -9,12 +9,10 @@
 import {
   buildAuditEmbed,
   buildAuditBulkDeleteEmbed,
-  buildAuditChannelEmbed,
   buildAuditLogEnabledEmbed,
   buildAuditMemberEmbed,
   buildAuditMessageDeleteEmbed,
   buildAuditMessageEditEmbed,
-  buildAuditServerUpdateEmbed,
   buildStatusEmbed,
 } from "./embeds.js";
 import {
@@ -42,6 +40,7 @@ import {
   evidenceStats,
   startEvidenceMaintenance,
 } from "./evidence-store.js";
+import { createSettingsMonitor } from "./settings-monitor.js";
 
 const UNBAN_POLL_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_PENDING_SENDS = 50;
@@ -53,6 +52,7 @@ const ignoredSystemMessages = createMessageCache(5_000);
 
 // Set by initAuditLog so runAuditLogTest can reuse the real send pipeline.
 let sendRef = null;
+let settingsMonitorRef = null;
 // Downloads (evidence capture) and uploads (re-hosting on delete) go through
 // this so tests can inject a fake without touching the network.
 let fetchImplRef = fetch;
@@ -135,6 +135,7 @@ export function runAuditLogTest(serverId) {
     evidenceFiles: evidence.files,
     evidenceBytes: evidence.bytes,
     evidenceBudgetBytes: evidence.budgetBytes,
+    settings: settingsMonitorRef?.status(serverId) ?? null,
   };
   if (!channelId || !sendRef) return status;
 
@@ -572,7 +573,7 @@ async function resolveAttachmentEvidence(client, entry) {
 //  Event wiring
 // ═══════════════════════════════════════════════════
 
-export function initAuditLog(client, { sendProtected, fetchImpl }) {
+export function initAuditLog(client, { sendProtected, request, fetchImpl }) {
   if (typeof sendProtected !== "function") {
     throw new TypeError("Audit logging requires a protected sender.");
   }
@@ -583,6 +584,10 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
   fetchImplRef = fetchImpl ?? fetch;
   startArchiveMaintenance();
   startEvidenceMaintenance();
+  settingsMonitorRef = createSettingsMonitor(client, {
+    request,
+    emit: (serverId, embed) => emitAudit(send, serverId, embed),
+  });
 
   // ── Message archive recorder ────────────────────
   // Record every message in audit-enabled servers so deletes/edits can always
@@ -792,66 +797,9 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
     );
   }
 
-  // ── Channels ────────────────────────────────────
-  client.on("channelCreate", (channel) => {
-    const serverId = channel.serverId;
-    if (!serverId) return;
-    const embed = buildAuditChannelEmbed({
-      title: "📁 Channel Created",
-      channelId: channel.id,
-      lines: [`**Name:** ${channel.name}`, `**Type:** ${channel.type}`],
-      colour: "#2ECC71",
-    });
-    emitAudit(send, serverId, embed);
-  });
-
-  client.on("channelUpdate", (channel, previousChannel) => {
-    const serverId = channel.serverId;
-    if (!serverId) return;
-
-    const lines = [];
-    if (
-      previousChannel.name !== undefined &&
-      previousChannel.name !== channel.name
-    ) {
-      lines.push(`**Name:** ${previousChannel.name} → ${channel.name}`);
-    }
-    if (previousChannel.description !== channel.description) {
-      lines.push(
-        `**Description:** ${truncate(previousChannel.description, 200)} → ${truncate(channel.description, 200)}`
-      );
-    }
-    if (
-      previousChannel.nsfw !== undefined &&
-      previousChannel.nsfw !== channel.nsfw
-    ) {
-      lines.push(`**NSFW:** ${previousChannel.nsfw} → ${channel.nsfw}`);
-    }
-    if (
-      previousChannel.defaultPermissions !== undefined &&
-      JSON.stringify(previousChannel.defaultPermissions) !==
-        JSON.stringify(channel.defaultPermissions)
-    ) {
-      lines.push("**Permissions:** default channel permissions changed");
-    }
-    if (
-      previousChannel.rolePermissions !== undefined &&
-      JSON.stringify(previousChannel.rolePermissions) !==
-        JSON.stringify(channel.rolePermissions)
-    ) {
-      lines.push("**Permissions:** role permission overrides changed");
-    }
-    if (!lines.length) return; // nothing user-facing changed (e.g. lastMessageId bump)
-
-    const embed = buildAuditChannelEmbed({
-      title: "📁 Channel Updated",
-      channelId: channel.id,
-      lines,
-      colour: "#F1C40F",
-    });
-    emitAudit(send, serverId, embed);
-  });
-
+  // Settings changes are handled from raw gateway events plus persisted REST
+  // reconciliation by settings-monitor.js. Keep this hydrated listener only
+  // for the special case where the configured audit channel itself vanishes.
   client.on("channelDelete", (channel) => {
     const serverId = channel.serverId;
     if (!serverId) return;
@@ -861,72 +809,8 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
       console.warn(
         `auditlog: the audit log channel itself was deleted for server ${serverId}; audit logging disabled`
       );
-      return;
+      settingsMonitorRef?.configurationChanged(serverId);
     }
-
-    const embed = buildAuditChannelEmbed({
-      title: "📁 Channel Deleted",
-      lines: [`**Name:** ${channel.name}`],
-      colour: "#E74C3C",
-    });
-    emitAudit(send, serverId, embed);
-  });
-
-  // ── Server / roles ──────────────────────────────
-  client.on("serverUpdate", (server, previousServer) => {
-    const lines = [];
-    if (
-      previousServer.name !== undefined &&
-      previousServer.name !== server.name
-    ) {
-      lines.push(`**Name:** ${previousServer.name} → ${server.name}`);
-    }
-    if (previousServer.description !== server.description) {
-      lines.push(
-        `**Description:** ${truncate(previousServer.description, 200)} → ${truncate(server.description, 200)}`
-      );
-    }
-    if (previousServer.icon?.id !== server.icon?.id)
-      lines.push("**Icon:** changed");
-    if (previousServer.banner?.id !== server.banner?.id)
-      lines.push("**Banner:** changed");
-    if (!lines.length) return;
-
-    const embed = buildAuditServerUpdateEmbed(lines);
-    emitAudit(send, server.id, embed);
-  });
-
-  client.on("serverRoleUpdate", (server, roleId, previousRole) => {
-    const role = server.roles.get(roleId);
-    const prev = previousRole ?? {};
-    const name = role?.name ?? prev.name ?? roleId;
-
-    const lines = [`**Role:** ${name}`];
-    if (prev.name !== undefined && prev.name !== role?.name)
-      lines.push(`**Name:** ${prev.name} → ${role?.name}`);
-    if (prev.colour !== undefined && prev.colour !== role?.colour) {
-      lines.push(
-        `**Colour:** ${prev.colour ?? "*(none)*"} → ${role?.colour ?? "*(none)*"}`
-      );
-    }
-    if (prev.hoist !== undefined && prev.hoist !== role?.hoist)
-      lines.push(`**Hoist:** ${prev.hoist} → ${role?.hoist}`);
-    if (prev.rank !== undefined && prev.rank !== role?.rank)
-      lines.push(`**Rank:** ${prev.rank} → ${role?.rank}`);
-    if (lines.length === 1)
-      lines.push("_Previous state unknown, or only permissions changed._");
-
-    const embed = buildAuditEmbed("🎭 Role Updated", lines, "#F1C40F");
-    emitAudit(send, server.id, embed);
-  });
-
-  client.on("serverRoleDelete", (server, roleId, role) => {
-    const embed = buildAuditEmbed(
-      "🎭 Role Deleted",
-      [`**Role:** ${role?.name ?? roleId}`],
-      "#E74C3C"
-    );
-    emitAudit(send, server.id, embed);
   });
 
   // ── Members ─────────────────────────────────────
@@ -1009,29 +893,7 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
     }
   });
 
-  // ── Emoji ───────────────────────────────────────
-  client.on("emojiCreate", (emoji) => {
-    if (emoji.parent?.type !== "Server") return;
-    const embed = buildAuditEmbed(
-      "😀 Emoji Created",
-      [
-        `**Name:** :${emoji.name}:`,
-        `**By:** ${formatUser(client, emoji.creator?.id)}`,
-      ],
-      "#2ECC71"
-    );
-    emitAudit(send, emoji.parent.id, embed);
-  });
-
-  client.on("emojiDelete", (emoji) => {
-    if (emoji.parent?.type !== "Server") return;
-    const embed = buildAuditEmbed(
-      "😀 Emoji Deleted",
-      [`**Name:** :${emoji.name}:`],
-      "#E74C3C"
-    );
-    emitAudit(send, emoji.parent.id, embed);
-  });
+  return settingsMonitorRef;
 }
 
 // ═══════════════════════════════════════════════════

@@ -89,6 +89,10 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 
 Stoat/Revolt has no built-in audit log, so `/AuditLog here` turns the current channel into one. `/AuditLog #channel` targets another text channel, `/AuditLog status` reports the current setting, and `/AuditLog off` disables it. The bot relays message edits/deletes (with original content), bulk deletes, channel/role/server changes, member joins/leaves, bans, unbans, timeouts, nickname/role changes, and emoji changes. The older `/Enable-AuditLog` and `/Disable-AuditLog` forms remain accepted for compatibility.
 
+Server-setting monitoring combines live raw gateway events with a persisted REST baseline in `data/server_settings_snapshots.json`. It records detailed before/after changes for server identity and discovery settings, categories and system-message routing, channels, role and channel permission overrides, roles, emoji, invites, and webhooks. A reconciliation runs at startup and about every five minutes, so changes made while the bot was offline are detected after it returns. Webhooks require one request per channel and are scanned in bounded rotating batches; `/Test-AuditLog` reports the current baseline and webhook coverage.
+
+Audit configuration and testing commands use the same capability-based moderator policy as other management commands: the owner, **Manage Server**, **Kick Members**, **Ban Members**, **Timeout Members**, or effective **Manage Messages** in the current channel.
+
 To always show what was deleted or edited — Stoat only reports the _id_ of a deleted message — the bot records every message in audit-enabled servers to a local archive (`data/message_archive.jsonl`, kept **30 days**, capped at 100k messages). This survives restarts.
 
 **Attachment evidence.** Stoat's file storage almost certainly purges an attachment the moment its message is deleted, so a saved link would 404 exactly when it's needed. Instead, the bot downloads qualifying attachments (any type, up to `AUDITLOG_EVIDENCE_MAX_MB` — default 20 MB, Stoat's own upload limit) the moment they're posted and keeps a local copy under `data/evidence/`, bounded by a hard total-size budget (`AUDITLOG_EVIDENCE_BUDGET_MB`, default 1 GB) — the oldest evidence is evicted first once the budget is full, so disk use can never exceed what you configure. When a message with saved evidence is deleted, the bot re-uploads the file and attaches it to the log entry. This means every qualifying attachment is downloaded once at post-time (a bandwidth cost), not just on deletion. Set `AUDITLOG_EVIDENCE_BUDGET_MB=0` to disable evidence capture entirely and fall back to metadata-only ("not preserved") notices.
@@ -99,10 +103,12 @@ The bot needs the **Ban Members** permission to detect bans (checked when a memb
 
 **Platform limitations that cannot be worked around:**
 
+- Stoat's server, channel, role, and member update events do not include the administrator who acted. These entries explicitly say **Actor unavailable from Stoat** rather than guessing. Emoji and invite creators are shown as verified actors when their resource data supplies a creator.
 - The gateway never reports **who** deleted a message. Delete entries list the author and members with effective **Manage Messages** permission as **possible deleters**, clearly labeled as a heuristic; this is not proof of who acted.
 - Newer backends can label a member departure as `Leave`, `Kick`, or `Ban`. When the backend omits that reason, the bot can only report that the member left or was removed.
 - Messages sent before audit logging was enabled, or while the bot was offline, can't have their content recovered.
-- Invites, webhooks, permission-override details, and voice actions produce no usable gateway events.
+- Invites and webhooks produce no usable gateway events, so they are detected later by REST reconciliation and only when the bot has permission to list them. Webhook tokens and usable invite codes are never persisted or logged.
+- Reconciliation can prove that a setting changed while the bot was offline, but not the exact time or actor. Voice participation is not treated as a server-setting change.
 
 ### Anti-raid automod
 
@@ -191,6 +197,9 @@ hoyofetch/
 ├── api.js              Code source integration (hoyo-codes + ennead + Game8)
 ├── embeds.js           Revolt SendableEmbed builder
 ├── store.js            JSON persistence (channels, codes, audit, automod)
+├── auditlog.js         Message/member audit event pipeline
+├── settings-monitor.js Persistent server-setting diff and reconciliation
+├── tamper-protection.js Always-on protected audit-message restoration
 ├── custom_emojis.json  Optional: custom Revolt emoji IDs
 ├── .env.example        Configuration template
 ├── package.json
@@ -198,6 +207,9 @@ hoyofetch/
     ├── channels.json
     ├── known_codes.json
     ├── source_cache.json
+    ├── auditlog.json
+    ├── server_settings_snapshots.json
+    ├── protected_messages.json
     ├── automod.json
     └── automod_cases.json
 ```

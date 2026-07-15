@@ -22,7 +22,9 @@ test("channel enable/disable lifecycle with scopes", () => {
   store.enableChannel("chan-1", "hoyo");
   assert.equal(store.isChannelEnabled("chan-1"), true);
   assert.equal(store.getChannelScope("chan-1"), "hoyo");
-  assert.deepEqual(store.getEnabledChannels(), [{ id: "chan-1", scope: "hoyo" }]);
+  assert.deepEqual(store.getEnabledChannels(), [
+    { id: "chan-1", scope: "hoyo" },
+  ]);
 
   // Re-enabling with a new scope reports the change.
   const result = store.enableChannel("chan-1", "nte");
@@ -53,7 +55,10 @@ test("writes are atomic and produce valid JSON (no leftover .tmp)", () => {
 });
 
 test("detectNewCodes returns only unseen codes and remembers them", () => {
-  assert.deepEqual(store.detectNewCodes("genshin", ["A", "B"]).sort(), ["A", "B"]);
+  assert.deepEqual(store.detectNewCodes("genshin", ["A", "B"]).sort(), [
+    "A",
+    "B",
+  ]);
   assert.deepEqual(store.detectNewCodes("genshin", ["B", "C"]), ["C"]);
   assert.deepEqual(store.detectNewCodes("genshin", ["B", "C"]), []);
 });
@@ -75,7 +80,10 @@ test("seedKnownCodes + hasSeenGame", () => {
 test("source cache round-trips through atomic writes", () => {
   assert.equal(store.getSourceCache("nte"), null);
   store.setSourceCache("nte", { lastAttemptAt: 123, codes: [] });
-  assert.deepEqual(store.getSourceCache("nte"), { lastAttemptAt: 123, codes: [] });
+  assert.deepEqual(store.getSourceCache("nte"), {
+    lastAttemptAt: 123,
+    codes: [],
+  });
 });
 
 test("audit log channel configuration round-trips and disables", () => {
@@ -84,6 +92,26 @@ test("audit log channel configuration round-trips and disables", () => {
   assert.equal(store.getAuditLogChannel("server-audit"), "channel-audit");
   store.disableAuditLog("server-audit");
   assert.equal(store.getAuditLogChannel("server-audit"), null);
+});
+
+test("server-settings snapshots round-trip atomically and can be removed", () => {
+  store.setServerSettingsSnapshot("server-settings", {
+    version: 1,
+    server: { name: "Test Server" },
+    channels: {},
+  });
+  assert.deepEqual(store.getServerSettingsSnapshot("server-settings"), {
+    version: 1,
+    server: { name: "Test Server" },
+    channels: {},
+  });
+  assert.doesNotThrow(() =>
+    JSON.parse(
+      readFileSync(join(dataDir, "server_settings_snapshots.json"), "utf-8")
+    )
+  );
+  store.removeServerSettingsSnapshot("server-settings");
+  assert.equal(store.getServerSettingsSnapshot("server-settings"), null);
 });
 
 test("automod configuration defaults off and persists mode, channel, and quorum", () => {

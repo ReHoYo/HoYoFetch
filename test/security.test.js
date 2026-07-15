@@ -243,6 +243,32 @@ test("Manage Messages is evaluated against the current channel", () => {
   );
 });
 
+test("every audit-log command remains executable by capability-based moderators", () => {
+  const auditCommands = [
+    "auditlog",
+    "enable-auditlog",
+    "enableauditlog",
+    "disable-auditlog",
+    "disableauditlog",
+    "test-auditlog",
+    "testauditlog",
+  ];
+  const moderators = [
+    makeMessage({ serverPermissions: ["KickMembers"] }),
+    makeMessage({ serverPermissions: ["BanMembers"] }),
+    makeMessage({ serverPermissions: ["TimeoutMembers"] }),
+    makeMessage({ channelPermissions: ["ManageMessages"] }),
+  ];
+
+  for (const command of auditCommands) {
+    const access = getCommandAccess(command, GAME_COMMANDS);
+    assert.equal(access, COMMAND_ACCESS.FETCH_MANAGER);
+    for (const moderator of moderators) {
+      assert.equal(authorizeCommand(moderator, access).allowed, true);
+    }
+  }
+});
+
 test("ban approval requires owner, Manage Server, or Ban Members", () => {
   for (const message of [
     makeMessage({ owner: true }),

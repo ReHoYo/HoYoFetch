@@ -96,8 +96,9 @@ const automod = createAutomod(client, {
 });
 
 // ── Audit log ───────────────────────────────────────
-initAuditLog(client, {
+const auditLog = initAuditLog(client, {
   sendProtected: tamperProtection.sendProtected,
+  request: apiRequest,
 });
 
 // ── Error handler ──────────────────────────────────
@@ -134,6 +135,9 @@ client.on("ready", async () => {
 
   // Tamper protection: reconcile immediately, then on a fixed interval.
   await tamperProtection.start();
+
+  // Establish or refresh persisted settings baselines before polling begins.
+  await auditLog.start();
 
   // Start polling for unbans (no gateway event exists for these)
   startUnbanPolling(client, {
@@ -282,6 +286,10 @@ client.on("messageCreate", async (message) => {
         CONFIG.prefix
       );
       await safeSend(message.channel, { embeds: [embed] });
+      const auditAction = cmdArgs.join(" ").trim().toLowerCase();
+      if (auditAction && auditAction !== "status") {
+        await auditLog.configurationChanged(message.server.id);
+      }
       return;
     }
 
@@ -486,6 +494,7 @@ async function handleEnableAuditLog(message) {
         ),
       ],
     });
+    await auditLog.configurationChanged(message.server.id);
     return;
   }
 
@@ -497,6 +506,7 @@ async function handleEnableAuditLog(message) {
       }),
     ],
   });
+  await auditLog.configurationChanged(message.server.id);
 }
 
 async function handleDisableAuditLog(message) {
@@ -525,6 +535,7 @@ async function handleDisableAuditLog(message) {
       ),
     ],
   });
+  await auditLog.configurationChanged(serverId);
 }
 
 async function handleTestAuditLog(message) {
@@ -553,6 +564,36 @@ async function handleTestAuditLog(message) {
     `**Attachment evidence stored:** ${status.evidenceFiles} file(s), ${evidenceMB} MB / ${evidenceBudgetMB} MB` +
       (status.evidenceBudgetBytes === 0 ? " (evidence capture disabled)" : ""),
   ];
+  if (status.settings) {
+    const settings = status.settings;
+    lines.push(
+      settings.baselineReady
+        ? `**Settings baseline:** ready (${settings.channels} channels, ${settings.roles} roles, ${settings.emojis} emoji, ${settings.invites} invites)`
+        : "⚠️ **Settings baseline:** not ready yet"
+    );
+    lines.push(
+      `**Webhook coverage:** ${settings.webhookChannelsScanned} channel(s) scanned, ${settings.webhooks} webhook(s) tracked`
+    );
+    if (!settings.emojiCoverage || !settings.inviteCoverage) {
+      const unavailable = [
+        !settings.emojiCoverage ? "emoji" : null,
+        !settings.inviteCoverage ? "invite" : null,
+      ].filter(Boolean);
+      lines.push(
+        `⚠️ **Settings coverage partial:** ${unavailable.join(" and ")} inventory could not be refreshed; check the bot's server permissions.`
+      );
+    }
+    if (settings.webhookFailures > 0) {
+      lines.push(
+        `⚠️ **Webhook coverage partial:** ${settings.webhookFailures} channel scan(s) failed; check Manage Webhooks access.`
+      );
+    }
+    if (settings.lastSuccessAt) {
+      lines.push(
+        `**Last settings reconciliation:** ${new Date(settings.lastSuccessAt).toUTCString()}`
+      );
+    }
+  }
   if (status.consecutiveFailures > 0) {
     lines.push(
       `⚠️ **${status.consecutiveFailures} recent send failure(s)** — if the test embed does not appear, ` +

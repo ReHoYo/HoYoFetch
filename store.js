@@ -1,12 +1,19 @@
 // store.js — Lightweight JSON-file persistence for channel config & known codes
 // ──────────────────────────────────────────────────────────────────────────────
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "fs";
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  renameSync,
+} from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Overridable so tests run hermetically and deployments can mount a volume.
-export const DATA_DIR = process.env.HOYOFETCH_DATA_DIR || join(__dirname, "data");
+export const DATA_DIR =
+  process.env.HOYOFETCH_DATA_DIR || join(__dirname, "data");
 
 // Ensure the data directory exists
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
@@ -17,6 +24,10 @@ const KNOWN_CODES_PATH = join(DATA_DIR, "known_codes.json");
 const SOURCE_CACHE_PATH = join(DATA_DIR, "source_cache.json");
 const PROTECTED_PATH = join(DATA_DIR, "protected_messages.json");
 const AUDITLOG_PATH = join(DATA_DIR, "auditlog.json");
+const SETTINGS_SNAPSHOTS_PATH = join(
+  DATA_DIR,
+  "server_settings_snapshots.json"
+);
 const AUTOMOD_PATH = join(DATA_DIR, "automod.json");
 const AUTOMOD_CASES_PATH = join(DATA_DIR, "automod_cases.json");
 
@@ -156,7 +167,11 @@ export function detectNewCodes(gameKey, currentCodes) {
     return [];
   }
 
-  const fresh = detectFreshCodes(gameKey, knownCodes[gameKey] || [], currentCodes);
+  const fresh = detectFreshCodes(
+    gameKey,
+    knownCodes[gameKey] || [],
+    currentCodes
+  );
 
   // Persist the full current set (replaces expired codes too)
   knownCodes[gameKey] = currentCodes;
@@ -175,8 +190,12 @@ export function detectNewCodes(gameKey, currentCodes) {
  * @return {string[]} — only codes not represented in previousCodes
  */
 export function detectFreshCodes(gameKey, previousCodes, currentCodes) {
-  const previous = new Set(previousCodes.map((code) => getCodeIdentity(gameKey, code)));
-  return currentCodes.filter((code) => !previous.has(getCodeIdentity(gameKey, code)));
+  const previous = new Set(
+    previousCodes.map((code) => getCodeIdentity(gameKey, code))
+  );
+  return currentCodes.filter(
+    (code) => !previous.has(getCodeIdentity(gameKey, code))
+  );
 }
 
 function getCodeIdentity(gameKey, code) {
@@ -366,7 +385,10 @@ const MAX_BACKOFF_MS = 15 * 60 * 1000;
  * @return {number} delay in ms before the next attempt
  */
 export function computeBackoffMs(failures) {
-  const exp = Math.min(BASE_BACKOFF_MS * 2 ** Math.max(0, failures - 1), MAX_BACKOFF_MS);
+  const exp = Math.min(
+    BASE_BACKOFF_MS * 2 ** Math.max(0, failures - 1),
+    MAX_BACKOFF_MS
+  );
   const jitter = 0.8 + Math.random() * 0.4; // 0.8x .. 1.2x
   return Math.round(Math.min(exp * jitter, MAX_BACKOFF_MS));
 }
@@ -388,9 +410,12 @@ export function shouldVerify(record, now) {
   const sinceVerified = now - record.lastVerifiedAt;
 
   let cadenceMs;
-  if (age < 24 * 60 * 60 * 1000) cadenceMs = 0; // < 1 day old: every sweep
-  else if (age < 7 * 24 * 60 * 60 * 1000) cadenceMs = 60 * 60 * 1000; // < 1 week: hourly
-  else if (age < 30 * 24 * 60 * 60 * 1000) cadenceMs = 6 * 60 * 60 * 1000; // < 1 month: every 6h
+  if (age < 24 * 60 * 60 * 1000)
+    cadenceMs = 0; // < 1 day old: every sweep
+  else if (age < 7 * 24 * 60 * 60 * 1000)
+    cadenceMs = 60 * 60 * 1000; // < 1 week: hourly
+  else if (age < 30 * 24 * 60 * 60 * 1000)
+    cadenceMs = 6 * 60 * 60 * 1000; // < 1 month: every 6h
   else cadenceMs = 24 * 60 * 60 * 1000; // older: daily
 
   return sinceVerified >= cadenceMs;
@@ -511,6 +536,32 @@ export function setKnownBans(serverId, userIds) {
   if (!auditLogs[serverId]) return;
   auditLogs[serverId].knownBans = userIds;
   writeJSON(AUDITLOG_PATH, auditLogs);
+}
+
+// ═══════════════════════════════════════════════════
+//  Server-settings audit snapshots
+// ═══════════════════════════════════════════════════
+// These snapshots contain only non-secret server configuration. They let the
+// audit monitor compare fresh REST state after a restart or gateway outage.
+
+let serverSettingsSnapshots = readJSON(SETTINGS_SNAPSHOTS_PATH, {});
+
+export function getServerSettingsSnapshot(serverId) {
+  const snapshot = serverSettingsSnapshots[serverId];
+  return snapshot && typeof snapshot === "object"
+    ? structuredClone(snapshot)
+    : null;
+}
+
+export function setServerSettingsSnapshot(serverId, snapshot) {
+  serverSettingsSnapshots[serverId] = structuredClone(snapshot);
+  writeJSON(SETTINGS_SNAPSHOTS_PATH, serverSettingsSnapshots);
+}
+
+export function removeServerSettingsSnapshot(serverId) {
+  if (!serverSettingsSnapshots[serverId]) return;
+  delete serverSettingsSnapshots[serverId];
+  writeJSON(SETTINGS_SNAPSHOTS_PATH, serverSettingsSnapshots);
 }
 
 // ═══════════════════════════════════════════════════

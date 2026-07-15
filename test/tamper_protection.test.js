@@ -508,7 +508,10 @@ test("the audit pipeline requires and uses a protected sender", async () => {
     logger: silentLogger,
   });
   storeModule.enableAuditLog("SERVER1", "CHANNEL1");
-  initAuditLog(client, { sendProtected: protection.sendProtected });
+  initAuditLog(client, {
+    sendProtected: protection.sendProtected,
+    request: async () => ({ ok: true, status: 200, data: {} }),
+  });
 
   const status = runAuditLogTest("SERVER1");
   assert.equal(status.queuedTest, true);
@@ -518,5 +521,92 @@ test("the audit pipeline requires and uses a protected sender", async () => {
       .some(
         (record) => record.payload.embeds?.[0]?.title === "🧪 Audit Log Test"
       )
+  );
+});
+
+test("a reconciled settings change stays protected through deletion and restoration", async () => {
+  const client = makeClient();
+  const serverId = "SERVERSETTINGS2";
+  const channelId = "CHANNELSETTINGS2";
+  let serverName = "Before";
+  let nextId = 0;
+  const request = async (method, path) => {
+    if (method === "GET" && path.startsWith(`/servers/${serverId}?`)) {
+      return {
+        ok: true,
+        status: 200,
+        data: {
+          _id: serverId,
+          owner: "OWNER2",
+          name: serverName,
+          channels: [
+            {
+              _id: channelId,
+              channel_type: "TextChannel",
+              server: serverId,
+              name: "audit-log",
+            },
+          ],
+          roles: {},
+          default_permissions: 0,
+        },
+      };
+    }
+    if (
+      method === "GET" &&
+      (path === `/servers/${serverId}/emojis` ||
+        path === `/servers/${serverId}/invites` ||
+        path === `/channels/${channelId}/webhooks`)
+    ) {
+      return { ok: true, status: 200, data: [] };
+    }
+    if (method === "POST" && path === `/channels/${channelId}/messages`) {
+      return {
+        ok: true,
+        status: 200,
+        data: { _id: `RESTOREDSETTING${++nextId}` },
+      };
+    }
+    return { ok: false, status: 404 };
+  };
+  const protection = createTamperProtection(client, {
+    send: async () => ({ _id: `SETTINGAUDIT${++nextId}` }),
+    request,
+    restoreFloorMs: 0,
+    logger: silentLogger,
+  });
+  storeModule.enableAuditLog(serverId, channelId);
+  const monitor = initAuditLog(client, {
+    sendProtected: protection.sendProtected,
+    request,
+  });
+
+  await monitor.reconcileServer(serverId);
+  serverName = "After";
+  await monitor.reconcileServer(serverId);
+  await waitFor(() =>
+    storeModule
+      .getAllProtectedMessages()
+      .some(
+        (record) =>
+          record.payload.embeds?.[0]?.title === "⚙️ Server Settings Updated"
+      )
+  );
+
+  const record = storeModule
+    .getAllProtectedMessages()
+    .find(
+      (entry) =>
+        entry.payload.embeds?.[0]?.title === "⚙️ Server Settings Updated"
+    );
+  await protection.handleRawEvent({
+    type: "MessageDelete",
+    id: record.messageId,
+  });
+  assert.equal(
+    storeModule
+      .getAllProtectedMessages()
+      .find((entry) => entry.recordId === record.recordId).restorations,
+    1
   );
 });
