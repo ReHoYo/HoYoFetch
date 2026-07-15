@@ -59,6 +59,7 @@ import {
   CommandRateLimiter,
   getCommandAccess,
   isSafeId,
+  refreshCommandAuthorization,
   safeErrorSummary,
   SingleFlight,
 } from "./security.js";
@@ -158,7 +159,7 @@ client.on("messageCreate", async (message) => {
   const access = getCommandAccess(accessKey, COMMAND_GAME_MAP);
   if (!access) return;
 
-  const authorization = authorizeCommand(message, access);
+  let authorization = authorizeCommand(message, access);
   if (!authorization.authorId) return;
 
   const rateLimit = commandRateLimiter.check(authorization.authorId);
@@ -168,6 +169,17 @@ client.on("messageCreate", async (message) => {
     }
     logCommandAudit(cmd, authorization, "rate_limited");
     return;
+  }
+
+  if (
+    !authorization.allowed &&
+    authorization.reason === "insufficient_permission"
+  ) {
+    authorization = await refreshCommandAuthorization(
+      client,
+      authorization,
+      access
+    );
   }
 
   if (!authorization.allowed) {
@@ -757,6 +769,7 @@ async function sendRateLimited(channel, retryAfterMs) {
 function logCommandAudit(command, authorization, outcome) {
   console.log(
     `🔐  command=${command} outcome=${outcome} reason=${authorization.reason} ` +
+      `source=${authorization.permissionSource ?? "context"} ` +
       `actor=${auditAlias(authorization.authorId)} ` +
       `channel=${auditAlias(authorization.channelId)}`
   );

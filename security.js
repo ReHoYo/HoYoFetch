@@ -36,6 +36,14 @@ const SERVER_MODERATOR_PERMISSIONS = Object.freeze([
   "TimeoutMembers",
 ]);
 
+const PERMISSION_BITS = Object.freeze({
+  ManageServer: 2n ** 1n,
+  KickMembers: 2n ** 6n,
+  BanMembers: 2n ** 7n,
+  TimeoutMembers: 2n ** 8n,
+  ManageMessages: 2n ** 23n,
+});
+
 const SAFE_ID_PATTERN = /^[A-Za-z0-9]+$/;
 const AUDIT_SALT = randomBytes(16);
 
@@ -44,7 +52,7 @@ export function getCommandAccess(body, commandGameMap = {}) {
   if (FETCH_MANAGEMENT_COMMANDS.has(body)) {
     return COMMAND_ACCESS.FETCH_MANAGER;
   }
-  if (AUDIT_LOG_COMMANDS.has(body)) return COMMAND_ACCESS.ADMIN;
+  if (AUDIT_LOG_COMMANDS.has(body)) return COMMAND_ACCESS.FETCH_MANAGER;
   if (body === "emojimode" || body.startsWith("emojimode ")) {
     return COMMAND_ACCESS.ADMIN;
   }
@@ -66,18 +74,19 @@ export function authorizeCommand(message, access = COMMAND_ACCESS.MEMBER) {
   const context = getServerMessageContext(message);
   if (!context.allowed) return context;
 
-  const { authorId, channel, member, server } = context;
+  const cachedContext = { ...context, permissionSource: "cache" };
+  const { authorId, channel, member, server } = cachedContext;
   const isOwner = server.ownerId === authorId;
   const isAdmin = isOwner || hasPermission(member, server, "ManageServer");
 
   if (access === COMMAND_ACCESS.MEMBER) {
-    return { ...context, reason: "member" };
+    return { ...cachedContext, reason: "member" };
   }
 
   if (access === COMMAND_ACCESS.ADMIN) {
     return isAdmin
-      ? { ...context, reason: isOwner ? "owner" : "admin" }
-      : denied("insufficient_permission", context);
+      ? { ...cachedContext, reason: isOwner ? "owner" : "admin" }
+      : denied("insufficient_permission", cachedContext);
   }
 
   if (access === COMMAND_ACCESS.FETCH_MANAGER) {
@@ -88,14 +97,254 @@ export function authorizeCommand(message, access = COMMAND_ACCESS.MEMBER) {
 
     if (isAdmin || isModerator) {
       return {
-        ...context,
+        ...cachedContext,
         reason: isOwner ? "owner" : isAdmin ? "admin" : "moderator",
       };
     }
-    return denied("insufficient_permission", context);
+    return denied("insufficient_permission", cachedContext);
   }
 
-  return denied("unknown_access_policy", context);
+  return denied("unknown_access_policy", cachedContext);
+}
+
+/**
+ * Re-evaluate a cached permission denial from fresh Stoat REST snapshots.
+ * This never mutates revolt.js's caches and fails closed on any bad response.
+ */
+export async function refreshCommandAuthorization(
+  client,
+  cachedAuthorization,
+  access,
+  { logger = console } = {}
+) {
+  if (
+    cachedAuthorization?.allowed ||
+    cachedAuthorization?.reason !== "insufficient_permission" ||
+    access === COMMAND_ACCESS.MEMBER
+  ) {
+    return cachedAuthorization;
+  }
+
+  const { authorId, channelId, server } = cachedAuthorization;
+  const serverId = server?.id;
+  if (
+    !client?.api?.get ||
+    !isSafeId(authorId) ||
+    !isSafeId(channelId) ||
+    !isSafeId(serverId)
+  ) {
+    return denied("insufficient_permission", {
+      ...cachedAuthorization,
+      permissionSource: "refresh_failed",
+    });
+  }
+
+  try {
+    const [serverSnapshot, memberResponse, channelSnapshot] = await Promise.all(
+      [
+        client.api.get(`/servers/${serverId}`),
+        client.api.get(`/servers/${serverId}/members/${authorId}`, {
+          roles: false,
+        }),
+        client.api.get(`/channels/${channelId}`),
+      ]
+    );
+    const memberSnapshot = memberResponse?.member ?? memberResponse;
+    const evaluated = evaluatePermissionSnapshot({
+      authorId,
+      server: serverSnapshot,
+      member: memberSnapshot,
+      channel: channelSnapshot,
+    });
+
+    if (!evaluated.valid) {
+      return denied("insufficient_permission", {
+        ...cachedAuthorization,
+        permissionSource: "refresh_failed",
+      });
+    }
+
+    const isAdmin =
+      evaluated.isOwner ||
+      hasPermissionBit(
+        evaluated.serverPermissions,
+        PERMISSION_BITS.ManageServer
+      );
+    const isModerator =
+      SERVER_MODERATOR_PERMISSIONS.some((permission) =>
+        hasPermissionBit(
+          evaluated.serverPermissions,
+          PERMISSION_BITS[permission]
+        )
+      ) ||
+      hasPermissionBit(
+        evaluated.channelPermissions,
+        PERMISSION_BITS.ManageMessages
+      );
+    const allowed =
+      access === COMMAND_ACCESS.ADMIN
+        ? isAdmin
+        : access === COMMAND_ACCESS.FETCH_MANAGER && (isAdmin || isModerator);
+
+    if (!allowed) {
+      return denied("insufficient_permission", {
+        ...cachedAuthorization,
+        permissionSource: "refreshed",
+      });
+    }
+
+    return {
+      ...cachedAuthorization,
+      allowed: true,
+      reason: evaluated.isOwner ? "owner" : isAdmin ? "admin" : "moderator",
+      permissionSource: "refreshed",
+    };
+  } catch (error) {
+    logger.warn?.(
+      `permission refresh failed actor=${auditAlias(authorId)} ` +
+        `server=${auditAlias(serverId)} channel=${auditAlias(channelId)} ` +
+        safeErrorSummary(error)
+    );
+    return denied("insufficient_permission", {
+      ...cachedAuthorization,
+      permissionSource: "refresh_failed",
+    });
+  }
+}
+
+/**
+ * Calculate effective server and channel permissions from raw API snapshots.
+ * Permission values are int64 numbers, so BigInt avoids 32-bit truncation.
+ */
+export function evaluatePermissionSnapshot({
+  authorId,
+  server,
+  member,
+  channel,
+  now = Date.now(),
+} = {}) {
+  const invalid = {
+    valid: false,
+    isOwner: false,
+    serverPermissions: 0n,
+    channelPermissions: 0n,
+  };
+
+  if (
+    !isSafeId(authorId) ||
+    !server ||
+    !member ||
+    !channel ||
+    server._id !== member._id?.server ||
+    server._id !== channel.server ||
+    member._id?.user !== authorId ||
+    channel.channel_type !== "TextChannel"
+  ) {
+    return invalid;
+  }
+
+  if (server.owner === authorId) {
+    return {
+      valid: true,
+      isOwner: true,
+      serverPermissions: PERMISSION_BITS.ManageServer,
+      channelPermissions: PERMISSION_BITS.ManageMessages,
+    };
+  }
+
+  const timeoutAt = member.timeout ? new Date(member.timeout).getTime() : null;
+  if (timeoutAt !== null && (!Number.isFinite(timeoutAt) || timeoutAt > now)) {
+    return {
+      valid: Number.isFinite(timeoutAt),
+      isOwner: false,
+      serverPermissions: 0n,
+      channelPermissions: 0n,
+    };
+  }
+
+  const serverPermissions = toPermissionBits(server.default_permissions);
+  const roleIds = member.roles ?? [];
+  const roles = server.roles ?? {};
+  if (
+    serverPermissions === null ||
+    !Array.isArray(roleIds) ||
+    !isPlainObject(roles) ||
+    !isPlainObject(channel.role_permissions ?? {})
+  ) {
+    return invalid;
+  }
+
+  const orderedRoles = [];
+  for (const roleId of roleIds) {
+    if (!isSafeId(roleId) || !isPlainObject(roles[roleId])) return invalid;
+    if (
+      roles[roleId].rank !== undefined &&
+      !Number.isFinite(roles[roleId].rank)
+    ) {
+      return invalid;
+    }
+    orderedRoles.push({ id: roleId, ...roles[roleId] });
+  }
+  orderedRoles.sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0));
+
+  let effectiveServer = serverPermissions;
+  for (const role of orderedRoles) {
+    effectiveServer = applyPermissionOverride(
+      effectiveServer,
+      role.permissions
+    );
+    if (effectiveServer === null) return invalid;
+  }
+
+  let effectiveChannel = effectiveServer;
+  if (
+    channel.default_permissions !== undefined &&
+    channel.default_permissions !== null
+  ) {
+    effectiveChannel = applyPermissionOverride(
+      effectiveChannel,
+      channel.default_permissions
+    );
+    if (effectiveChannel === null) return invalid;
+  }
+  for (const role of orderedRoles) {
+    const override = channel.role_permissions?.[role.id];
+    if (!override) continue;
+    effectiveChannel = applyPermissionOverride(effectiveChannel, override);
+    if (effectiveChannel === null) return invalid;
+  }
+
+  return {
+    valid: true,
+    isOwner: false,
+    serverPermissions: effectiveServer,
+    channelPermissions: effectiveChannel,
+  };
+}
+
+function applyPermissionOverride(current, override) {
+  if (!isPlainObject(override)) return null;
+  const allow = toPermissionBits(override.a);
+  const deny = toPermissionBits(override.d);
+  if (allow === null || deny === null) return null;
+  return (current | allow) & ~deny;
+}
+
+function toPermissionBits(value) {
+  if (typeof value === "bigint") return value >= 0n ? value : null;
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : null;
+  }
+  if (typeof value === "string" && /^\d+$/.test(value)) return BigInt(value);
+  return null;
+}
+
+function hasPermissionBit(value, permission) {
+  return (value & permission) === permission;
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function getServerMessageContext(message) {

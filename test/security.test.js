@@ -5,8 +5,10 @@ import {
   authorizeCommand,
   COMMAND_ACCESS,
   CommandRateLimiter,
+  evaluatePermissionSnapshot,
   getCommandAccess,
   isSafeId,
+  refreshCommandAuthorization,
   safeErrorSummary,
   SingleFlight,
 } from "../security.js";
@@ -18,6 +20,63 @@ const GAME_COMMANDS = {
   fetchhi3: "honkai3rd",
   fetchnte: "nte",
 };
+
+const PERMISSIONS = {
+  ManageServer: 2 ** 1,
+  KickMembers: 2 ** 6,
+  BanMembers: 2 ** 7,
+  TimeoutMembers: 2 ** 8,
+  ManageMessages: 2 ** 23,
+};
+
+function makePermissionSnapshots({
+  owner = "OWNER123",
+  defaultPermissions = 0,
+  memberRoles = [],
+  roles = {},
+  channelDefault = { a: 0, d: 0 },
+  channelRoles = {},
+  timeout = null,
+} = {}) {
+  return {
+    server: {
+      _id: "SERVER123",
+      owner,
+      default_permissions: defaultPermissions,
+      roles,
+    },
+    member: {
+      _id: { server: "SERVER123", user: "USER123" },
+      joined_at: new Date(0).toISOString(),
+      roles: memberRoles,
+      timeout,
+    },
+    channel: {
+      channel_type: "TextChannel",
+      _id: "CHANNEL123",
+      server: "SERVER123",
+      name: "general",
+      default_permissions: channelDefault,
+      role_permissions: channelRoles,
+    },
+  };
+}
+
+function makeRefreshClient(snapshots, { fail = false, calls = [] } = {}) {
+  return {
+    api: {
+      async get(path) {
+        calls.push(path);
+        if (fail) throw new Error("permission service unavailable");
+        if (path === "/servers/SERVER123") return snapshots.server;
+        if (path === "/servers/SERVER123/members/USER123")
+          return snapshots.member;
+        if (path === "/channels/CHANNEL123") return snapshots.channel;
+        throw new Error("unexpected permission route");
+      },
+    },
+  };
+}
 
 function makeMessage({
   owner = false,
@@ -87,8 +146,14 @@ test("command classification protects every fetch-management variant", () => {
     );
   }
 
-  assert.equal(getCommandAccess("restart", GAME_COMMANDS), COMMAND_ACCESS.ADMIN);
-  assert.equal(getCommandAccess("emojimode", GAME_COMMANDS), COMMAND_ACCESS.ADMIN);
+  assert.equal(
+    getCommandAccess("restart", GAME_COMMANDS),
+    COMMAND_ACCESS.ADMIN
+  );
+  assert.equal(
+    getCommandAccess("emojimode", GAME_COMMANDS),
+    COMMAND_ACCESS.ADMIN
+  );
   for (const command of [
     "auditlog",
     "enable-auditlog",
@@ -98,7 +163,10 @@ test("command classification protects every fetch-management variant", () => {
     "test-auditlog",
     "testauditlog",
   ]) {
-    assert.equal(getCommandAccess(command, GAME_COMMANDS), COMMAND_ACCESS.ADMIN);
+    assert.equal(
+      getCommandAccess(command, GAME_COMMANDS),
+      COMMAND_ACCESS.FETCH_MANAGER
+    );
   }
   assert.equal(
     getCommandAccess("emojimode custom", GAME_COMMANDS),
@@ -111,20 +179,14 @@ test("command classification protects every fetch-management variant", () => {
 test("ordinary members keep public commands but cannot manage fetch or restart", () => {
   const message = makeMessage();
 
-  assert.equal(
-    authorizeCommand(message, COMMAND_ACCESS.MEMBER).allowed,
-    true
-  );
+  assert.equal(authorizeCommand(message, COMMAND_ACCESS.MEMBER).allowed, true);
   const fetchManagement = authorizeCommand(
     message,
     COMMAND_ACCESS.FETCH_MANAGER
   );
   assert.equal(fetchManagement.allowed, false);
   assert.equal(fetchManagement.reason, "insufficient_permission");
-  assert.equal(
-    authorizeCommand(message, COMMAND_ACCESS.ADMIN).allowed,
-    false
-  );
+  assert.equal(authorizeCommand(message, COMMAND_ACCESS.ADMIN).allowed, false);
 });
 
 test("owners and Manage Server administrators can manage fetch and restart", () => {
@@ -136,19 +198,12 @@ test("owners and Manage Server administrators can manage fetch and restart", () 
       authorizeCommand(message, COMMAND_ACCESS.FETCH_MANAGER).allowed,
       true
     );
-    assert.equal(
-      authorizeCommand(message, COMMAND_ACCESS.ADMIN).allowed,
-      true
-    );
+    assert.equal(authorizeCommand(message, COMMAND_ACCESS.ADMIN).allowed, true);
   }
 });
 
 test("each server moderation permission can manage fetch but cannot restart", () => {
-  for (const permission of [
-    "KickMembers",
-    "BanMembers",
-    "TimeoutMembers",
-  ]) {
+  for (const permission of ["KickMembers", "BanMembers", "TimeoutMembers"]) {
     const message = makeMessage({ serverPermissions: [permission] });
     assert.equal(
       authorizeCommand(message, COMMAND_ACCESS.FETCH_MANAGER).reason,
@@ -177,6 +232,222 @@ test("Manage Messages is evaluated against the current channel", () => {
     authorizeCommand(serverOnlyValue, COMMAND_ACCESS.FETCH_MANAGER).allowed,
     false
   );
+});
+
+test("permission snapshots preserve high bits and ordered allow/deny precedence", () => {
+  const highBit = 2 ** 35;
+  const snapshots = makePermissionSnapshots({
+    defaultPermissions: highBit,
+    memberRoles: ["LOWROLE", "HIGHROLE"],
+    roles: {
+      LOWROLE: {
+        name: "Low",
+        rank: 10,
+        permissions: { a: PERMISSIONS.ManageServer, d: 0 },
+      },
+      HIGHROLE: {
+        name: "High",
+        rank: 1,
+        permissions: { a: 0, d: PERMISSIONS.ManageServer },
+      },
+    },
+  });
+  const evaluated = evaluatePermissionSnapshot({
+    authorId: "USER123",
+    ...snapshots,
+  });
+
+  assert.equal(evaluated.valid, true);
+  assert.equal(evaluated.serverPermissions & BigInt(highBit), BigInt(highBit));
+  assert.equal(
+    evaluated.serverPermissions & BigInt(PERMISSIONS.ManageServer),
+    0n
+  );
+});
+
+test("permission snapshots apply channel role overrides after server roles", () => {
+  const snapshots = makePermissionSnapshots({
+    memberRoles: ["MODROLE"],
+    roles: {
+      MODROLE: {
+        name: "Moderator",
+        rank: 1,
+        permissions: { a: 0, d: 0 },
+      },
+    },
+    channelRoles: {
+      MODROLE: { a: PERMISSIONS.ManageMessages, d: 0 },
+    },
+  });
+  const evaluated = evaluatePermissionSnapshot({
+    authorId: "USER123",
+    ...snapshots,
+  });
+
+  assert.equal(evaluated.valid, true);
+  assert.equal(
+    evaluated.channelPermissions & BigInt(PERMISSIONS.ManageMessages),
+    BigInt(PERMISSIONS.ManageMessages)
+  );
+});
+
+test("fresh snapshots recover cached Manage Server false denials", async () => {
+  const snapshots = makePermissionSnapshots({
+    memberRoles: ["ADMINROLE"],
+    roles: {
+      ADMINROLE: {
+        name: "Administrator",
+        rank: 1,
+        permissions: { a: PERMISSIONS.ManageServer, d: 0 },
+      },
+    },
+  });
+  const calls = [];
+  const cached = authorizeCommand(makeMessage(), COMMAND_ACCESS.ADMIN);
+  const refreshed = await refreshCommandAuthorization(
+    makeRefreshClient(snapshots, { calls }),
+    cached,
+    COMMAND_ACCESS.ADMIN
+  );
+
+  assert.equal(cached.allowed, false);
+  assert.equal(refreshed.allowed, true);
+  assert.equal(refreshed.reason, "admin");
+  assert.equal(refreshed.permissionSource, "refreshed");
+  assert.equal(calls.length, 3);
+});
+
+test("fresh snapshots authorize every moderator capability for audit commands", async () => {
+  for (const permission of ["KickMembers", "BanMembers", "TimeoutMembers"]) {
+    const snapshots = makePermissionSnapshots({
+      memberRoles: ["MODROLE"],
+      roles: {
+        MODROLE: {
+          name: "Moderator",
+          rank: 1,
+          permissions: { a: PERMISSIONS[permission], d: 0 },
+        },
+      },
+    });
+    const cached = authorizeCommand(
+      makeMessage(),
+      COMMAND_ACCESS.FETCH_MANAGER
+    );
+    const refreshed = await refreshCommandAuthorization(
+      makeRefreshClient(snapshots),
+      cached,
+      COMMAND_ACCESS.FETCH_MANAGER
+    );
+    assert.equal(refreshed.reason, "moderator", permission);
+  }
+
+  const channelSnapshots = makePermissionSnapshots({
+    memberRoles: ["CHANNELMOD"],
+    roles: {
+      CHANNELMOD: {
+        name: "Channel Moderator",
+        rank: 1,
+        permissions: { a: 0, d: 0 },
+      },
+    },
+    channelRoles: {
+      CHANNELMOD: { a: PERMISSIONS.ManageMessages, d: 0 },
+    },
+  });
+  const cached = authorizeCommand(makeMessage(), COMMAND_ACCESS.FETCH_MANAGER);
+  const refreshed = await refreshCommandAuthorization(
+    makeRefreshClient(channelSnapshots),
+    cached,
+    COMMAND_ACCESS.FETCH_MANAGER
+  );
+  assert.equal(refreshed.reason, "moderator");
+});
+
+test("moderator snapshots cannot authorize admin-only commands", async () => {
+  const snapshots = makePermissionSnapshots({
+    memberRoles: ["MODROLE"],
+    roles: {
+      MODROLE: {
+        name: "Moderator",
+        rank: 1,
+        permissions: { a: PERMISSIONS.BanMembers, d: 0 },
+      },
+    },
+  });
+  const cached = authorizeCommand(makeMessage(), COMMAND_ACCESS.ADMIN);
+  const refreshed = await refreshCommandAuthorization(
+    makeRefreshClient(snapshots),
+    cached,
+    COMMAND_ACCESS.ADMIN
+  );
+  assert.equal(refreshed.allowed, false);
+  assert.equal(refreshed.permissionSource, "refreshed");
+});
+
+test("timeouts, malformed snapshots, cross-server data, and API failures fail closed", async () => {
+  const timedOut = makePermissionSnapshots({
+    defaultPermissions: PERMISSIONS.ManageServer,
+    timeout: new Date(Date.now() + 60_000).toISOString(),
+  });
+  assert.equal(
+    evaluatePermissionSnapshot({ authorId: "USER123", ...timedOut })
+      .serverPermissions,
+    0n
+  );
+
+  const malformed = makePermissionSnapshots();
+  malformed.server.default_permissions = Number.NaN;
+  assert.equal(
+    evaluatePermissionSnapshot({ authorId: "USER123", ...malformed }).valid,
+    false
+  );
+
+  const crossServer = makePermissionSnapshots();
+  crossServer.channel.server = "OTHERSERVER";
+  assert.equal(
+    evaluatePermissionSnapshot({ authorId: "USER123", ...crossServer }).valid,
+    false
+  );
+
+  const output = [];
+  const cached = authorizeCommand(makeMessage(), COMMAND_ACCESS.ADMIN);
+  const failed = await refreshCommandAuthorization(
+    makeRefreshClient(makePermissionSnapshots(), { fail: true }),
+    cached,
+    COMMAND_ACCESS.ADMIN,
+    { logger: { warn: (message) => output.push(message) } }
+  );
+  assert.equal(failed.allowed, false);
+  assert.equal(failed.permissionSource, "refresh_failed");
+  assert.doesNotMatch(output.join("\n"), /USER123|SERVER123|CHANNEL123/);
+});
+
+test("cached approvals and member commands never trigger permission refresh", async () => {
+  const calls = [];
+  const client = makeRefreshClient(makePermissionSnapshots(), { calls });
+  const cachedAdmin = authorizeCommand(
+    makeMessage({ serverPermissions: ["ManageServer"] }),
+    COMMAND_ACCESS.ADMIN
+  );
+  const cachedMember = authorizeCommand(makeMessage(), COMMAND_ACCESS.MEMBER);
+
+  assert.equal(
+    await refreshCommandAuthorization(
+      client,
+      cachedAdmin,
+      COMMAND_ACCESS.ADMIN
+    ),
+    cachedAdmin
+  );
+  assert.equal(
+    await refreshCommandAuthorization(
+      client,
+      cachedMember,
+      COMMAND_ACCESS.MEMBER
+    ),
+    cachedMember
+  );
+  assert.equal(calls.length, 0);
 });
 
 test("role names alone do not grant access and permission errors fail closed", () => {

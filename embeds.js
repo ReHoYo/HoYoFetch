@@ -122,7 +122,7 @@ export function buildHelpEmbed(prefix) {
     ],
     [
       `${prefix}AuditLog [status|here|#channel|off]`,
-      "View or configure the server audit log _(Manage Server only)_",
+      "View or configure the server audit log _(admins/mods only)_",
     ],
     [`${prefix}HelpHoyoFetch`, "Show this help message"],
   ];
