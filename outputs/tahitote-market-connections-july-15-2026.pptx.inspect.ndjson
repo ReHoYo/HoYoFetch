@@ -1,0 +1,158 @@
+{"kind":"deck","id":"pr/cmuf8j","name":"Deck"}
+{"kind":"layout","layoutId":"e8cf7db3-d836-4847-98b8-33b916b11085","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"f82f762b-d100-4729-8732-c1bef0202214","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/b9ek78","slide":1,"title":"MARKET CONNECTIONS","textShapes":6}
+{"kind":"shape","id":"sh/obutob2t","slide":1,"bbox":[1115,0,165,720]}
+{"kind":"shape","id":"sh/nalcf618","slide":1,"bbox":[1065,0,28,720]}
+{"kind":"textbox","id":"sh/29cbm1kn","slide":1,"text":"MARKET CONNECTIONS","textPreview":"MARKET CONNECTIONS","textChars":18,"textLines":1,"bbox":[48,42,560,34]}
+{"kind":"textbox","id":"sh/xgnulgja","slide":1,"text":"TahiTote","textPreview":"TahiTote","textChars":8,"textLines":1,"bbox":[48,170,900,116]}
+{"kind":"textbox","id":"sh/cfutsb2p","slide":1,"text":"Mula sa retaso, tungo sa kita","textPreview":"Mula sa retaso, tungo sa kita","textChars":29,"textLines":1,"bbox":[48,308,780,58]}
+{"kind":"shape","id":"sh/belcj614","slide":1,"bbox":[48,404,735,4]}
+{"kind":"textbox","id":"sh/adcbq1kz","slide":1,"text":"Bagong Silang, Caloocan City","textPreview":"Bagong Silang, Caloocan City","textChars":28,"textLines":1,"bbox":[48,464,670,42]}
+{"kind":"textbox","id":"sh/dkju9c36","slide":1,"text":"Hulyo 15, 2026","textPreview":"Hulyo 15, 2026","textChars":14,"textLines":1,"bbox":[48,518,360,38]}
+{"kind":"textbox","id":"sh/sjatg72l","slide":1,"text":"DLSU Service Learning Group 1","textPreview":"DLSU Service Learning Group 1","textChars":29,"textLines":1,"bbox":[48,606,560,30]}
+{"kind":"notes","id":"nt/b9ek78","slide":1,"text":"Magandang araw po sa inyong lahat! Maraming salamat po kina Tita Merlie, Tita Joy, Analyn, at sa buong GK Australia sa oras ninyo.\nKami po ang Market Connections team mula DLSU. Maikli lang ang usapan natin: paano natin masisigurong mas madaling makita, bilhin, at ulit-uliting i-order ang TahiTote.\n[Ngumiti at mag-pause bago lumipat sa susunod na slide.]"}
+{"kind":"slide","id":"sl/5dqea3","slide":2,"title":"ANO ANG MARKET CONNECTIONS?","textShapes":10}
+{"kind":"textbox","id":"sh/369wj2tc","slide":2,"text":"ANO ANG MARKET CONNECTIONS?","textPreview":"ANO ANG MARKET CONNECTIONS?","textChars":27,"textLines":1,"bbox":[48,34,650,26]}
+{"kind":"textbox","id":"sh/o7idc7ux","slide":2,"text":"Ang mahalaga: tuloy-tuloy ang order","textPreview":"Ang mahalaga: tuloy-tuloy ang order","textChars":35,"textLines":1,"bbox":[48,66,1168,70]}
+{"kind":"shape","id":"sh/p8relcbi","slide":2,"bbox":[48,148,1168,1]}
+{"kind":"textbox","id":"sh/uhgv6xcv","slide":2,"text":"Hindi lang paglagay ng produkto online—kundi pagtiyak na may bumibili buwan-buwan.","textPreview":"Hindi lang paglagay ng produkto online—kundi pagtiyak na may bumibili buwan-buwan.","textChars":82,"textLines":1,"bbox":[48,202,560,250]}
+{"kind":"shape","id":"sh/fipcf2tg","slide":2,"bbox":[640,194,1,390]}
+{"kind":"textbox","id":"sh/g3yd87u1","slide":2,"text":"LAYUNIN BAWAT BUWAN","textPreview":"LAYUNIN BAWAT BUWAN","textChars":19,"textLines":1,"bbox":[690,206,480,30]}
+{"kind":"textbox","id":"sh/h4ruhsb6","slide":2,"text":"100–200","textPreview":"100–200","textChars":7,"textLines":1,"bbox":[690,252,480,94]}
+{"kind":"textbox","id":"sh/6dgv2dcj","slide":2,"text":"TahiTote na mabenta","textPreview":"TahiTote na mabenta","textChars":19,"textLines":1,"bbox":[690,348,480,44]}
+{"kind":"shape","id":"sh/7epcbit4","slide":2,"bbox":[690,428,500,142]}
+{"kind":"textbox","id":"sh/rmpo3i90","slide":2,"text":"₱4,000–₱12,000","textPreview":"₱4,000–₱12,000","textChars":14,"textLines":1,"bbox":[720,454,440,56]}
+{"kind":"textbox","id":"sh/61g7ud8f","slide":2,"text":"kita kada buwan para sa hati ng mga miyembro at puhunan pabalik sa negosyo","textPreview":"kita kada buwan para sa hati ng mga miyembro at puhunan pabalik sa negosyo","textChars":74,"textLines":1,"bbox":[720,518,440,52]}
+{"kind":"textbox","id":"sh/tor658rq","slide":2,"text":"TAHITOTE  •  MARKET CONNECTIONS","textPreview":"TAHITOTE  •  MARKET CONNECTIONS","textChars":31,"textLines":1,"bbox":[48,666,430,24]}
+{"kind":"textbox","id":"sh/snipwnq5","slide":2,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[1180,662,52,28]}
+{"kind":"notes","id":"nt/5dqea3","slide":2,"text":"Ang pinakasentro ng Market Connections ay hindi isang beses na benta. Ang gusto natin ay may tuloy-tuloy na order.\nKung 100 hanggang 200 bags ang mabenta kada buwan, ang target nating pondo para sa hatian ay nasa ₱4,000 hanggang ₱12,000 kada buwan—para sa mga miyembro at sa puhunan pabalik sa negosyo.\nHuwag muna nating himayin ang computation dito; makikita natin mamaya kung paano ito konektado sa presyo."}
+{"kind":"slide","id":"sl/5g4oj9","slide":3,"title":"PRAKTIKAL NA SUPORTA","textShapes":16}
+{"kind":"textbox","id":"sh/6hsf25cf","slide":3,"text":"PRAKTIKAL NA SUPORTA","textPreview":"PRAKTIKAL NA SUPORTA","textChars":20,"textLines":1,"bbox":[48,34,650,26]}
+{"kind":"textbox","id":"sh/tk3yd0b6","slide":3,"text":"Apat na bagay ang aasikasuhin namin","textPreview":"Apat na bagay ang aasikasuhin namin","textChars":35,"textLines":1,"bbox":[48,66,1168,70]}
+{"kind":"shape","id":"sh/sjux4ful","slide":3,"bbox":[48,148,1168,1]}
+{"kind":"shape","id":"sh/fmlgfatw","slide":3,"bbox":[48,190,548,178]}
+{"kind":"textbox","id":"sh/elcf65cr","slide":3,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[72,212,78,38]}
+{"kind":"textbox","id":"sh/1o3yhkb2","slide":3,"text":"Purchase Order Form","textPreview":"Purchase Order Form","textChars":19,"textLines":1,"bbox":[152,212,410,42]}
+{"kind":"textbox","id":"sh/gnux8fuh","slide":3,"text":"Tala ng ano, ilan, presyo, at kanino ang bawat order.","textPreview":"Tala ng ano, ilan, presyo, at kanino ang bawat order.","textChars":53,"textLines":1,"bbox":[152,268,410,76]}
+{"kind":"shape","id":"sh/3a5gjut8","slide":3,"bbox":[650,190,548,178]}
+{"kind":"textbox","id":"sh/2pwfapcn","slide":3,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[674,212,78,38]}
+{"kind":"textbox","id":"sh/8f2p4z25","slide":3,"text":"Bayad sa GCash","textPreview":"Bayad sa GCash","textChars":14,"textLines":1,"bbox":[754,212,410,42]}
+{"kind":"textbox","id":"sh/9gb6d43q","slide":3,"text":"Madaling pagtanggap at pag-check ng bayad online.","textPreview":"Madaling pagtanggap at pag-check ng bayad online.","textChars":49,"textLines":1,"bbox":[754,268,410,76]}
+{"kind":"shape","id":"sh/mdk72pkz","slide":3,"bbox":[48,414,548,178]}
+{"kind":"textbox","id":"sh/7etobulk","slide":3,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[72,436,78,38]}
+{"kind":"textbox","id":"sh/wj2p8z2h","slide":3,"text":"Pag-post sa Facebook","textPreview":"Pag-post sa Facebook","textChars":20,"textLines":1,"bbox":[152,436,410,42]}
+{"kind":"textbox","id":"sh/hkv6h43m","slide":3,"text":"Malinaw na larawan, presyo, at paraan ng pag-order.","textPreview":"Malinaw na larawan, presyo, at paraan ng pag-order.","textChars":51,"textLines":1,"bbox":[152,492,410,76]}
+{"kind":"shape","id":"sh/uhk769kb","slide":3,"bbox":[650,414,548,178]}
+{"kind":"textbox","id":"sh/vitofulw","slide":3,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[674,436,78,38]}
+{"kind":"textbox","id":"sh/4nmpcj2d","slide":3,"text":"Paglapit sa Mamimili","textPreview":"Paglapit sa Mamimili","textChars":20,"textLines":1,"bbox":[754,436,410,42]}
+{"kind":"textbox","id":"sh/5ovqlo3y","slide":3,"text":"Maramihang order para sa mga okasyon, bisita, at katuwang ng GK.","textPreview":"Maramihang order para sa mga okasyon, bisita, at katuwang ng GK.","textChars":64,"textLines":1,"bbox":[754,492,410,76]}
+{"kind":"textbox","id":"sh/d4r65ov2","slide":3,"text":"TAHITOTE  •  MARKET CONNECTIONS","textPreview":"TAHITOTE  •  MARKET CONNECTIONS","textChars":31,"textLines":1,"bbox":[48,666,430,24]}
+{"kind":"textbox","id":"sh/s3ipwjuh","slide":3,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[1180,662,52,28]}
+{"kind":"notes","id":"nt/5g4oj9","slide":3,"text":"Una, Purchase Order Form: para alam natin kung ano, ilan, magkano, at kanino ang order.\nIkalawa, GCash: para mas madaling tumanggap ng bayad online.\nIkatlo, Facebook posting: larawan, presyo, at malinaw na paraan ng pag-order.\nIkaapat, paglapit sa mamimili: hindi lang tayo maghihintay ng mensahe. Lalapit din tayo sa mga maramihang order para sa okasyon, pati sa mga bumibisita at katuwang ng GK."}
+{"kind":"slide","id":"sl/zdaibc","slide":4,"title":"PAANO GUMAGANA ANG ORDER?","textShapes":17}
+{"kind":"textbox","id":"sh/red4f65w","slide":4,"text":"PAANO GUMAGANA ANG ORDER?","textPreview":"PAANO GUMAGANA ANG ORDER?","textChars":25,"textLines":1,"bbox":[48,34,650,26]}
+{"kind":"textbox","id":"sh/sfm58b6h","slide":4,"text":"Apat na hakbang lang ang pagbili","textPreview":"Apat na hakbang lang ang pagbili","textChars":32,"textLines":1,"bbox":[48,66,1168,70]}
+{"kind":"shape","id":"sh/dgv6hgn2","slide":4,"bbox":[48,148,1168,1]}
+{"kind":"shape","id":"sh/i9kn21of","slide":4,"bbox":[118,276,932,3]}
+{"kind":"shape","id":"sh/jat4b650","slide":4,"bbox":[94,246,58,58]}
+{"kind":"textbox","id":"sh/4b254r65","slide":4,"text":"1","textPreview":"1","textChars":1,"textLines":1,"bbox":[94,255,58,38]}
+{"kind":"textbox","id":"sh/5cbmdwnq","slide":4,"text":"Makikita","textPreview":"Makikita","textChars":8,"textLines":1,"bbox":[70,342,245,42]}
+{"kind":"textbox","id":"sh/ulknyho3","slide":4,"text":"Makikita ng mamimili ang TahiTote sa Facebook.","textPreview":"Makikita ng mamimili ang TahiTote sa Facebook.","textChars":46,"textLines":1,"bbox":[70,398,245,130]}
+{"kind":"shape","id":"sh/v6t47m5o","slide":4,"bbox":[386,246,58,58]}
+{"kind":"textbox","id":"sh/z2horih8","slide":4,"text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[386,255,58,38]}
+{"kind":"textbox","id":"sh/e187ydgn","slide":4,"text":"Magme-message","textPreview":"Magme-message","textChars":13,"textLines":1,"bbox":[362,342,245,42]}
+{"kind":"textbox","id":"sh/l4z6tszy","slide":4,"text":"Magtatanong o mag-o-order ang mamimili.","textPreview":"Magtatanong o mag-o-order ang mamimili.","textChars":39,"textLines":1,"bbox":[362,398,245,130]}
+{"kind":"shape","id":"sh/03qp0nyt","slide":4,"bbox":[678,246,58,58]}
+{"kind":"textbox","id":"sh/n6hov2h4","slide":4,"text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[678,255,58,38]}
+{"kind":"textbox","id":"sh/m5872xgj","slide":4,"text":"Itatala","textPreview":"Itatala","textChars":7,"textLines":1,"bbox":[654,342,245,42]}
+{"kind":"textbox","id":"sh/98j6xsza","slide":4,"text":"Ilalagay sa form ang bag, dami, at presyo.","textPreview":"Ilalagay sa form ang bag, dami, at presyo.","textChars":42,"textLines":1,"bbox":[654,398,245,130]}
+{"kind":"shape","id":"sh/87qp4nyp","slide":4,"bbox":[970,246,58,58]}
+{"kind":"textbox","id":"sh/3axojyh0","slide":4,"text":"4","textPreview":"4","textChars":1,"textLines":1,"bbox":[970,255,58,38]}
+{"kind":"textbox","id":"sh/29onqtgf","slide":4,"text":"Magbabayad","textPreview":"Magbabayad","textChars":10,"textLines":1,"bbox":[946,342,245,42]}
+{"kind":"textbox","id":"sh/6hwje54f","slide":4,"text":"GCash, saka aayusin ang delivery o pickup.","textPreview":"GCash, saka aayusin ang delivery o pickup.","textChars":42,"textLines":1,"bbox":[946,398,245,130]}
+{"kind":"shape","id":"sh/r250na5k","slide":4,"bbox":[70,570,1120,46]}
+{"kind":"textbox","id":"sh/s3e1gvm5","slide":4,"text":"Facebook → Mensahe → Order Form → GCash → Hatid / Pickup","textPreview":"Facebook → Mensahe → Order Form → GCash → Hatid / Pickup","textChars":56,"textLines":1,"bbox":[98,579,1064,32]}
+{"kind":"textbox","id":"sh/t4nip0nq","slide":4,"text":"TAHITOTE  •  MARKET CONNECTIONS","textPreview":"TAHITOTE  •  MARKET CONNECTIONS","textChars":31,"textLines":1,"bbox":[48,666,430,24]}
+{"kind":"textbox","id":"sh/idwzal43","slide":4,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[1180,662,52,28]}
+{"kind":"notes","id":"nt/zdaibc","slide":4,"text":"Ganito lang kasimple ang flow. Una, makikita sa Facebook. Pangalawa, magme-message ang buyer. Pangatlo, itatala natin ang order. Pang-apat, magbabayad sa GCash at aayusin ang delivery o pickup.\n[Ituro ang bawat numero habang nagsasalita. Huwag basahin nang sabay-sabay ang buong slide.]"}
+{"kind":"slide","id":"sl/ulxzws","slide":5,"title":"IISANG LUGAR, MAS MADALING ALAGAAN","textShapes":11}
+{"kind":"textbox","id":"sh/tgrap4v2","slide":5,"text":"IISANG LUGAR, MAS MADALING ALAGAAN","textPreview":"IISANG LUGAR, MAS MADALING ALAGAAN","textChars":34,"textLines":1,"bbox":[48,34,650,26]}
+{"kind":"textbox","id":"sh/6dgru9wb","slide":5,"text":"Facebook ang iisang pangunahing tindahan natin","textPreview":"Facebook ang iisang pangunahing tindahan natin","textChars":46,"textLines":1,"bbox":[48,66,1168,70]}
+{"kind":"shape","id":"sh/re9snedw","slide":5,"bbox":[48,148,1168,1]}
+{"kind":"textbox","id":"sh/gji90jed","slide":5,"text":"Facebook\nna lang","textPreview":"Facebook | na lang","textChars":16,"textLines":2,"bbox":[48,210,500,154]}
+{"kind":"textbox","id":"sh/1kratovy","slide":5,"text":"Mas pamilyar, mas madaling balikan, at hindi kailangang matuto ng panibagong app.","textPreview":"Mas pamilyar, mas madaling balikan, at hindi kailangang matuto ng panibagong app.","textChars":81,"textLines":1,"bbox":[48,394,520,120]}
+{"kind":"shape","id":"sh/eh0ry9wn","slide":5,"bbox":[620,194,1,402]}
+{"kind":"textbox","id":"sh/fi9sred8","slide":5,"text":"IISANG FB PAGE","textPreview":"IISANG FB PAGE","textChars":14,"textLines":1,"bbox":[674,204,450,30]}
+{"kind":"textbox","id":"sh/wny9ofe9","slide":5,"text":"SLG1 + SLG2","textPreview":"SLG1 + SLG2","textChars":11,"textLines":1,"bbox":[674,254,470,52]}
+{"kind":"textbox","id":"sh/ho7ahkvu","slide":5,"text":"Magkasamang mamamahala sa parehong page para pare-pareho ang impormasyon.","textPreview":"Magkasamang mamamahala sa parehong page para pare-pareho ang impormasyon.","textChars":73,"textLines":1,"bbox":[674,318,470,92]}
+{"kind":"shape","id":"sh/50rqdsvq","slide":5,"bbox":[674,452,500,118]}
+{"kind":"textbox","id":"sh/4zi9k7u5","slide":5,"text":"Facebook Marketplace","textPreview":"Facebook Marketplace","textChars":20,"textLines":1,"bbox":[704,474,430,42]}
+{"kind":"textbox","id":"sh/3yp8b2dk","slide":5,"text":"Dito ipo-post at ibebenta ang mga produkto.","textPreview":"Dito ipo-post at ibebenta ang mga produkto.","textChars":43,"textLines":1,"bbox":[704,524,430,32]}
+{"kind":"textbox","id":"sh/ixgrixwz","slide":5,"text":"TAHITOTE  •  MARKET CONNECTIONS","textPreview":"TAHITOTE  •  MARKET CONNECTIONS","textChars":31,"textLines":1,"bbox":[48,666,430,24]}
+{"kind":"textbox","id":"sh/d4rahcvm","slide":5,"text":"05","textPreview":"05","textChars":2,"textLines":1,"bbox":[1180,662,52,28]}
+{"kind":"notes","id":"nt/ulxzws","slide":5,"text":"Facebook lang ang pangunahing channel natin. Iisang page ito na sabay na aalagaan ng SLG1 at SLG2.\nGagamitin din natin ang Facebook Marketplace para sa mismong pagbebenta.\nKung natural na lumabas sa usapan: ito rin ang iminungkahi ng Group 7 sa pagsasanay nila. Magandang patunay iyon—magkahiwalay kaming nag-isip pero pareho ang naging direksiyon."}
+{"kind":"slide","id":"sl/vyjo96","slide":6,"title":"PAG-UUSAPAN NATIN","textShapes":7}
+{"kind":"textbox","id":"sh/tsjipkry","slide":6,"text":"PAG-UUSAPAN NATIN","textPreview":"PAG-UUSAPAN NATIN","textChars":17,"textLines":1,"bbox":[48,34,650,26]}
+{"kind":"textbox","id":"sh/65szu5s7","slide":6,"text":"Sino ang komportable munang tumanggap sa GCash?","textPreview":"Sino ang komportable munang tumanggap sa GCash?","textChars":47,"textLines":1,"bbox":[48,66,1168,70]}
+{"kind":"shape","id":"sh/7q10na9s","slide":6,"bbox":[48,148,1168,1]}
+{"kind":"textbox","id":"sh/gvah0fqp","slide":6,"text":"Wala pa tayong opisyal na GCash account para sa grupo.","textPreview":"Wala pa tayong opisyal na GCash account para sa grupo.","textChars":54,"textLines":1,"bbox":[48,190,900,54]}
+{"kind":"shape","id":"sh/hw3itkru","slide":6,"bbox":[48,278,1168,212]}
+{"kind":"textbox","id":"sh/utszypsj","slide":6,"text":"Sino sa inyo ang komportable munang gumamit ng sariling GCash, habang wala pang opisyal na account?","textPreview":"Sino sa inyo ang komportable munang gumamit ng sariling GCash, habang wala pang opisyal na account?","textChars":99,"textLines":1,"bbox":[94,318,1076,132]}
+{"kind":"textbox","id":"sh/vu10ra94","slide":6,"text":"Pansamantala lang ito—hanggang magkaroon ng opisyal na account ng grupo.","textPreview":"Pansamantala lang ito—hanggang magkaroon ng opisyal na account ng grupo.","textChars":72,"textLines":1,"bbox":[222,532,836,54]}
+{"kind":"textbox","id":"sh/4zuh4zql","slide":6,"text":"TAHITOTE  •  MARKET CONNECTIONS","textPreview":"TAHITOTE  •  MARKET CONNECTIONS","textChars":31,"textLines":1,"bbox":[48,666,430,24]}
+{"kind":"textbox","id":"sh/503ix4r6","slide":6,"text":"06","textPreview":"06","textChars":2,"textLines":1,"bbox":[1180,662,52,28]}
+{"kind":"notes","id":"nt/vyjo96","slide":6,"text":"Open question po ito sa lahat. Wala pa tayong opisyal na GCash account para sa grupo.\nSino po ang komportable munang gumamit ng sariling GCash? Walang kailangang sagutin agad at walang pipilitin.\nPansamantala lang ito. Kapag may opisyal nang account ang grupo, doon ililipat ang proseso.\n[Mag-pause. Maghanda ng notebook at isulat kung sino ang kusang mag-volunteer at kung ano ang concerns nila.]"}
+{"kind":"slide","id":"sl/q8xxgz","slide":7,"title":"KUMPIRMASYON NG PRESYO","textShapes":16}
+{"kind":"textbox","id":"sh/utkjy9kv","slide":7,"text":"KUMPIRMASYON NG PRESYO","textPreview":"KUMPIRMASYON NG PRESYO","textChars":22,"textLines":1,"bbox":[48,34,650,26]}
+{"kind":"textbox","id":"sh/hgvi9o3m","slide":7,"text":"Tama ang presyong ginagamit ninyo ngayon","textPreview":"Tama ang presyong ginagamit ninyo ngayon","textChars":40,"textLines":1,"bbox":[48,66,1168,70]}
+{"kind":"shape","id":"sh/wf210j21","slide":7,"bbox":[48,148,1168,1]}
+{"kind":"textbox","id":"sh/3id0byls","slide":7,"text":"Pinagtagpo namin ang costing ng tatlong grupo at ang aktuwal ninyong presyo—kasya at may malinaw na tubo.","textPreview":"Pinagtagpo namin ang costing ng tatlong grupo at ang aktuwal ninyong presyo—kasya at may malinaw na tubo.","textChars":105,"textLines":1,"bbox":[48,158,1130,46]}
+{"kind":"shape","id":"sh/ih4j2tk7","slide":7,"bbox":[48,232,348,206]}
+{"kind":"textbox","id":"sh/5kvido3i","slide":7,"text":"GASTOS","textPreview":"GASTOS","textChars":6,"textLines":1,"bbox":[74,256,296,28]}
+{"kind":"textbox","id":"sh/4jm1432x","slide":7,"text":"₱19.40–₱32","textPreview":"₱19.40–₱32","textChars":10,"textLines":1,"bbox":[74,302,296,58]}
+{"kind":"textbox","id":"sh/rmdkfylo","slide":7,"text":"materyales + packaging kada bag","textPreview":"materyales + packaging kada bag","textChars":31,"textLines":1,"bbox":[74,366,296,54]}
+{"kind":"shape","id":"sh/ql4j6tk3","slide":7,"bbox":[444,232,348,206]}
+{"kind":"textbox","id":"sh/cn650fm5","slide":7,"text":"KARANIWANG PRESYO","textPreview":"KARANIWANG PRESYO","textChars":17,"textLines":1,"bbox":[470,256,296,28]}
+{"kind":"textbox","id":"sh/dofmtknq","slide":7,"text":"₱180","textPreview":"₱180","textChars":4,"textLines":1,"bbox":[470,302,296,58]}
+{"kind":"textbox","id":"sh/qlony54z","slide":7,"text":"nasa aktuwal ninyong presyo na ₱150–₱250, depende sa tela","textPreview":"nasa aktuwal ninyong presyo na ₱150–₱250, depende sa tela","textChars":57,"textLines":1,"bbox":[470,366,296,54]}
+{"kind":"shape","id":"sh/bmx4ra5k","slide":7,"bbox":[840,232,348,206]}
+{"kind":"textbox","id":"sh/0rq54fmh","slide":7,"text":"NATITIRA","textPreview":"NATITIRA","textChars":8,"textLines":1,"bbox":[866,256,296,28]}
+{"kind":"textbox","id":"sh/lsz6xknm","slide":7,"text":"₱148–₱161","textPreview":"₱148–₱161","textChars":9,"textLines":1,"bbox":[866,302,296,58]}
+{"kind":"textbox","id":"sh/ypon254b","slide":7,"text":"kada bag, matapos ang materyales + packaging","textPreview":"kada bag, matapos ang materyales + packaging","textChars":44,"textLines":1,"bbox":[866,366,296,54]}
+{"kind":"shape","id":"sh/zqh4va5w","slide":7,"bbox":[48,468,1168,96]}
+{"kind":"textbox","id":"sh/8fq58zmd","slide":7,"text":"Ang natitira ay para sa mga miyembro: hahatiin bilang kita, at may bahagi para sa susunod na materyales.","textPreview":"Ang natitira ay para sa mga miyembro: hahatiin bilang kita, at may bahagi para sa susunod na materyales.","textChars":104,"textLines":1,"bbox":[82,490,1100,54]}
+{"kind":"textbox","id":"sh/9gz614ny","slide":7,"text":"100–200 TahiTote/buwan = ₱4,000–₱12,000 para sa hatian at muling puhunan","textPreview":"100–200 TahiTote/buwan = ₱4,000–₱12,000 para sa hatian at muling puhunan","textChars":72,"textLines":1,"bbox":[158,592,964,36]}
+{"kind":"textbox","id":"sh/hcfmlkf2","slide":7,"text":"TAHITOTE  •  MARKET CONNECTIONS","textPreview":"TAHITOTE  •  MARKET CONNECTIONS","textChars":31,"textLines":1,"bbox":[48,666,430,24]}
+{"kind":"textbox","id":"sh/gbm5czeh","slide":7,"text":"07","textPreview":"07","textChars":2,"textLines":1,"bbox":[1180,662,52,28]}
+{"kind":"notes","id":"nt/q8xxgz","slide":7,"text":"Ang mahalagang punto: hindi po kami nagdadala ng bagong presyong ipapataw. Kinumpirma lang namin na tama at sustainable ang presyong ginagamit ninyo na ngayon.\nAng gastos sa materyales at packaging ay ₱19.40 hanggang ₱32 kada bag. Ang karaniwang presyo ay ₱180, nasa aktuwal ninyong range na ₱150 hanggang ₱250 depende sa tela.\nKaya may natitirang humigit-kumulang ₱148 hanggang ₱161 kada bag. Hindi iyon para sa amin—para iyon sa mga miyembro: may hahatiin bilang kita at may ibabalik na puhunan para sa susunod na materyales.\nIugnay pabalik sa slide 2: sa 100–200 bags kada buwan, ang target na pondo para sa hatian at muling puhunan ay ₱4,000–₱12,000 kada buwan."}
+{"kind":"slide","id":"sl/mqfo5c","slide":8,"title":"NGAYONG ARAW","textShapes":14}
+{"kind":"textbox","id":"sh/5wbq5kj2","slide":8,"text":"NGAYONG ARAW","textPreview":"NGAYONG ARAW","textChars":12,"textLines":1,"bbox":[48,34,650,26]}
+{"kind":"textbox","id":"sh/ytkru5kr","slide":8,"text":"Tatlong bagay ang gagawin natin ngayong araw","textPreview":"Tatlong bagay ang gagawin natin ngayong araw","textChars":44,"textLines":1,"bbox":[48,66,1168,70]}
+{"kind":"shape","id":"sh/jut83a1w","slide":8,"bbox":[48,148,1168,1]}
+{"kind":"shape","id":"sh/szm90zit","slide":8,"bbox":[48,292,1168,1]}
+{"kind":"textbox","id":"sh/tkvq9kje","slide":8,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[48,202,82,40]}
+{"kind":"textbox","id":"sh/6xkryp0n","slide":8,"text":"Demo ng paggawa ng TahiTote","textPreview":"Demo ng paggawa ng TahiTote","textChars":27,"textLines":1,"bbox":[150,194,470,45]}
+{"kind":"textbox","id":"sh/7yd87u18","slide":8,"text":"Sabay nating tingnan ang proseso mula simula hanggang matapos.","textPreview":"Sabay nating tingnan ang proseso mula simula hanggang matapos.","textChars":62,"textLines":1,"bbox":[650,197,540,58]}
+{"kind":"shape","id":"sh/gnm94zip","slide":8,"bbox":[48,412,1168,1]}
+{"kind":"textbox","id":"sh/hovqd4ja","slide":8,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[48,322,82,40]}
+{"kind":"textbox","id":"sh/xo7ql4ne","slide":8,"text":"Kumpirmasyon ng costing at presyo","textPreview":"Kumpirmasyon ng costing at presyo","textChars":33,"textLines":1,"bbox":[150,314,470,45]}
+{"kind":"textbox","id":"sh/cnypczmt","slide":8,"text":"Sisiguraduhin nating pare-pareho ang gagamiting bilang.","textPreview":"Sisiguraduhin nating pare-pareho ang gagamiting bilang.","textChars":55,"textLines":1,"bbox":[650,317,540,58]}
+{"kind":"shape","id":"sh/bmpoju58","slide":8,"bbox":[48,532,1168,1]}
+{"kind":"textbox","id":"sh/alw7a94n","slide":8,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[48,442,82,40]}
+{"kind":"textbox","id":"sh/lc7qpona","slide":8,"text":"Usapan tungkol sa order at bayad","textPreview":"Usapan tungkol sa order at bayad","textChars":32,"textLines":1,"bbox":[150,434,470,45]}
+{"kind":"textbox","id":"sh/kbypgjmp","slide":8,"text":"Purchase Order Form, Facebook, at pansamantalang GCash setup.","textPreview":"Purchase Order Form, Facebook, at pansamantalang GCash setup.","textChars":61,"textLines":1,"bbox":[650,437,540,58]}
+{"kind":"shape","id":"sh/zap8ne54","slide":8,"bbox":[48,570,1168,58]}
+{"kind":"textbox","id":"sh/y9g7e94j","slide":8,"text":"Maiuuwi: video ng paggawa na puwedeng balikan anumang oras.","textPreview":"Maiuuwi: video ng paggawa na puwedeng balikan anumang oras.","textChars":59,"textLines":1,"bbox":[78,583,1108,32]}
+{"kind":"textbox","id":"sh/1gn6dkn6","slide":8,"text":"TAHITOTE  •  MARKET CONNECTIONS","textPreview":"TAHITOTE  •  MARKET CONNECTIONS","textChars":31,"textLines":1,"bbox":[48,666,430,24]}
+{"kind":"textbox","id":"sh/0fep4fml","slide":8,"text":"08","textPreview":"08","textChars":2,"textLines":1,"bbox":[1180,662,52,28]}
+{"kind":"notes","id":"nt/mqfo5c","slide":8,"text":"Ngayong araw, may demo muna ng paggawa, pagkatapos ay kumpirmasyon ng costing at presyo, saka usapan tungkol sa order at bayad.\nWalang kit o materyales na iaabot ngayong araw. Ang maiiwan sa inyo ay video ng paggawa ng TahiTote na puwedeng balikan anumang oras.\nIpakita ito bilang pangmatagalang gabay: hindi isang beses lang magagamit, at puwedeng panoorin ulit ng sinumang miyembro habang gumagawa."}
+{"kind":"slide","id":"sl/goemw6","slide":9,"title":"TAHITOTE","textShapes":5}
+{"kind":"shape","id":"sh/lwbmpkzi","slide":9,"bbox":[1115,0,165,720]}
+{"kind":"textbox","id":"sh/ytk3e5g7","slide":9,"text":"TAHITOTE","textPreview":"TAHITOTE","textChars":8,"textLines":1,"bbox":[48,42,260,30]}
+{"kind":"textbox","id":"sh/jut4nahc","slide":9,"text":"Maraming\nsalamat!","textPreview":"Maraming | salamat!","textChars":17,"textLines":2,"bbox":[48,176,780,188]}
+{"kind":"textbox","id":"sh/8zmlkzy9","slide":9,"text":"May tanong o alalahanin? Pag-usapan natin bago tayo matapos.","textPreview":"May tanong o alalahanin? Pag-usapan natin bago tayo matapos.","textChars":60,"textLines":1,"bbox":[48,400,760,74]}
+{"kind":"shape","id":"sh/t0vmtkzu","slide":9,"bbox":[48,508,760,4]}
+{"kind":"textbox","id":"sh/6x43ipg3","slide":9,"text":"Messenger","textPreview":"Messenger","textChars":9,"textLines":1,"bbox":[48,548,170,30]}
+{"kind":"textbox","id":"sh/7yd4ruho","slide":9,"text":"Merlie Serdan Gonzales  •  Jhoye Ituralde Bernal  •  Analyn Caayao","textPreview":"Merlie Serdan Gonzales  •  Jhoye Ituralde Bernal  •  Analyn Caayao","textChars":66,"textLines":1,"bbox":[48,586,930,56]}
+{"kind":"notes","id":"nt/goemw6","slide":9,"text":"Maraming salamat po sa pakikinig at sa pagtitiwala. Bago tayo matapos, may tanong, concern, o bagay po bang gusto ninyong linawin?\n[Buksan ang floor. Huwag agad magmadali sa closing; bigyan ng ilang segundong katahimikan para makapag-isip ang lahat.]"}

@@ -19,7 +19,11 @@ import { isEvidenceEnabled, perFileCapBytes } from "./evidence-store.js";
  * @param  {boolean} opts.isAuto  — whether this is an auto-fetch (only new codes)
  * @return {Object}  SendableEmbed
  */
-export function buildCodesEmbed(gameKey, codes, { isAuto = false, page = null } = {}) {
+export function buildCodesEmbed(
+  gameKey,
+  codes,
+  { isAuto = false, page = null } = {}
+) {
   const game = GAMES[gameKey];
   if (!game) throw new Error(`Unknown game: ${gameKey}`);
 
@@ -81,10 +85,7 @@ export function buildNoCodesEmbed(gameKey) {
  */
 export function buildHelpEmbed(prefix) {
   const cmds = [
-    [
-      `${prefix}FetchGI`,
-      "Fetch active **Genshin Impact** redemption codes",
-    ],
+    [`${prefix}FetchGI`, "Fetch active **Genshin Impact** redemption codes"],
     [
       `${prefix}FetchHSR`,
       "Fetch active **Honkai: Star Rail** redemption codes",
@@ -93,14 +94,8 @@ export function buildHelpEmbed(prefix) {
       `${prefix}FetchZZZ`,
       "Fetch active **Zenless Zone Zero** redemption codes",
     ],
-    [
-      `${prefix}FetchHI3`,
-      "Fetch active **Honkai Impact 3rd** codes",
-    ],
-    [
-      `${prefix}FetchNTE`,
-      "Fetch active **Neverness to Everness** codes",
-    ],
+    [`${prefix}FetchHI3`, "Fetch active **Honkai Impact 3rd** codes"],
+    [`${prefix}FetchNTE`, "Fetch active **Neverness to Everness** codes"],
     [
       `${prefix}EnableFetch`,
       "Enable hourly auto-fetch of **HoYoverse + NTE** codes in this channel _(admins/mods only)_",
@@ -126,21 +121,10 @@ export function buildHelpEmbed(prefix) {
       "Restart the bot process after deploying updates _(owner/admin only)_",
     ],
     [
-      `${prefix}Enable-AuditLog`,
-      "**Mods only.** Post a live log of server actions (deletes, edits, joins/leaves, bans, channel/role changes) to this channel",
+      `${prefix}AuditLog [status|here|#channel|off]`,
+      "View or configure the server audit log _(Manage Server only)_",
     ],
-    [
-      `${prefix}Disable-AuditLog`,
-      "Turn off audit logging for this server",
-    ],
-    [
-      `${prefix}Test-AuditLog`,
-      "Send a test event through the audit log to verify it is working",
-    ],
-    [
-      `${prefix}HelpHoyoFetch`,
-      "Show this help message",
-    ],
+    [`${prefix}HelpHoyoFetch`, "Show this help message"],
   ];
 
   const description = cmds
@@ -151,7 +135,7 @@ export function buildHelpEmbed(prefix) {
     title: "📖 HoyoFetch — Command Reference",
     description:
       description +
-      "\n\n_All commands are **case-insensitive**._\n" +
+      "\n\n_Command names are **case-insensitive**; IDs are preserved exactly._\n" +
       "_Commands are accepted from human server members only._\n" +
       "_GI / HSR / ZZZ codes from [hoyo-codes.seria.moe](https://hoyo-codes.seria.moe)_\n" +
       "_HI3 codes from [api.ennead.cc](https://api.ennead.cc/mihoyo)_\n" +
@@ -215,15 +199,126 @@ export function buildRestoredEmbed(originalEmbed, count) {
  * @return {Object}   SendableEmbed
  */
 export function buildAuditEmbed(title, lines, colour) {
-  const description = [...lines, "", `_${new Date().toUTCString()}_`].join("\n");
+  const timestamp = `_${new Date().toUTCString()}_`;
+  const body = lines.join("\n");
+  const budget = MAX_DESCRIPTION_LENGTH - timestamp.length - 2;
+  const boundedBody =
+    body.length > budget ? `${body.slice(0, Math.max(0, budget - 1))}…` : body;
+  const description = `${boundedBody}\n\n${timestamp}`;
   return { title, description, colour };
+}
+
+function auditText(value, max, fallback = "*(none)*") {
+  const text = typeof value === "string" ? value : "";
+  if (!text) return fallback;
+  return text.length > max ? `${text.slice(0, Math.max(0, max - 1))}…` : text;
+}
+
+export function buildAuditMessageDeleteEmbed({
+  author = "Unknown user",
+  channelId,
+  content,
+  messageId,
+  attachmentLines = [],
+  suspects = "the author or a moderator",
+} = {}) {
+  const lines = [
+    `**Author:** ${author}`,
+    `**Channel:** <#${channelId}>`,
+    `**Content:** ${
+      content === undefined
+        ? `*content unavailable — sent before the bot started or expired from cache${messageId ? ` (${messageId})` : ""}*`
+        : auditText(content, 1200, "*(no text — attachment/embed only)*")
+    }`,
+  ];
+  if (attachmentLines.length)
+    lines.push("", "**Attachments:**", ...attachmentLines);
+  lines.push(
+    `**Possible deleter (heuristic — the platform does not report who deleted):** ${auditText(suspects, 300, "the author or a moderator")}`
+  );
+  return buildAuditEmbed("🗑️ Message Deleted", lines, "#E74C3C");
+}
+
+export function buildAuditBulkDeleteEmbed({
+  channelId,
+  count = 0,
+  entries = [],
+  suspects,
+} = {}) {
+  const shown = entries.slice(0, 5);
+  if (entries.length > 5) shown.push(`_…and ${entries.length - 5} more_`);
+  const lines = [
+    `**Channel:** <#${channelId}>`,
+    `**Count:** ${count}`,
+    "",
+    ...shown,
+  ];
+  if (suspects) {
+    lines.push(
+      "",
+      `**Possible deleter (heuristic — the platform does not report who deleted):** ${auditText(suspects, 300)}`
+    );
+  }
+  return buildAuditEmbed("🗑️ Bulk Message Delete", lines, "#C0392B");
+}
+
+export function buildAuditMessageEditEmbed({
+  author = "Unknown user",
+  channelId,
+  before,
+  after,
+} = {}) {
+  return buildAuditEmbed(
+    "✏️ Message Edited",
+    [
+      `**Author:** ${author}`,
+      `**Channel:** <#${channelId}>`,
+      `**Before:** ${auditText(before, 800, "*content unavailable — message predates the archive*")}`,
+      `**After:** ${auditText(after, 800, "*(no text)*")}`,
+    ],
+    "#F1C40F"
+  );
+}
+
+export function buildAuditMemberEmbed({
+  title,
+  user = "Unknown user",
+  lines = [],
+  colour = "#E67E22",
+} = {}) {
+  return buildAuditEmbed(
+    title ?? "👤 Member Updated",
+    [`**User:** ${user}`, ...lines],
+    colour
+  );
+}
+
+export function buildAuditChannelEmbed({
+  title,
+  channelId,
+  lines = [],
+  colour = "#3498DB",
+} = {}) {
+  const channelLine = channelId ? [`**Channel:** <#${channelId}>`] : [];
+  return buildAuditEmbed(
+    title ?? "📁 Channel Updated",
+    [...channelLine, ...lines],
+    colour
+  );
+}
+
+export function buildAuditServerUpdateEmbed(lines = []) {
+  return buildAuditEmbed("⚙️ Server Updated", lines, "#9B59B6");
 }
 
 /**
  * Build the confirmation embed shown when audit logging is enabled,
  * including the platform limitations that can't be worked around.
  */
-export function buildAuditLogEnabledEmbed(prefix, { moved = false, previousChannelId = null } = {}) {
+export function buildAuditLogEnabledEmbed(
+  prefix,
+  { moved = false, previousChannelId = null } = {}
+) {
   const intro = moved
     ? `Audit logging has been **moved** here from <#${previousChannelId}>.`
     : "Audit logging is now **active** in this channel.";
@@ -239,13 +334,13 @@ export function buildAuditLogEnabledEmbed(prefix, { moved = false, previousChann
       "I will post a record of server actions here: message edits/deletes, channel/role/server changes, " +
       "member joins/leaves, bans, timeouts, nickname and role changes, and emoji changes.\n\n" +
       "**⚠️ Platform limitations (Stoat has no native audit log, so these can't be worked around):**\n" +
-      "- Deletes/edits never say **who** performed them — only the change itself is shown.\n" +
-      "- A kick and a voluntary leave look identical — logged as \"left or was kicked\".\n" +
+      "- Deletes never say **who** performed them. Delete entries show a clearly labeled heuristic list of the author and members with **Manage Messages**; it is not proof of who acted.\n" +
+      '- Newer Stoat backends may identify a member departure as a leave, kick, or ban. Older backends are logged as "left or was removed".\n' +
       "- Bans are detected when a member leaves; unbans are detected by periodic polling (up to ~5 min delay).\n" +
       `${evidenceBullet}\n` +
       "- Messages sent before enablement or while I was offline can't be recovered.\n" +
       "- Invites, webhooks, permission overrides, and voice actions aren't reported by the platform at all.\n\n" +
-      `Use \`${prefix}Disable-AuditLog\` to turn this off.`,
+      `Use \`${prefix}AuditLog off\` to turn this off.`,
     colour: "#2ECC71",
   };
 }

@@ -89,6 +89,17 @@ test("command classification protects every fetch-management variant", () => {
 
   assert.equal(getCommandAccess("restart", GAME_COMMANDS), COMMAND_ACCESS.ADMIN);
   assert.equal(getCommandAccess("emojimode", GAME_COMMANDS), COMMAND_ACCESS.ADMIN);
+  for (const command of [
+    "auditlog",
+    "enable-auditlog",
+    "enableauditlog",
+    "disable-auditlog",
+    "disableauditlog",
+    "test-auditlog",
+    "testauditlog",
+  ]) {
+    assert.equal(getCommandAccess(command, GAME_COMMANDS), COMMAND_ACCESS.ADMIN);
+  }
   assert.equal(
     getCommandAccess("emojimode custom", GAME_COMMANDS),
     COMMAND_ACCESS.ADMIN

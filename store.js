@@ -446,6 +446,9 @@ export function enableAuditLog(serverId, channelId) {
   };
 }
 
+// Unified /AuditLog command name for the same persisted server → channel seam.
+export const setAuditLogChannel = enableAuditLog;
+
 /**
  * Disable audit logging for a server.
  * @param {string} serverId

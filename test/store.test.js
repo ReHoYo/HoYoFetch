@@ -77,3 +77,11 @@ test("source cache round-trips through atomic writes", () => {
   store.setSourceCache("nte", { lastAttemptAt: 123, codes: [] });
   assert.deepEqual(store.getSourceCache("nte"), { lastAttemptAt: 123, codes: [] });
 });
+
+test("audit log channel configuration round-trips and disables", () => {
+  const result = store.setAuditLogChannel("server-audit", "channel-audit");
+  assert.equal(result.changed, true);
+  assert.equal(store.getAuditLogChannel("server-audit"), "channel-audit");
+  store.disableAuditLog("server-audit");
+  assert.equal(store.getAuditLogChannel("server-audit"), null);
+});

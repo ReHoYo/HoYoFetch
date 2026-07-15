@@ -15,6 +15,7 @@ const FETCH_MANAGEMENT_COMMANDS = new Set([
 ]);
 
 const AUDIT_LOG_COMMANDS = new Set([
+  "auditlog",
   "enable-auditlog",
   "enableauditlog",
   "disable-auditlog",
@@ -40,9 +41,10 @@ const AUDIT_SALT = randomBytes(16);
 
 export function getCommandAccess(body, commandGameMap = {}) {
   if (Object.hasOwn(commandGameMap, body)) return COMMAND_ACCESS.MEMBER;
-  if (FETCH_MANAGEMENT_COMMANDS.has(body) || AUDIT_LOG_COMMANDS.has(body)) {
+  if (FETCH_MANAGEMENT_COMMANDS.has(body)) {
     return COMMAND_ACCESS.FETCH_MANAGER;
   }
+  if (AUDIT_LOG_COMMANDS.has(body)) return COMMAND_ACCESS.ADMIN;
   if (body === "emojimode" || body.startsWith("emojimode ")) {
     return COMMAND_ACCESS.ADMIN;
   }
@@ -66,8 +68,7 @@ export function authorizeCommand(message, access = COMMAND_ACCESS.MEMBER) {
 
   const { authorId, channel, member, server } = context;
   const isOwner = server.ownerId === authorId;
-  const isAdmin =
-    isOwner || hasPermission(member, server, "ManageServer");
+  const isAdmin = isOwner || hasPermission(member, server, "ManageServer");
 
   if (access === COMMAND_ACCESS.MEMBER) {
     return { ...context, reason: "member" };

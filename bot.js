@@ -62,7 +62,12 @@ import {
   safeErrorSummary,
   SingleFlight,
 } from "./security.js";
-import { initAuditLog, startUnbanPolling, runAuditLogTest } from "./auditlog.js";
+import {
+  handleAuditLogCommand,
+  initAuditLog,
+  startUnbanPolling,
+  runAuditLogTest,
+} from "./auditlog.js";
 import { createTamperProtection } from "./tamper-protection.js";
 
 // ── Validate token ─────────────────────────────────
@@ -96,9 +101,9 @@ client.on("error", (err) => {
   if (errData?.type === "InvalidSession") {
     console.error(
       "❌  Your BOT_TOKEN is invalid or expired.\n" +
-      "   1. Go to your Revolt bot settings and copy a fresh token\n" +
-      "   2. Paste it into .env as BOT_TOKEN=<token>\n" +
-      "   3. Restart the bot"
+        "   1. Go to your Revolt bot settings and copy a fresh token\n" +
+        "   2. Paste it into .env as BOT_TOKEN=<token>\n" +
+        "   3. Restart the bot"
     );
     process.exit(1);
   }
@@ -143,9 +148,14 @@ client.on("messageCreate", async (message) => {
   // Must start with the prefix
   if (!raw.toLowerCase().startsWith(CONFIG.prefix.toLowerCase())) return;
 
-  // Strip prefix and lowercase for matching
-  const body = raw.slice(CONFIG.prefix.length).toLowerCase();
-  const access = getCommandAccess(body, COMMAND_GAME_MAP);
+  // Preserve arguments exactly (Stoat IDs are case-sensitive) while matching
+  // only the command word case-insensitively.
+  const rawBody = raw.slice(CONFIG.prefix.length).trim();
+  const [cmdWord = "", ...cmdArgs] = rawBody.split(/\s+/);
+  const cmd = cmdWord.toLowerCase();
+  const accessKey =
+    cmd === "auditlog" || cmd === "emojimode" ? cmd : rawBody.toLowerCase();
+  const access = getCommandAccess(accessKey, COMMAND_GAME_MAP);
   if (!access) return;
 
   const authorization = authorizeCommand(message, access);
@@ -156,104 +166,118 @@ client.on("messageCreate", async (message) => {
     if (rateLimit.notify && authorization.channel) {
       await sendRateLimited(authorization.channel, rateLimit.retryAfterMs);
     }
-    logCommandAudit(body, authorization, "rate_limited");
+    logCommandAudit(cmd, authorization, "rate_limited");
     return;
   }
 
   if (!authorization.allowed) {
     if (authorization.reason === "insufficient_permission") {
       await sendNoPermission(message, access);
-      logCommandAudit(body, authorization, "denied");
+      logCommandAudit(cmd, authorization, "denied");
     }
     return;
   }
 
   if (access !== COMMAND_ACCESS.MEMBER) {
-    logCommandAudit(body, authorization, "allowed");
+    logCommandAudit(cmd, authorization, "allowed");
   }
 
   try {
     // ── Hidden image easter eggs ─────────────────
-    if (EASTER_EGG_COMMANDS[body]) {
-      await handleEasterEggCommand(message, EASTER_EGG_COMMANDS[body]);
+    if (EASTER_EGG_COMMANDS[cmd]) {
+      await handleEasterEggCommand(message, EASTER_EGG_COMMANDS[cmd]);
       return;
     }
 
     // ── Game fetch commands ──────────────────────
-    if (COMMAND_GAME_MAP[body]) {
-      await handleFetchCommand(message, COMMAND_GAME_MAP[body]);
+    if (COMMAND_GAME_MAP[cmd]) {
+      await handleFetchCommand(message, COMMAND_GAME_MAP[cmd]);
       return;
     }
 
     // ── EnableFetch ──────────────────────────────
-    if (body === "enablefetch") {
+    if (cmd === "enablefetch") {
       await handleEnableFetch(message, "all");
       return;
     }
 
     // ── EnableFetchHoyo ──────────────────────────
-    if (body === "enablefetchhoyo") {
+    if (cmd === "enablefetchhoyo") {
       await handleEnableFetch(message, "hoyo");
       return;
     }
 
     // ── EnableFetchNTE ───────────────────────────
-    if (body === "enablefetchnte") {
+    if (cmd === "enablefetchnte") {
       await handleEnableFetch(message, "nte");
       return;
     }
 
     // ── DisableFetch ─────────────────────────────
-    if (body === "disablefetch") {
+    if (cmd === "disablefetch") {
       await handleDisableFetch(message);
       return;
     }
 
     // ── Restart ──────────────────────────────────
-    if (body === "restart") {
+    if (cmd === "restart") {
       await handleRestart(message);
       return;
     }
 
     // ── Enable-AuditLog ──────────────────────────
-    if (body === "enable-auditlog" || body === "enableauditlog") {
+    if (cmd === "enable-auditlog" || cmd === "enableauditlog") {
       await handleEnableAuditLog(message);
       return;
     }
 
     // ── Disable-AuditLog ─────────────────────────
-    if (body === "disable-auditlog" || body === "disableauditlog") {
+    if (cmd === "disable-auditlog" || cmd === "disableauditlog") {
       await handleDisableAuditLog(message);
       return;
     }
 
     // ── Test-AuditLog ────────────────────────────
-    if (body === "test-auditlog" || body === "testauditlog") {
+    if (cmd === "test-auditlog" || cmd === "testauditlog") {
       await handleTestAuditLog(message);
       return;
     }
 
     // ── HelpHoyoFetch ────────────────────────────
-    if (body === "helphoyofetch") {
+    if (cmd === "helphoyofetch") {
       await handleHelp(message);
       return;
     }
 
     // ── EmojiMode [unicode|custom] ───────────────
-    if (body === "emojimode" || body.startsWith("emojimode ")) {
-      await handleEmojiMode(message, body.slice("emojimode".length).trim());
+    if (cmd === "emojimode") {
+      await handleEmojiMode(message, cmdArgs.join(" ").toLowerCase());
+      return;
+    }
+
+    // ── AuditLog [status|here|#channel|off] ─────────
+    if (cmd === "auditlog") {
+      const embed = handleAuditLogCommand(
+        client,
+        message,
+        cmdArgs,
+        CONFIG.prefix
+      );
+      await safeSend(message.channel, { embeds: [embed] });
       return;
     }
 
     // ── HarHar ──────────────────────────────────────
-    if (body === "harhar") {
-      await safeSend(message.channel, { content: ":01KPK39288XJE44RWR495WSZGR:" });
+    if (cmd === "harhar") {
+      await safeSend(message.channel, {
+        content: ":01KPK39288XJE44RWR495WSZGR:",
+      });
       return;
     }
   } catch (err) {
     console.error(
-      `Command error [${body}] actor=${auditAlias(message.authorId)} ` +
-      `channel=${auditAlias(message.channelId)} ${safeErrorSummary(err)}`
+      `Command error [${cmd}] actor=${auditAlias(message.authorId)} ` +
+        `channel=${auditAlias(message.channelId)} ${safeErrorSummary(err)}`
     );
     await safeSend(message.channel, {
       embeds: [
@@ -327,7 +351,9 @@ async function handleFetchCommand(message, gameKey) {
     `Contacting the ${apiLabel}…`,
     game.colour
   );
-  const loadingMsg = await safeSend(message.channel, { embeds: [loadingEmbed] });
+  const loadingMsg = await safeSend(message.channel, {
+    embeds: [loadingEmbed],
+  });
 
   const codes = await fetchCodesOnce(gameKey);
 
@@ -375,13 +401,15 @@ async function handleEnableFetch(message, scope = "all") {
     return;
   }
 
-  const title = result.wasEnabled ? "✅ Auto-Fetch Updated" : "✅ Auto-Fetch Enabled";
+  const title = result.wasEnabled
+    ? "✅ Auto-Fetch Updated"
+    : "✅ Auto-Fetch Enabled";
   await tamperProtection.sendProtected(message.channel, {
     embeds: [
       buildStatusEmbed(
         title,
         `This channel will now receive new ${scopeLabel} automatically every hour.\n` +
-        `Use \`${CONFIG.prefix}DisableFetch\` to stop.`,
+          `Use \`${CONFIG.prefix}DisableFetch\` to stop.`,
         "#2ECC71"
       ),
     ],
@@ -487,7 +515,9 @@ async function handleTestAuditLog(message) {
   }
 
   const evidenceMB = (status.evidenceBytes / (1024 * 1024)).toFixed(1);
-  const evidenceBudgetMB = Math.round(status.evidenceBudgetBytes / (1024 * 1024));
+  const evidenceBudgetMB = Math.round(
+    status.evidenceBudgetBytes / (1024 * 1024)
+  );
   const lines = [
     `Test event queued — a 🧪 embed should appear in <#${status.channelId}> within a few seconds.`,
     `**Messages currently archived:** ${status.archivedCount}`,
@@ -497,13 +527,17 @@ async function handleTestAuditLog(message) {
   if (status.consecutiveFailures > 0) {
     lines.push(
       `⚠️ **${status.consecutiveFailures} recent send failure(s)** — if the test embed does not appear, ` +
-      "check that I can send messages and embeds in the log channel."
+        "check that I can send messages and embeds in the log channel."
     );
   }
-  lines.push("If no 🧪 embed appears, the send pipeline is broken — check my channel permissions and console logs.");
+  lines.push(
+    "If no 🧪 embed appears, the send pipeline is broken — check my channel permissions and console logs."
+  );
 
   await safeSend(message.channel, {
-    embeds: [buildStatusEmbed("🧪 Audit Log Test Queued", lines.join("\n"), "#3498DB")],
+    embeds: [
+      buildStatusEmbed("🧪 Audit Log Test Queued", lines.join("\n"), "#3498DB"),
+    ],
   });
 }
 
@@ -521,7 +555,7 @@ async function handleEmojiMode(message, arg) {
         buildStatusEmbed(
           "🎨 Emoji Mode",
           `Current mode: **${getEmojiMode()}**.\n` +
-          `Use \`${CONFIG.prefix}EmojiMode unicode\` or \`${CONFIG.prefix}EmojiMode custom\` to change it.`,
+            `Use \`${CONFIG.prefix}EmojiMode unicode\` or \`${CONFIG.prefix}EmojiMode custom\` to change it.`,
           "#3498DB"
         ),
       ],
@@ -569,7 +603,9 @@ async function handleRestart(message) {
 
   restartInProgress = true;
   const supervisorMode = shouldUseSupervisorRestart();
-  const restartMode = supervisorMode ? "the host process manager" : "a new local bot process";
+  const restartMode = supervisorMode
+    ? "the host process manager"
+    : "a new local bot process";
 
   await safeSend(message.channel, {
     embeds: [
@@ -583,7 +619,7 @@ async function handleRestart(message) {
 
   console.log(
     `🔄  Restart requested actor=${auditAlias(message.authorId)}; ` +
-    `mode=${supervisorMode ? "supervisor" : "self-spawn"}`
+      `mode=${supervisorMode ? "supervisor" : "self-spawn"}`
   );
 
   setTimeout(() => restartProcess(supervisorMode), 1_000).unref();
@@ -611,7 +647,9 @@ async function runAutoFetch() {
 
   // Check only games that at least one enabled channel has subscribed to.
   const activeGames = Object.values(GAMES).filter(
-    (g) => !g.deprecated && enabledChannels.some((ch) => scopeIncludesGame(ch.scope, g.key))
+    (g) =>
+      !g.deprecated &&
+      enabledChannels.some((ch) => scopeIncludesGame(ch.scope, g.key))
   );
 
   for (const game of activeGames) {
@@ -699,13 +737,7 @@ async function sendNoPermission(message, access) {
       ? "Only the server owner or members with **Manage Server** permission can use this command."
       : "Only server administrators or members with moderation permissions can use this command.";
   await safeSend(message.channel, {
-    embeds: [
-      buildStatusEmbed(
-        "🔒 Permission Denied",
-        description,
-        "#E74C3C"
-      ),
-    ],
+    embeds: [buildStatusEmbed("🔒 Permission Denied", description, "#E74C3C")],
   });
 }
 
@@ -725,8 +757,8 @@ async function sendRateLimited(channel, retryAfterMs) {
 function logCommandAudit(command, authorization, outcome) {
   console.log(
     `🔐  command=${command} outcome=${outcome} reason=${authorization.reason} ` +
-    `actor=${auditAlias(authorization.authorId)} ` +
-    `channel=${auditAlias(authorization.channelId)}`
+      `actor=${auditAlias(authorization.authorId)} ` +
+      `channel=${auditAlias(authorization.channelId)}`
   );
 }
 
@@ -808,7 +840,7 @@ async function safeSend(channel, data) {
     } catch (fallbackErr) {
       console.error(
         `safeSend fallback error channel=${auditAlias(channel?.id)}: ` +
-        safeErrorSummary(fallbackErr)
+          safeErrorSummary(fallbackErr)
       );
     }
   }

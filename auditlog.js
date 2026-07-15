@@ -6,8 +6,19 @@
 // list of things the platform simply does not report (actor attribution,
 // kick vs leave, etc.) — those limits are inherent to the gateway, not
 // bugs in this module.
-import { buildAuditEmbed } from "./embeds.js";
 import {
+  buildAuditEmbed,
+  buildAuditBulkDeleteEmbed,
+  buildAuditChannelEmbed,
+  buildAuditLogEnabledEmbed,
+  buildAuditMemberEmbed,
+  buildAuditMessageDeleteEmbed,
+  buildAuditMessageEditEmbed,
+  buildAuditServerUpdateEmbed,
+  buildStatusEmbed,
+} from "./embeds.js";
+import {
+  enableAuditLog,
   getAuditLogChannel,
   getAuditLogServers,
   getKnownBans,
@@ -35,7 +46,10 @@ import {
 const UNBAN_POLL_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_PENDING_SENDS = 50;
 const MAX_CONSECUTIVE_FAILURES = 5;
+const MEMBER_REFRESH_TTL_MS = 15 * 60 * 1000;
 const DEBUG = process.env.AUDITLOG_DEBUG === "1";
+const memberSnapshots = new Map();
+const ignoredSystemMessages = createMessageCache(5_000);
 
 // Set by initAuditLog so runAuditLogTest can reuse the real send pipeline.
 let sendRef = null;
@@ -54,7 +68,9 @@ const failureCounts = new Map(); // serverId -> consecutive failure count
 
 function queueSend(serverId, channelId, send, embed, attachments) {
   if (pending >= MAX_PENDING_SENDS) {
-    console.warn(`auditlog: send queue full, dropping an event for server ${serverId}`);
+    console.warn(
+      `auditlog: send queue full, dropping an event for server ${serverId}`
+    );
     return;
   }
   pending++;
@@ -80,11 +96,9 @@ function queueSend(serverId, channelId, send, embed, attachments) {
 function bumpFailure(serverId) {
   const count = (failureCounts.get(serverId) || 0) + 1;
   failureCounts.set(serverId, count);
-  if (count >= MAX_CONSECUTIVE_FAILURES) {
-    disableAuditLog(serverId);
-    failureCounts.delete(serverId);
+  if (count === MAX_CONSECUTIVE_FAILURES) {
     console.warn(
-      `auditlog: disabled for server ${serverId} after ${MAX_CONSECUTIVE_FAILURES} consecutive send failures`
+      `auditlog: ${MAX_CONSECUTIVE_FAILURES} consecutive send failures for server ${serverId}; keeping the configured channel for recovery`
     );
   }
 }
@@ -93,7 +107,9 @@ function emitAudit(send, serverId, embed, attachments) {
   if (!serverId) return;
   const channelId = getAuditLogChannel(serverId);
   if (!channelId) {
-    debugLog(`emitAudit: audit log not enabled for server ${serverId}, dropping "${embed.title}"`);
+    debugLog(
+      `emitAudit: audit log not enabled for server ${serverId}, dropping "${embed.title}"`
+    );
     return;
   }
   debugLog(`emitAudit: queueing "${embed.title}" → channel ${channelId}`);
@@ -137,15 +153,253 @@ export function runAuditLogTest(serverId) {
 }
 
 // ── Formatting helpers ─────────────────────────────
-function truncate(str, max = 700) {
+export function truncate(str, max = 700) {
   if (!str) return "*(none)*";
   return str.length > max ? `${str.slice(0, max)}… *(truncated)*` : str;
 }
 
-function formatContent(content) {
-  if (content === undefined) return "*content not cached*";
-  if (content === "") return "*(no text — attachment/embed only)*";
-  return truncate(content);
+/**
+ * Return user-visible changes for a fixed list of fields.
+ * Permission payloads are intentionally treated as opaque values.
+ */
+export function diffFields(before = {}, after = {}, fields = []) {
+  return fields
+    .filter(
+      (field) =>
+        JSON.stringify(before?.[field]) !== JSON.stringify(after?.[field])
+    )
+    .map((field) => ({
+      field,
+      before: before?.[field],
+      after: after?.[field],
+    }));
+}
+
+export function createMessageCache(limit = 5_000) {
+  const maxEntries = Number.isInteger(limit) && limit > 0 ? limit : 5_000;
+  const cache = new Map();
+  const mapSet = cache.set.bind(cache);
+  cache.set = (key, value) => {
+    if (cache.has(key)) cache.delete(key);
+    mapSet(key, value);
+    while (cache.size > maxEntries) {
+      cache.delete(cache.keys().next().value);
+    }
+    return cache;
+  };
+  return cache;
+}
+
+export function snapshotMessage(message, channel = message?.channel) {
+  return {
+    id: message?.id,
+    channelId: message?.channelId ?? channel?.id,
+    serverId: channel?.serverId ?? message?.server?.id,
+    authorId: message?.authorId,
+    authorLabel: message?.author?.username
+      ? `@${message.author.username}`
+      : "Webhook/Unknown",
+    content: message?.content ?? "",
+    attachments: (message?.attachments ?? []).map((attachment) => ({
+      filename: attachment.filename ?? "file",
+      size: attachment.size ?? 0,
+    })),
+    createdAt: message?.createdAt?.toISOString?.() ?? new Date().toISOString(),
+  };
+}
+
+const CHANNEL_ID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
+const CHANNEL_MENTION_PATTERN = /^<#([0-9A-HJKMNP-TV-Z]{26})>$/i;
+
+export function parseChannelArg(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  const mention = trimmed.match(CHANNEL_MENTION_PATTERN);
+  if (mention) return mention[1];
+  return CHANNEL_ID_PATTERN.test(trimmed) ? trimmed : null;
+}
+
+/**
+ * Clearly label the platform-limited delete attribution as a heuristic.
+ */
+export function formatSuspects(authorLabel, moderatorLabels = [], cap = 6) {
+  const author =
+    typeof authorLabel === "string" && authorLabel.trim()
+      ? authorLabel.trim()
+      : null;
+  const moderators = [...new Set(moderatorLabels.filter(Boolean))];
+
+  if (!author && !moderators.length) return "the author or a moderator";
+  if (!moderators.length)
+    return author ? `the author (${author})` : "a moderator";
+
+  const shownLimit = Math.max(0, cap - (author ? 1 : 0));
+  const shown = moderators.slice(0, shownLimit);
+  const remaining = moderators.length - shown.length;
+  const list = `${shown.join(", ")}${remaining > 0 ? `, … (+${remaining} more)` : ""}`;
+  const moderatorPhrase = `one of ${moderators.length} member${moderators.length === 1 ? "" : "s"} with Manage Messages: ${list}`;
+  return author
+    ? `the author (${author}), or ${moderatorPhrase}`
+    : moderatorPhrase;
+}
+
+function formatUserLabel(client, userId) {
+  if (!userId) return null;
+  const user = client.users.get(userId);
+  return user?.username ? `@${user.username}` : null;
+}
+
+async function getServerMembers(client, server) {
+  const cached = memberSnapshots.get(server.id);
+  if (cached && Date.now() - cached.refreshedAt < MEMBER_REFRESH_TTL_MS) {
+    return cached.members;
+  }
+
+  try {
+    const result = await server.fetchMembers();
+    const members = result?.members ?? [];
+    memberSnapshots.set(server.id, { refreshedAt: Date.now(), members });
+    return members;
+  } catch {
+    return [...client.serverMembers.values()].filter(
+      (member) => member.id?.server === server.id
+    );
+  }
+}
+
+export async function computeSuspects(client, channel, authorId) {
+  const server = channel?.server ?? client.servers.get(channel?.serverId);
+  if (!server)
+    return {
+      authorLabel: formatUserLabel(client, authorId),
+      moderatorLabels: [],
+    };
+
+  const members = await getServerMembers(client, server);
+  const moderatorIds = new Set();
+  for (const member of members) {
+    const userId = member.id?.user;
+    if (!userId || userId === client.user?.id || userId === authorId) continue;
+    try {
+      if (
+        userId === server.ownerId ||
+        member.hasPermission(channel, "ManageMessages")
+      ) {
+        moderatorIds.add(userId);
+      }
+    } catch {
+      // A partial member or stale permission cache must not break delete logging.
+    }
+  }
+
+  if (
+    server.ownerId &&
+    server.ownerId !== client.user?.id &&
+    server.ownerId !== authorId
+  ) {
+    moderatorIds.add(server.ownerId);
+  }
+
+  return {
+    authorLabel: formatUserLabel(client, authorId),
+    moderatorLabels: [...moderatorIds]
+      .map((id) => formatUserLabel(client, id))
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b)),
+  };
+}
+
+/**
+ * Handle the unified /AuditLog command. The command router is responsible for
+ * enforcing Manage Server before this function is called.
+ */
+export function handleAuditLogCommand(
+  client,
+  message,
+  args = [],
+  prefix = "/"
+) {
+  const serverId = message.server?.id;
+  const command = `${prefix}AuditLog`;
+  if (!serverId) {
+    return buildStatusEmbed(
+      "🔒 Server Only",
+      "Audit logging can only be configured inside a server.",
+      "#E74C3C"
+    );
+  }
+
+  const value = args.join(" ").trim();
+  const action = value.toLowerCase();
+  if (!value || action === "status") {
+    const channelId = getAuditLogChannel(serverId);
+    return channelId
+      ? buildStatusEmbed(
+          "📋 Audit Log Status",
+          `Audit logging is active in <#${channelId}>.\nUse \`${command} here\`, \`${command} #channel\`, or \`${command} off\` to change it.`,
+          "#3498DB"
+        )
+      : buildStatusEmbed(
+          "📋 Audit Log Status",
+          `Audit logging is off. Use \`${command} here\` or \`${command} #channel\` to enable it.`,
+          "#808080"
+        );
+  }
+
+  if (action === "off") {
+    const wasEnabled = isAuditLogEnabled(serverId);
+    disableAuditLog(serverId);
+    return buildStatusEmbed(
+      wasEnabled ? "🔕 Audit Log Disabled" : "ℹ️ Audit Log Already Off",
+      wasEnabled
+        ? "This server will no longer receive audit log messages."
+        : "Audit logging was already off for this server.",
+      wasEnabled ? "#E67E22" : "#3498DB"
+    );
+  }
+
+  const channelId =
+    action === "here" ? message.channelId : parseChannelArg(value);
+  if (!channelId) {
+    return buildStatusEmbed(
+      "⚠️ Invalid Audit Log Channel",
+      `Use \`${command} here\`, \`${command} #channel\`, \`${command} CHANNEL_ID\`, \`${command} status\`, or \`${command} off\`.`,
+      "#E74C3C"
+    );
+  }
+
+  const channel = client.channels.get(channelId);
+  let canSend = false;
+  try {
+    canSend = Boolean(channel?.havePermission?.("SendMessage"));
+  } catch {
+    canSend = false;
+  }
+  if (
+    !channel ||
+    channel.serverId !== serverId ||
+    channel.type !== "TextChannel" ||
+    !canSend
+  ) {
+    return buildStatusEmbed(
+      "⚠️ Unavailable Audit Log Channel",
+      "Choose a text channel in this server where I have **Send Messages** permission.",
+      "#E74C3C"
+    );
+  }
+
+  const result = enableAuditLog(serverId, channelId);
+  if (result.wasEnabled && !result.changed) {
+    return buildStatusEmbed(
+      "ℹ️ Already Enabled",
+      `Audit logging is already active in <#${channelId}>.`,
+      "#3498DB"
+    );
+  }
+  return buildAuditLogEnabledEmbed(prefix, {
+    moved: result.wasEnabled,
+    previousChannelId: result.previousChannelId,
+  });
 }
 
 function formatUser(client, userId) {
@@ -169,7 +423,9 @@ function humanReadableSize(bytes) {
 
 function isTrustedAttachmentUrl(client, url) {
   const autumnBase = client.configuration?.features?.autumn?.url;
-  return Boolean(autumnBase) && typeof url === "string" && url.startsWith(autumnBase);
+  return (
+    Boolean(autumnBase) && typeof url === "string" && url.startsWith(autumnBase)
+  );
 }
 
 async function downloadAttachmentBytes(url, maxBytes) {
@@ -217,15 +473,29 @@ async function buildAttachmentDescriptors(client, messageId, attachments) {
 
     if (qualifies) {
       try {
-        const bytes = await downloadAttachmentBytes(descriptor.url, perFileCapBytes());
+        const bytes = await downloadAttachmentBytes(
+          descriptor.url,
+          perFileCapBytes()
+        );
         if (bytes) {
-          descriptor.evidencePath = saveEvidence(messageId, i, bytes, descriptor.contentType);
-          debugLog(`evidence captured for ${descriptor.id} (${bytes.length} bytes)`);
+          descriptor.evidencePath = saveEvidence(
+            messageId,
+            i,
+            bytes,
+            descriptor.contentType
+          );
+          debugLog(
+            `evidence captured for ${descriptor.id} (${bytes.length} bytes)`
+          );
         } else {
-          debugLog(`evidence download unavailable/too large for ${descriptor.id}`);
+          debugLog(
+            `evidence download unavailable/too large for ${descriptor.id}`
+          );
         }
       } catch (err) {
-        debugLog(`evidence capture error for ${descriptor.id}: ${err?.message || err}`);
+        debugLog(
+          `evidence capture error for ${descriptor.id}: ${err?.message || err}`
+        );
       }
     }
 
@@ -258,13 +528,17 @@ async function resolveAttachmentEvidence(client, entry) {
   for (const att of attachments) {
     const sizeLabel = humanReadableSize(att.size);
     if (!att.evidencePath) {
-      lines.push(`⚠️ \`${att.filename}\` (${sizeLabel}) — not preserved (too large or evidence capture was disabled)`);
+      lines.push(
+        `⚠️ \`${att.filename}\` (${sizeLabel}) — not preserved (too large or evidence capture was disabled)`
+      );
       continue;
     }
 
     const bytes = readEvidence(att.evidencePath);
     if (!bytes) {
-      lines.push(`⚠️ \`${att.filename}\` (${sizeLabel}) — evidence copy was evicted before this deletion`);
+      lines.push(
+        `⚠️ \`${att.filename}\` (${sizeLabel}) — evidence copy was evicted before this deletion`
+      );
       continue;
     }
 
@@ -278,10 +552,16 @@ async function resolveAttachmentEvidence(client, entry) {
         fetchImpl: fetchImplRef,
       });
       ids.push(newId);
-      lines.push(`✅ \`${att.filename}\` (${sizeLabel}) — preserved, attached above`);
+      lines.push(
+        `✅ \`${att.filename}\` (${sizeLabel}) — preserved, attached above`
+      );
     } catch (err) {
-      debugLog(`evidence re-upload failed for ${att.id}: ${err?.message || err}`);
-      lines.push(`⚠️ \`${att.filename}\` (${sizeLabel}) — preserved locally but re-upload failed`);
+      debugLog(
+        `evidence re-upload failed for ${att.id}: ${err?.message || err}`
+      );
+      lines.push(
+        `⚠️ \`${att.filename}\` (${sizeLabel}) — preserved locally but re-upload failed`
+      );
     }
   }
 
@@ -314,8 +594,17 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
   client.on("messageCreate", async (message) => {
     const serverId = client.channels.get(message.channelId)?.serverId;
     if (!serverId || !isAuditLogEnabled(serverId)) return;
+    if (message.channelId === getAuditLogChannel(serverId)) return;
+    if (message.systemMessage) {
+      ignoredSystemMessages.set(message.id, true);
+      return;
+    }
 
-    const attachments = await buildAttachmentDescriptors(client, message.id, message.attachments);
+    const attachments = await buildAttachmentDescriptors(
+      client,
+      message.id,
+      message.attachments
+    );
 
     recordMessage({
       id: message.id,
@@ -339,7 +628,9 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
       } else if (event.type === "MessageUpdate") {
         handleRawMessageUpdate(client, send, event);
       } else if (event.type === "BulkMessageDelete") {
-        handleRawBulkDelete(client, send, event);
+        await handleRawBulkDelete(client, send, event);
+      } else if (event.type === "ServerMemberLeave") {
+        await handleRawMemberLeave(client, send, event);
       }
     } catch (err) {
       console.error("auditlog: raw event error:", err?.message || err);
@@ -347,11 +638,17 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
   });
 
   async function handleRawMessageDelete(client, send, event) {
-    const serverId = client.channels.get(event.channel)?.serverId;
+    const channel = client.channels.get(event.channel);
+    const serverId = channel?.serverId;
     if (!serverId) {
-      debugLog(`MessageDelete ${event.id}: skipped (no server for channel ${event.channel})`);
+      debugLog(
+        `MessageDelete ${event.id}: skipped (no server for channel ${event.channel})`
+      );
       return; // DM or unknown channel
     }
+    if (!isAuditLogEnabled(serverId)) return;
+    if (event.channel === getAuditLogChannel(serverId)) return;
+    if (ignoredSystemMessages.delete(event.id)) return;
 
     const entry = getArchivedMessage(event.id);
     if (entry && isSelf(entry.authorId)) {
@@ -361,22 +658,18 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
 
     debugLog(`MessageDelete ${event.id}: logging (archived=${Boolean(entry)})`);
 
-    const { lines: attachmentLines, ids: preservedAttachmentIds } = await resolveAttachmentEvidence(client, entry);
+    const { lines: attachmentLines, ids: preservedAttachmentIds } =
+      await resolveAttachmentEvidence(client, entry);
 
-    const bodyLines = [
-      `**Author:** ${entry ? formatUser(client, entry.authorId) : "*unknown*"}`,
-      `**Channel:** <#${event.channel}>`,
-      `**Content:** ${entry ? formatContent(entry.content) : "*unknown — message predates the archive or was sent while I was offline*"}`,
-    ];
-    if (attachmentLines.length) {
-      bodyLines.push("", "**Attachments:**", ...attachmentLines);
-    }
-    bodyLines.push(
-      "_Deleter unknown — Stoat does not report who deleted a message._",
-      "_It's safe to assume it was either the message author or an admin/mod — only they have permission to delete it._"
-    );
-
-    const embed = buildAuditEmbed("🗑️ Message Deleted", bodyLines, "#E74C3C");
+    const suspects = await computeSuspects(client, channel, entry?.authorId);
+    const embed = buildAuditMessageDeleteEmbed({
+      author: entry ? formatUser(client, entry.authorId) : "*unknown*",
+      channelId: event.channel,
+      content: entry?.content,
+      messageId: event.id,
+      attachmentLines,
+      suspects: formatSuspects(suspects.authorLabel, suspects.moderatorLabels),
+    });
     emitAudit(send, serverId, embed, preservedAttachmentIds);
   }
 
@@ -386,6 +679,8 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
 
     const serverId = client.channels.get(event.channel)?.serverId;
     if (!serverId) return;
+    if (!isAuditLogEnabled(serverId)) return;
+    if (event.channel === getAuditLogChannel(serverId)) return;
 
     const entry = getArchivedMessage(event.id);
     if (entry && isSelf(entry.authorId)) {
@@ -401,54 +696,112 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
 
     debugLog(`MessageUpdate ${event.id}: logging (archived=${Boolean(entry)})`);
 
-    const embed = buildAuditEmbed(
-      "✏️ Message Edited",
-      [
-        `**Author:** ${entry ? formatUser(client, entry.authorId) : "*unknown*"}`,
-        `**Channel:** <#${event.channel}>`,
-        `**Before:** ${entry ? formatContent(before) : "*unknown — message predates the archive*"}`,
-        `**After:** ${formatContent(after)}`,
-      ],
-      "#F1C40F"
-    );
+    const embed = buildAuditMessageEditEmbed({
+      author: entry ? formatUser(client, entry.authorId) : "*unknown*",
+      channelId: event.channel,
+      before: entry ? before : undefined,
+      after,
+    });
     emitAudit(send, serverId, embed);
 
     // Keep the archive current so the next edit diffs against this one
     applyEdit(event.id, after);
   }
 
-  function handleRawBulkDelete(client, send, event) {
-    const serverId = client.channels.get(event.channel)?.serverId;
+  async function handleRawBulkDelete(client, send, event) {
+    const channel = client.channels.get(event.channel);
+    const serverId = channel?.serverId;
     if (!serverId) return;
+    if (!isAuditLogEnabled(serverId)) return;
+    if (event.channel === getAuditLogChannel(serverId)) return;
 
-    const entries = (event.ids ?? []).map((id) => ({ id, entry: getArchivedMessage(id) }));
-    const relevant = entries.filter(({ entry }) => !entry || !isSelf(entry.authorId));
+    const entries = (event.ids ?? [])
+      .filter((id) => !ignoredSystemMessages.delete(id))
+      .map((id) => ({ id, entry: getArchivedMessage(id) }));
+    const relevant = entries.filter(
+      ({ entry }) => !entry || !isSelf(entry.authorId)
+    );
     if (!relevant.length) return;
 
-    const shown = relevant.slice(0, 10).map(({ entry }) =>
+    const shown = relevant.map(({ id, entry }) =>
       entry
         ? `${formatUser(client, entry.authorId)}: ${truncate(entry.content || "*(no content)*", 150)}`
-        : "*unknown message (not archived)*"
+        : `*unknown message ${id} (not archived)*`
     );
-    if (relevant.length > 10) shown.push(`_…and ${relevant.length - 10} more_`);
 
-    const embed = buildAuditEmbed(
-      "🗑️ Bulk Message Delete",
-      [`**Channel:** <#${event.channel}>`, `**Count:** ${relevant.length}`, "", ...shown],
-      "#E74C3C"
-    );
+    const suspects = await computeSuspects(client, channel);
+    const embed = buildAuditBulkDeleteEmbed({
+      channelId: event.channel,
+      count: relevant.length,
+      entries: shown,
+      suspects: formatSuspects(null, suspects.moderatorLabels),
+    });
     emitAudit(send, serverId, embed);
+  }
+
+  async function handleRawMemberLeave(client, send, event) {
+    const serverId = event.id;
+    const userId = event.user;
+    if (!serverId || !userId || isSelf(userId)) return;
+    if (!isAuditLogEnabled(serverId)) return;
+
+    const reason = typeof event.reason === "string" ? event.reason : null;
+    let title = "📤 Member Left or Was Removed";
+    let colour = "#E67E22";
+    const lines = [`**User:** ${formatUser(client, userId)}`];
+
+    if (reason === "Leave") {
+      title = "📤 Member Left";
+      lines.push("**Reason reported by server:** Left voluntarily");
+    } else if (reason === "Kick") {
+      title = "🥾 Member Kicked";
+      lines.push("**Reason reported by server:** Kicked");
+    } else if (reason === "Ban") {
+      title = "🔨 Member Banned";
+      colour = "#E74C3C";
+      let banReason = null;
+      try {
+        const server = client.servers.get(serverId);
+        const bans = await server?.fetchBans();
+        const ban = bans?.find((entry) => entry.id.user === userId);
+        banReason = ban?.reason ?? null;
+        const known = new Set(getKnownBans(serverId));
+        known.add(userId);
+        setKnownBans(serverId, [...known]);
+      } catch {
+        // The raw reason still provides the ban verdict if ban-list access fails.
+      }
+      lines.push(
+        `**Reason:** ${banReason ? truncate(banReason, 300) : "*(none given)*"}`
+      );
+    } else {
+      lines.push(
+        "**Reason:** Left or was removed (reason not provided by server)"
+      );
+    }
+
+    emitAudit(
+      send,
+      serverId,
+      buildAuditMemberEmbed({
+        title,
+        user: formatUser(client, userId),
+        lines: lines.slice(1),
+        colour,
+      })
+    );
   }
 
   // ── Channels ────────────────────────────────────
   client.on("channelCreate", (channel) => {
     const serverId = channel.serverId;
     if (!serverId) return;
-    const embed = buildAuditEmbed(
-      "📁 Channel Created",
-      [`**Name:** ${channel.name}`, `**Type:** ${channel.type}`, `**Channel:** <#${channel.id}>`],
-      "#2ECC71"
-    );
+    const embed = buildAuditChannelEmbed({
+      title: "📁 Channel Created",
+      channelId: channel.id,
+      lines: [`**Name:** ${channel.name}`, `**Type:** ${channel.type}`],
+      colour: "#2ECC71",
+    });
     emitAudit(send, serverId, embed);
   });
 
@@ -457,7 +810,10 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
     if (!serverId) return;
 
     const lines = [];
-    if (previousChannel.name !== undefined && previousChannel.name !== channel.name) {
+    if (
+      previousChannel.name !== undefined &&
+      previousChannel.name !== channel.name
+    ) {
       lines.push(`**Name:** ${previousChannel.name} → ${channel.name}`);
     }
     if (previousChannel.description !== channel.description) {
@@ -465,18 +821,34 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
         `**Description:** ${truncate(previousChannel.description, 200)} → ${truncate(channel.description, 200)}`
       );
     }
-    if (previousChannel.nsfw !== undefined && previousChannel.nsfw !== channel.nsfw) {
+    if (
+      previousChannel.nsfw !== undefined &&
+      previousChannel.nsfw !== channel.nsfw
+    ) {
       lines.push(`**NSFW:** ${previousChannel.nsfw} → ${channel.nsfw}`);
     }
     if (
       previousChannel.defaultPermissions !== undefined &&
-      JSON.stringify(previousChannel.defaultPermissions) !== JSON.stringify(channel.defaultPermissions)
+      JSON.stringify(previousChannel.defaultPermissions) !==
+        JSON.stringify(channel.defaultPermissions)
     ) {
       lines.push("**Permissions:** default channel permissions changed");
     }
+    if (
+      previousChannel.rolePermissions !== undefined &&
+      JSON.stringify(previousChannel.rolePermissions) !==
+        JSON.stringify(channel.rolePermissions)
+    ) {
+      lines.push("**Permissions:** role permission overrides changed");
+    }
     if (!lines.length) return; // nothing user-facing changed (e.g. lastMessageId bump)
 
-    const embed = buildAuditEmbed("📁 Channel Updated", [`**Channel:** <#${channel.id}>`, ...lines], "#F1C40F");
+    const embed = buildAuditChannelEmbed({
+      title: "📁 Channel Updated",
+      channelId: channel.id,
+      lines,
+      colour: "#F1C40F",
+    });
     emitAudit(send, serverId, embed);
   });
 
@@ -486,18 +858,27 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
 
     if (channel.id === getAuditLogChannel(serverId)) {
       disableAuditLog(serverId);
-      console.warn(`auditlog: the audit log channel itself was deleted for server ${serverId}; audit logging disabled`);
+      console.warn(
+        `auditlog: the audit log channel itself was deleted for server ${serverId}; audit logging disabled`
+      );
       return;
     }
 
-    const embed = buildAuditEmbed("📁 Channel Deleted", [`**Name:** ${channel.name}`], "#E74C3C");
+    const embed = buildAuditChannelEmbed({
+      title: "📁 Channel Deleted",
+      lines: [`**Name:** ${channel.name}`],
+      colour: "#E74C3C",
+    });
     emitAudit(send, serverId, embed);
   });
 
   // ── Server / roles ──────────────────────────────
   client.on("serverUpdate", (server, previousServer) => {
     const lines = [];
-    if (previousServer.name !== undefined && previousServer.name !== server.name) {
+    if (
+      previousServer.name !== undefined &&
+      previousServer.name !== server.name
+    ) {
       lines.push(`**Name:** ${previousServer.name} → ${server.name}`);
     }
     if (previousServer.description !== server.description) {
@@ -505,11 +886,13 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
         `**Description:** ${truncate(previousServer.description, 200)} → ${truncate(server.description, 200)}`
       );
     }
-    if (previousServer.icon?.id !== server.icon?.id) lines.push("**Icon:** changed");
-    if (previousServer.banner?.id !== server.banner?.id) lines.push("**Banner:** changed");
+    if (previousServer.icon?.id !== server.icon?.id)
+      lines.push("**Icon:** changed");
+    if (previousServer.banner?.id !== server.banner?.id)
+      lines.push("**Banner:** changed");
     if (!lines.length) return;
 
-    const embed = buildAuditEmbed("⚙️ Server Updated", lines, "#F1C40F");
+    const embed = buildAuditServerUpdateEmbed(lines);
     emitAudit(send, server.id, embed);
   });
 
@@ -519,71 +902,41 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
     const name = role?.name ?? prev.name ?? roleId;
 
     const lines = [`**Role:** ${name}`];
-    if (prev.name !== undefined && prev.name !== role?.name) lines.push(`**Name:** ${prev.name} → ${role?.name}`);
+    if (prev.name !== undefined && prev.name !== role?.name)
+      lines.push(`**Name:** ${prev.name} → ${role?.name}`);
     if (prev.colour !== undefined && prev.colour !== role?.colour) {
-      lines.push(`**Colour:** ${prev.colour ?? "*(none)*"} → ${role?.colour ?? "*(none)*"}`);
+      lines.push(
+        `**Colour:** ${prev.colour ?? "*(none)*"} → ${role?.colour ?? "*(none)*"}`
+      );
     }
-    if (prev.hoist !== undefined && prev.hoist !== role?.hoist) lines.push(`**Hoist:** ${prev.hoist} → ${role?.hoist}`);
-    if (prev.rank !== undefined && prev.rank !== role?.rank) lines.push(`**Rank:** ${prev.rank} → ${role?.rank}`);
-    if (lines.length === 1) lines.push("_Previous state unknown, or only permissions changed._");
+    if (prev.hoist !== undefined && prev.hoist !== role?.hoist)
+      lines.push(`**Hoist:** ${prev.hoist} → ${role?.hoist}`);
+    if (prev.rank !== undefined && prev.rank !== role?.rank)
+      lines.push(`**Rank:** ${prev.rank} → ${role?.rank}`);
+    if (lines.length === 1)
+      lines.push("_Previous state unknown, or only permissions changed._");
 
     const embed = buildAuditEmbed("🎭 Role Updated", lines, "#F1C40F");
     emitAudit(send, server.id, embed);
   });
 
   client.on("serverRoleDelete", (server, roleId, role) => {
-    const embed = buildAuditEmbed("🎭 Role Deleted", [`**Role:** ${role?.name ?? roleId}`], "#E74C3C");
+    const embed = buildAuditEmbed(
+      "🎭 Role Deleted",
+      [`**Role:** ${role?.name ?? roleId}`],
+      "#E74C3C"
+    );
     emitAudit(send, server.id, embed);
   });
 
   // ── Members ─────────────────────────────────────
   client.on("serverMemberJoin", (member) => {
     const serverId = member.id.server;
-    const embed = buildAuditEmbed("📥 Member Joined", [`**User:** ${formatUser(client, member.id.user)}`], "#2ECC71");
-    emitAudit(send, serverId, embed);
-  });
-
-  client.on("serverMemberLeave", async (member) => {
-    const serverId = member.id.server;
-    const userId = member.id.user;
-    if (isSelf(userId)) return;
-
-    const server = client.servers.get(serverId);
-    let banned = false;
-    let reason = null;
-
-    try {
-      const bans = await server?.fetchBans();
-      const ban = bans?.find((b) => b.id.user === userId);
-      if (ban) {
-        banned = true;
-        reason = ban.reason ?? null;
-        // Keep the snapshot in sync so the unban poller doesn't treat this as new
-        const known = new Set(getKnownBans(serverId));
-        known.add(userId);
-        setKnownBans(serverId, [...known]);
-      }
-    } catch {
-      // Bot likely lacks Ban Members permission here — fall back to the generic verdict
-    }
-
-    const embed = banned
-      ? buildAuditEmbed(
-          "🔨 Member Banned",
-          [
-            `**User:** ${formatUser(client, userId)}`,
-            `**Reason:** ${reason ? truncate(reason, 300) : "*(none given)*"}`,
-          ],
-          "#E74C3C"
-        )
-      : buildAuditEmbed(
-          "📤 Member Left or Was Kicked",
-          [
-            `**User:** ${formatUser(client, userId)}`,
-            "_Stoat does not distinguish a kick from a voluntary leave._",
-          ],
-          "#E67E22"
-        );
+    const embed = buildAuditMemberEmbed({
+      title: "📥 Member Joined",
+      user: formatUser(client, member.id.user),
+      colour: "#2ECC71",
+    });
     emitAudit(send, serverId, embed);
   });
 
@@ -594,8 +947,12 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
 
     const sections = [];
 
-    const prevTimeout = previousMember.timeout ? new Date(previousMember.timeout).getTime() : null;
-    const curTimeout = member.timeout ? new Date(member.timeout).getTime() : null;
+    const prevTimeout = previousMember.timeout
+      ? new Date(previousMember.timeout).getTime()
+      : null;
+    const curTimeout = member.timeout
+      ? new Date(member.timeout).getTime()
+      : null;
     if (prevTimeout !== curTimeout) {
       if (curTimeout) {
         sections.push({
@@ -604,7 +961,11 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
           lines: [`**Until:** ${new Date(member.timeout).toUTCString()}`],
         });
       } else {
-        sections.push({ title: "⏳ Timeout Removed", colour: "#2ECC71", lines: [] });
+        sections.push({
+          title: "⏳ Timeout Removed",
+          colour: "#2ECC71",
+          lines: [],
+        });
       }
     }
 
@@ -627,9 +988,15 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
       const server = client.servers.get(serverId);
       const roleName = (id) => server?.roles.get(id)?.name ?? id;
       const lines = [];
-      if (added.length) lines.push(`**Added:** ${added.map(roleName).join(", ")}`);
-      if (removed.length) lines.push(`**Removed:** ${removed.map(roleName).join(", ")}`);
-      sections.push({ title: "🎭 Member Roles Changed", colour: "#F1C40F", lines });
+      if (added.length)
+        lines.push(`**Added:** ${added.map(roleName).join(", ")}`);
+      if (removed.length)
+        lines.push(`**Removed:** ${removed.map(roleName).join(", ")}`);
+      sections.push({
+        title: "🎭 Member Roles Changed",
+        colour: "#F1C40F",
+        lines,
+      });
     }
 
     for (const section of sections) {
@@ -647,7 +1014,10 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
     if (emoji.parent?.type !== "Server") return;
     const embed = buildAuditEmbed(
       "😀 Emoji Created",
-      [`**Name:** :${emoji.name}:`, `**By:** ${formatUser(client, emoji.creator?.id)}`],
+      [
+        `**Name:** :${emoji.name}:`,
+        `**By:** ${formatUser(client, emoji.creator?.id)}`,
+      ],
       "#2ECC71"
     );
     emitAudit(send, emoji.parent.id, embed);
@@ -655,7 +1025,11 @@ export function initAuditLog(client, { sendProtected, fetchImpl }) {
 
   client.on("emojiDelete", (emoji) => {
     if (emoji.parent?.type !== "Server") return;
-    const embed = buildAuditEmbed("😀 Emoji Deleted", [`**Name:** :${emoji.name}:`], "#E74C3C");
+    const embed = buildAuditEmbed(
+      "😀 Emoji Deleted",
+      [`**Name:** :${emoji.name}:`],
+      "#E74C3C"
+    );
     emitAudit(send, emoji.parent.id, embed);
   });
 }
@@ -669,10 +1043,7 @@ export function startUnbanPolling(client, { sendProtected }) {
   if (typeof sendProtected !== "function") {
     throw new TypeError("Audit-log polling requires a protected sender.");
   }
-  setInterval(
-    () => pollUnbans(client, sendProtected),
-    UNBAN_POLL_INTERVAL_MS
-  );
+  setInterval(() => pollUnbans(client, sendProtected), UNBAN_POLL_INTERVAL_MS);
 }
 
 async function pollUnbans(client, send) {
