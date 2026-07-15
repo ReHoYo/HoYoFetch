@@ -94,6 +94,7 @@ function makeClient() {
   return {
     user: { id: "BOT1" },
     users: new Map(),
+    serverMembers: { hasByKey: () => false },
     channels: new Map(),
     configuration: { features: { autumn: { url: "https://autumn.test" } } },
     authenticationHeader: ["X-Bot-Token", "secret"],
@@ -109,6 +110,9 @@ function makeClient() {
     },
     emitRaw(event) {
       for (const listener of rawListeners) listener(event);
+    },
+    emit(name, ...args) {
+      for (const listener of listeners.get(name) ?? []) listener(...args);
     },
   };
 }
@@ -522,6 +526,48 @@ test("the audit pipeline requires and uses a protected sender", async () => {
         (record) => record.payload.embeds?.[0]?.title === "🧪 Audit Log Test"
       )
   );
+});
+
+test("live user identity events enter the protected audit pipeline", async () => {
+  const client = makeClient();
+  const serverId = "IDENTITYSERVER";
+  const channelId = "IDENTITYCHANNEL";
+  const user = { id: "IDENTITYUSER", username: "After", avatar: null };
+  client.users.set(user.id, user);
+  client.serverMembers.hasByKey = ({ server, user: memberUser }) =>
+    server === serverId && memberUser === user.id;
+
+  let nextId = 0;
+  const protection = createTamperProtection(client, {
+    send: async () => ({ _id: `IDENTITYAUDIT${++nextId}` }),
+    request: async () => ({ ok: true, status: 200, data: {} }),
+    logger: silentLogger,
+  });
+  storeModule.enableAuditLog(serverId, channelId);
+  initAuditLog(client, {
+    sendProtected: protection.sendProtected,
+    request: async () => ({ ok: true, status: 200, data: {} }),
+  });
+
+  client.emit("userUpdate", user, {
+    username: "Before",
+    avatar: { id: "OLDAVATAR" },
+  });
+
+  await waitFor(
+    () =>
+      storeModule
+        .getAllProtectedMessages()
+        .filter((record) => record.channelId === channelId).length === 2
+  );
+  const identityRecords = storeModule
+    .getAllProtectedMessages()
+    .filter((record) => record.channelId === channelId);
+  assert.deepEqual(
+    identityRecords.map((record) => record.payload.embeds[0].title),
+    ["🪪 Username Changed", "🖼️ Profile Avatar Changed"]
+  );
+  storeModule.disableAuditLog(serverId);
 });
 
 test("a reconciled settings change stays protected through deletion and restoration", async () => {

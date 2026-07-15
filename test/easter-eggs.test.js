@@ -54,6 +54,8 @@ test("easter egg commands stay hidden from help and the README", async () => {
   const readme = (
     await readFile(new URL("../README.md", import.meta.url), "utf8")
   ).toLowerCase();
+  assert.match(publicHelp, /username\/avatar changes/);
+  assert.match(readme, /global-profile and server-specific avatar changes/);
 
   for (const command of EASTER_EGG_COMMAND_NAMES) {
     assert.doesNotMatch(publicHelp, new RegExp(`/${command}\\b`));

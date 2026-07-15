@@ -9,16 +9,21 @@ process.env.HOYOFETCH_DATA_DIR = mkdtempSync(
 );
 
 const {
+  avatarChangeState,
+  buildMemberUpdateAuditSections,
+  buildUserIdentityAuditSections,
   computeSuspects,
   createMessageCache,
   diffFields,
+  emitUserIdentityUpdates,
   formatSuspects,
   handleAuditLogCommand,
   parseChannelArg,
   snapshotMessage,
   truncate,
 } = await import("../auditlog.js");
-const { getAuditLogChannel } = await import("../store.js");
+const { disableAuditLog, enableAuditLog, getAuditLogChannel } =
+  await import("../store.js");
 const {
   buildAuditBulkDeleteEmbed,
   buildAuditMessageDeleteEmbed,
@@ -26,6 +31,10 @@ const {
 } = await import("../embeds.js");
 
 const CHANNEL_ID = "01HZY3M6Q8V7N2K4J5T9W0XABC";
+
+function avatar(id, url = `https://autumn.test/avatars/${id}`) {
+  return { id, createFileURL: () => url };
+}
 
 test("bounded message cache evicts FIFO and refreshes existing keys", () => {
   const cache = createMessageCache(2);
@@ -68,6 +77,218 @@ test("diffFields omits no-ops and reports selected changes", () => {
       { field: "nsfw", before: false, after: true },
     ]
   );
+});
+
+test("avatar identity detects add, change, remove, and same-id no-ops", () => {
+  assert.equal(avatarChangeState(null, avatar("AVATAR1")), "Added");
+  assert.equal(
+    avatarChangeState(avatar("AVATAR1"), avatar("AVATAR2")),
+    "Changed"
+  );
+  assert.equal(avatarChangeState(avatar("AVATAR1"), null), "Removed");
+  assert.equal(avatarChangeState(avatar("AVATAR1"), avatar("AVATAR1")), null);
+  assert.equal(avatarChangeState({ malformed: true }, null), null);
+});
+
+test("user identity sections separate username and profile avatar changes", () => {
+  const client = {
+    configuration: {
+      features: { autumn: { url: "https://autumn.test", enabled: true } },
+    },
+  };
+  const sections = buildUserIdentityAuditSections(
+    client,
+    {
+      id: "USER1",
+      username: "New`Name\nBounded",
+      avatar: avatar("NEWAVATAR"),
+    },
+    {
+      username: "OldName",
+      avatar: avatar("OLDAVATAR"),
+      displayName: "Old Display",
+    }
+  );
+
+  assert.deepEqual(
+    sections.map(({ title }) => title),
+    ["🪪 Username Changed", "🖼️ Profile Avatar Changed"]
+  );
+  assert.match(sections[0].lines.join("\n"), /NewˋName Bounded/);
+  assert.match(sections[0].lines.join("\n"), /Actor.*Unavailable/);
+  assert.equal(sections[1].iconUrl, "https://autumn.test/avatars/NEWAVATAR");
+  assert.doesNotMatch(sections[1].lines.join("\n"), /OLDAVATAR|NEWAVATAR/);
+
+  assert.deepEqual(
+    buildUserIdentityAuditSections(
+      client,
+      { username: "Same", avatar: avatar("SAME"), status: "Online" },
+      { username: "Same", avatar: avatar("SAME"), status: "Idle" }
+    ),
+    []
+  );
+  assert.equal(
+    buildUserIdentityAuditSections(
+      client,
+      { username: "Same", avatar: avatar("NEW", "https://evil.test/NEW") },
+      { username: "Same", avatar: avatar("OLD") }
+    )[0].iconUrl,
+    null
+  );
+});
+
+test("global identity updates route only to confirmed audited memberships", () => {
+  enableAuditLog("SERVER_A", "CHANNEL_A");
+  enableAuditLog("SERVER_B", "CHANNEL_B");
+  const currentUser = {
+    id: "USER1",
+    username: "NewName",
+    avatar: avatar("NEWAVATAR"),
+  };
+  const client = {
+    user: { id: "BOT" },
+    users: new Map([["USER1", currentUser]]),
+    serverMembers: {
+      hasByKey: ({ server, user }) => server === "SERVER_A" && user === "USER1",
+    },
+    configuration: {
+      features: { autumn: { url: "https://autumn.test", enabled: true } },
+    },
+  };
+  const emitted = [];
+
+  try {
+    const count = emitUserIdentityUpdates(
+      client,
+      currentUser,
+      { username: "OldName", avatar: avatar("OLDAVATAR") },
+      (serverId, embed) => emitted.push({ serverId, embed })
+    );
+    assert.equal(count, 2);
+    assert.deepEqual(
+      emitted.map(({ serverId }) => serverId),
+      ["SERVER_A", "SERVER_A"]
+    );
+    assert.deepEqual(
+      emitted.map(({ embed }) => embed.title),
+      ["🪪 Username Changed", "🖼️ Profile Avatar Changed"]
+    );
+    assert.doesNotMatch(
+      emitted[1].embed.description,
+      /OLDAVATAR|NEWAVATAR|https:\/\//
+    );
+    assert.equal(
+      emitted[1].embed.icon_url,
+      "https://autumn.test/avatars/NEWAVATAR"
+    );
+
+    assert.equal(
+      emitUserIdentityUpdates(
+        { ...client, user: { id: "USER1" } },
+        currentUser,
+        { username: "OldName" },
+        () => assert.fail("self updates must not emit")
+      ),
+      0
+    );
+    assert.equal(
+      emitUserIdentityUpdates(
+        { ...client, serverMembers: { hasByKey: () => false } },
+        currentUser,
+        { username: "OldName" },
+        () => assert.fail("unconfirmed memberships must not emit")
+      ),
+      0
+    );
+  } finally {
+    disableAuditLog("SERVER_A");
+    disableAuditLog("SERVER_B");
+  }
+});
+
+test("server avatar changes coexist with nickname and role changes", () => {
+  const client = {
+    servers: new Map([
+      [
+        "SERVER_A",
+        {
+          roles: new Map([
+            ["ROLE_OLD", { name: "Old Role" }],
+            ["ROLE_NEW", { name: "New Role" }],
+          ]),
+        },
+      ],
+    ]),
+    configuration: {
+      features: { autumn: { url: "https://autumn.test", enabled: true } },
+    },
+  };
+  const sections = buildMemberUpdateAuditSections(
+    client,
+    {
+      id: { server: "SERVER_A", user: "USER1" },
+      nickname: "New Nick",
+      avatar: avatar("SERVER_NEW"),
+      roles: ["ROLE_NEW"],
+      timeout: null,
+    },
+    {
+      nickname: "Old Nick",
+      avatar: avatar("SERVER_OLD"),
+      roles: ["ROLE_OLD"],
+      timeout: null,
+    }
+  );
+
+  assert.deepEqual(
+    sections.map(({ title }) => title),
+    [
+      "✏️ Nickname Changed",
+      "🖼️ Server Avatar Changed",
+      "🎭 Member Roles Changed",
+    ]
+  );
+  assert.equal(
+    sections.find(({ title }) => title.includes("Server Avatar")).iconUrl,
+    "https://autumn.test/avatars/SERVER_NEW"
+  );
+  assert.deepEqual(
+    buildMemberUpdateAuditSections(
+      client,
+      {
+        id: { server: "SERVER_A", user: "USER1" },
+        nickname: null,
+        avatar: avatar("SAME"),
+        roles: [],
+        timeout: null,
+      },
+      {
+        nickname: null,
+        avatar: avatar("SAME"),
+        roles: [],
+        timeout: null,
+      }
+    ),
+    []
+  );
+  const removal = buildMemberUpdateAuditSections(
+    client,
+    {
+      id: { server: "SERVER_A", user: "USER1" },
+      nickname: null,
+      avatar: null,
+      roles: [],
+      timeout: null,
+    },
+    {
+      nickname: null,
+      avatar: avatar("REMOVED"),
+      roles: [],
+      timeout: null,
+    }
+  )[0];
+  assert.match(removal.lines.join("\n"), /Change:\*\* Removed/);
+  assert.equal(removal.iconUrl, null);
 });
 
 test("parseChannelArg preserves valid bare and mentioned ULIDs", () => {

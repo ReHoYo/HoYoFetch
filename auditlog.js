@@ -49,6 +49,8 @@ const MAX_PENDING_SENDS = 50;
 const MAX_CONSECUTIVE_FAILURES = 5;
 const MEMBER_REFRESH_TTL_MS = 15 * 60 * 1000;
 const DEBUG = process.env.AUDITLOG_DEBUG === "1";
+const ACTOR_UNAVAILABLE_LINE =
+  "**Actor:** Unavailable — Stoat did not include an actor for this change.";
 const memberSnapshots = new Map();
 const ignoredSystemMessages = createMessageCache(5_000);
 
@@ -409,6 +411,181 @@ function formatUser(client, userId) {
   if (!userId) return "Unknown user";
   const user = client.users.get(userId);
   return user ? `@${user.username} (${userId})` : `Unknown user (${userId})`;
+}
+
+function auditCodeValue(value, max = 100) {
+  const text = typeof value === "string" ? value : "";
+  const singleLine = text.replace(/[\r\n]+/g, " ").replaceAll("`", "ˋ");
+  return `\`${truncate(singleLine, max)}\``;
+}
+
+function avatarFileId(avatar) {
+  if (typeof avatar === "string" && avatar) return avatar;
+  const id = avatar?.id ?? avatar?._id;
+  return typeof id === "string" && id ? id : null;
+}
+
+export function avatarChangeState(beforeAvatar, afterAvatar) {
+  const beforeId = avatarFileId(beforeAvatar);
+  const afterId = avatarFileId(afterAvatar);
+  if (beforeId === afterId) return null;
+  if (!beforeId && afterId) return "Added";
+  if (beforeId && !afterId) return "Removed";
+  if (beforeId && afterId) return "Changed";
+  return null;
+}
+
+function trustedAvatarPreview(client, avatar) {
+  const url = avatar?.createFileURL?.();
+  return isTrustedAttachmentUrl(client, url) ? url : null;
+}
+
+function avatarAuditSection(client, title, beforeAvatar, afterAvatar) {
+  const state = avatarChangeState(beforeAvatar, afterAvatar);
+  if (!state) return null;
+  return {
+    title,
+    colour: "#9B59B6",
+    lines: [`**Change:** ${state}`, ACTOR_UNAVAILABLE_LINE],
+    iconUrl:
+      state === "Added" || state === "Changed"
+        ? trustedAvatarPreview(client, afterAvatar)
+        : null,
+  };
+}
+
+export function buildUserIdentityAuditSections(
+  client,
+  user,
+  previousUser = {}
+) {
+  const sections = [];
+  if (
+    typeof previousUser.username === "string" &&
+    typeof user?.username === "string" &&
+    previousUser.username !== user.username
+  ) {
+    sections.push({
+      title: "🪪 Username Changed",
+      colour: "#F1C40F",
+      lines: [
+        `**Before:** ${auditCodeValue(previousUser.username)}`,
+        `**After:** ${auditCodeValue(user.username)}`,
+        ACTOR_UNAVAILABLE_LINE,
+      ],
+      iconUrl: null,
+    });
+  }
+
+  const avatarSection = avatarAuditSection(
+    client,
+    "🖼️ Profile Avatar Changed",
+    previousUser.avatar,
+    user?.avatar
+  );
+  if (avatarSection) sections.push(avatarSection);
+  return sections;
+}
+
+function auditSectionEmbed(client, userId, section) {
+  const embed = buildAuditEmbed(
+    section.title,
+    [`**User:** ${formatUser(client, userId)}`, ...section.lines],
+    section.colour
+  );
+  if (section.iconUrl) embed.icon_url = section.iconUrl;
+  return embed;
+}
+
+export function emitUserIdentityUpdates(client, user, previousUser, emit) {
+  const userId = user?.id ?? user?._id;
+  if (!userId || userId === client.user?.id || typeof emit !== "function") {
+    return 0;
+  }
+  const sections = buildUserIdentityAuditSections(client, user, previousUser);
+  if (!sections.length) return 0;
+
+  let emitted = 0;
+  for (const { serverId } of getAuditLogServers()) {
+    const isMember = client.serverMembers?.hasByKey?.({
+      server: serverId,
+      user: userId,
+    });
+    if (!isMember) continue;
+    for (const section of sections) {
+      emit(serverId, auditSectionEmbed(client, userId, section));
+      emitted++;
+    }
+  }
+  return emitted;
+}
+
+export function buildMemberUpdateAuditSections(
+  client,
+  member,
+  previousMember = {}
+) {
+  const sections = [];
+
+  const prevTimeout = previousMember.timeout
+    ? new Date(previousMember.timeout).getTime()
+    : null;
+  const curTimeout = member.timeout ? new Date(member.timeout).getTime() : null;
+  if (prevTimeout !== curTimeout) {
+    if (curTimeout) {
+      sections.push({
+        title: "⏳ Member Timed Out",
+        colour: "#E67E22",
+        lines: [`**Until:** ${new Date(member.timeout).toUTCString()}`],
+      });
+    } else {
+      sections.push({
+        title: "⏳ Timeout Removed",
+        colour: "#2ECC71",
+        lines: [],
+      });
+    }
+  }
+
+  if (previousMember.nickname !== member.nickname) {
+    sections.push({
+      title: "✏️ Nickname Changed",
+      colour: "#F1C40F",
+      lines: [
+        `**Before:** ${previousMember.nickname ?? "*(none)*"}`,
+        `**After:** ${member.nickname ?? "*(none)*"}`,
+      ],
+    });
+  }
+
+  const avatarSection = avatarAuditSection(
+    client,
+    "🖼️ Server Avatar Changed",
+    previousMember.avatar,
+    member.avatar
+  );
+  if (avatarSection) sections.push(avatarSection);
+
+  const prevRoles = new Set(previousMember.roles ?? []);
+  const curRoles = new Set(member.roles ?? []);
+  const added = [...curRoles].filter((role) => !prevRoles.has(role));
+  const removed = [...prevRoles].filter((role) => !curRoles.has(role));
+  if (added.length || removed.length) {
+    const server = client.servers.get(member.id.server);
+    const roleName = (id) => server?.roles.get(id)?.name ?? id;
+    const lines = [];
+    if (added.length)
+      lines.push(`**Added:** ${added.map(roleName).join(", ")}`);
+    if (removed.length)
+      lines.push(`**Removed:** ${removed.map(roleName).join(", ")}`);
+    sections.push({
+      title: "🎭 Member Roles Changed",
+      colour: "#F1C40F",
+      lines,
+    });
+  }
+
+  return sections;
 }
 
 function humanReadableSize(bytes) {
@@ -828,71 +1005,25 @@ export function initAuditLog(client, { sendProtected, request, fetchImpl }) {
     emitAudit(send, serverId, embed);
   });
 
+  client.on("userUpdate", (user, previousUser) => {
+    emitUserIdentityUpdates(client, user, previousUser, (serverId, embed) =>
+      emitAudit(send, serverId, embed)
+    );
+  });
+
   client.on("serverMemberUpdate", (member, previousMember) => {
     const serverId = member.id.server;
     const userId = member.id.user;
     if (isSelf(userId)) return;
 
-    const sections = [];
-
-    const prevTimeout = previousMember.timeout
-      ? new Date(previousMember.timeout).getTime()
-      : null;
-    const curTimeout = member.timeout
-      ? new Date(member.timeout).getTime()
-      : null;
-    if (prevTimeout !== curTimeout) {
-      if (curTimeout) {
-        sections.push({
-          title: "⏳ Member Timed Out",
-          colour: "#E67E22",
-          lines: [`**Until:** ${new Date(member.timeout).toUTCString()}`],
-        });
-      } else {
-        sections.push({
-          title: "⏳ Timeout Removed",
-          colour: "#2ECC71",
-          lines: [],
-        });
-      }
-    }
-
-    if (previousMember.nickname !== member.nickname) {
-      sections.push({
-        title: "✏️ Nickname Changed",
-        colour: "#F1C40F",
-        lines: [
-          `**Before:** ${previousMember.nickname ?? "*(none)*"}`,
-          `**After:** ${member.nickname ?? "*(none)*"}`,
-        ],
-      });
-    }
-
-    const prevRoles = new Set(previousMember.roles ?? []);
-    const curRoles = new Set(member.roles ?? []);
-    const added = [...curRoles].filter((r) => !prevRoles.has(r));
-    const removed = [...prevRoles].filter((r) => !curRoles.has(r));
-    if (added.length || removed.length) {
-      const server = client.servers.get(serverId);
-      const roleName = (id) => server?.roles.get(id)?.name ?? id;
-      const lines = [];
-      if (added.length)
-        lines.push(`**Added:** ${added.map(roleName).join(", ")}`);
-      if (removed.length)
-        lines.push(`**Removed:** ${removed.map(roleName).join(", ")}`);
-      sections.push({
-        title: "🎭 Member Roles Changed",
-        colour: "#F1C40F",
-        lines,
-      });
-    }
+    const sections = buildMemberUpdateAuditSections(
+      client,
+      member,
+      previousMember
+    );
 
     for (const section of sections) {
-      const embed = buildAuditEmbed(
-        section.title,
-        [`**User:** ${formatUser(client, userId)}`, ...section.lines],
-        section.colour
-      );
+      const embed = auditSectionEmbed(client, userId, section);
       emitAudit(send, serverId, embed);
     }
   });

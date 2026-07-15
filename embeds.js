@@ -132,7 +132,7 @@ export function buildHelpEmbeds(prefix) {
     ],
     [
       `${prefix}AuditLog [status|here|#channel|off]`,
-      "View or configure the server audit log _(admins/mods only)_",
+      "Log messages, moderation, username/avatar changes, and server settings _(admins/mods only)_",
     ],
     [
       `${prefix}Test-AuditLog`,
@@ -385,10 +385,10 @@ export function buildAuditLogEnabledEmbed(
     description:
       `${intro}\n\n` +
       "I will post a record of server actions here: message edits/deletes, channel/role/server changes, " +
-      "member joins/leaves, bans, timeouts, nickname and role changes, emoji changes, invites, and webhooks. " +
+      "member joins/leaves, bans, timeouts, username changes, global and server avatar changes, nickname and role changes, emoji changes, invites, and webhooks. " +
       "Server settings are also reconciled after restarts and gateway outages.\n\n" +
       "**⚠️ Platform limitations (Stoat has no native audit log, so these can't be worked around):**\n" +
-      "- Server, channel, role, and member update events do not identify the administrator who acted. Those records say **Actor unavailable from Stoat** instead of guessing. Emoji and invite creators are shown when Stoat supplies them.\n" +
+      "- Server, channel, role, member, and user-profile update events do not identify who acted. Those records say **Actor unavailable from Stoat** instead of guessing. Emoji and invite creators are shown when Stoat supplies them.\n" +
       "- Deletes never say **who** performed them. Delete entries show a clearly labeled heuristic list of the author and members with **Manage Messages**; it is not proof of who acted.\n" +
       '- Newer Stoat backends may identify a member departure as a leave, kick, or ban. Older backends are logged as "left or was removed".\n' +
       "- Bans are detected when a member leaves; unbans are detected by periodic polling (up to ~5 min delay).\n" +

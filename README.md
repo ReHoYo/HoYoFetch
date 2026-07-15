@@ -107,7 +107,7 @@ Reasons are mandatory, use the literal `reason:` delimiter, and may contain up t
 
 ### Audit log
 
-Stoat/Revolt has no built-in audit log, so `/AuditLog here` turns the current channel into one. `/AuditLog #channel` targets another text channel, `/AuditLog status` reports the current setting, and `/AuditLog off` disables it. The bot relays message edits/deletes (with original content), bulk deletes, channel/role/server changes, member joins/leaves, bans, unbans, timeouts, nickname/role changes, and emoji changes. The older `/Enable-AuditLog` and `/Disable-AuditLog` forms remain accepted for compatibility.
+Stoat/Revolt has no built-in audit log, so `/AuditLog here` turns the current channel into one. `/AuditLog #channel` targets another text channel, `/AuditLog status` reports the current setting, and `/AuditLog off` disables it. The bot relays message edits/deletes (with original content), bulk deletes, channel/role/server changes, member joins/leaves, bans, unbans, timeouts, username changes, global-profile and server-specific avatar changes, nickname/role changes, and emoji changes. Username and avatar coverage is live-only while HoYoFetch is online. The older `/Enable-AuditLog` and `/Disable-AuditLog` forms remain accepted for compatibility.
 
 Server-setting monitoring combines live raw gateway events with a persisted REST baseline in `data/server_settings_snapshots.json`. It records detailed before/after changes for server identity and discovery settings, categories and system-message routing, channels, role and channel permission overrides, roles, emoji, invites, and webhooks. A reconciliation runs at startup and about every five minutes, so changes made while the bot was offline are detected after it returns. Webhooks require one request per channel and are scanned in bounded rotating batches; `/Test-AuditLog` reports the current baseline and webhook coverage.
 
@@ -123,7 +123,7 @@ The bot needs the **Ban Members** permission to detect bans (checked when a memb
 
 **Platform limitations that cannot be worked around:**
 
-- Stoat's server, channel, role, and member update events do not include the administrator who acted. These entries explicitly say **Actor unavailable from Stoat** rather than guessing. Emoji and invite creators are shown as verified actors when their resource data supplies a creator.
+- Stoat's server, channel, role, member, and user-profile update events do not identify who acted. These entries explicitly say **Actor unavailable from Stoat** rather than guessing. Emoji and invite creators are shown as verified actors when their resource data supplies a creator.
 - The gateway never reports **who** deleted a message. Delete entries list the author and members with effective **Manage Messages** permission as **possible deleters**, clearly labeled as a heuristic; this is not proof of who acted.
 - Newer backends can label a member departure as `Leave`, `Kick`, or `Ban`. When the backend omits that reason, the bot can only report that the member left or was removed.
 - Messages sent before audit logging was enabled, or while the bot was offline, can't have their content recovered.
