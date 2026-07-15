@@ -119,7 +119,7 @@ function makeMessage({
   };
 }
 
-test("command classification protects every fetch-management variant", () => {
+test("every privileged command and alias uses manager access", () => {
   for (const command of [
     "enablefetch",
     "enablefetchhoyo",
@@ -146,15 +146,10 @@ test("command classification protects every fetch-management variant", () => {
     );
   }
 
-  assert.equal(
-    getCommandAccess("restart", GAME_COMMANDS),
-    COMMAND_ACCESS.ADMIN
-  );
-  assert.equal(
-    getCommandAccess("emojimode", GAME_COMMANDS),
-    COMMAND_ACCESS.ADMIN
-  );
   for (const command of [
+    "restart",
+    "emojimode",
+    "emojimode custom",
     "auditlog",
     "enable-auditlog",
     "enableauditlog",
@@ -168,15 +163,11 @@ test("command classification protects every fetch-management variant", () => {
       COMMAND_ACCESS.FETCH_MANAGER
     );
   }
-  assert.equal(
-    getCommandAccess("emojimode custom", GAME_COMMANDS),
-    COMMAND_ACCESS.ADMIN
-  );
   assert.equal(getCommandAccess("unknown", GAME_COMMANDS), null);
   assert.equal(getCommandAccess("chison now", GAME_COMMANDS), null);
 });
 
-test("ordinary members keep public commands but cannot manage fetch or restart", () => {
+test("ordinary members keep public commands but cannot use manager or admin access", () => {
   const message = makeMessage();
 
   assert.equal(authorizeCommand(message, COMMAND_ACCESS.MEMBER).allowed, true);
@@ -189,7 +180,7 @@ test("ordinary members keep public commands but cannot manage fetch or restart",
   assert.equal(authorizeCommand(message, COMMAND_ACCESS.ADMIN).allowed, false);
 });
 
-test("owners and Manage Server administrators can manage fetch and restart", () => {
+test("owners and Manage Server administrators pass manager and admin access", () => {
   for (const message of [
     makeMessage({ owner: true }),
     makeMessage({ serverPermissions: ["ManageServer"] }),
@@ -202,7 +193,7 @@ test("owners and Manage Server administrators can manage fetch and restart", () 
   }
 });
 
-test("each server moderation permission can manage fetch but cannot restart", () => {
+test("each server moderation permission passes manager but not admin access", () => {
   for (const permission of ["KickMembers", "BanMembers", "TimeoutMembers"]) {
     const message = makeMessage({ serverPermissions: [permission] });
     assert.equal(
@@ -317,7 +308,16 @@ test("fresh snapshots recover cached Manage Server false denials", async () => {
   assert.equal(calls.length, 3);
 });
 
-test("fresh snapshots authorize every moderator capability for audit commands", async () => {
+test("fresh snapshots authorize every moderator capability for manager commands", async () => {
+  assert.equal(
+    getCommandAccess("restart", GAME_COMMANDS),
+    COMMAND_ACCESS.FETCH_MANAGER
+  );
+  assert.equal(
+    getCommandAccess("emojimode custom", GAME_COMMANDS),
+    COMMAND_ACCESS.FETCH_MANAGER
+  );
+
   for (const permission of ["KickMembers", "BanMembers", "TimeoutMembers"]) {
     const snapshots = makePermissionSnapshots({
       memberRoles: ["MODROLE"],
@@ -363,7 +363,7 @@ test("fresh snapshots authorize every moderator capability for audit commands", 
   assert.equal(refreshed.reason, "moderator");
 });
 
-test("moderator snapshots cannot authorize admin-only commands", async () => {
+test("the explicit admin tier still rejects moderator-only snapshots", async () => {
   const snapshots = makePermissionSnapshots({
     memberRoles: ["MODROLE"],
     roles: {

@@ -62,8 +62,8 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/EnableFetchHoyo`                        | Enable HoYoverse-only auto-fetch in the current channel (admins/mods only)                                  |
 | `/EnableFetchNTE`                         | Enable NTE-only auto-fetch in the current channel (admins/mods only)                                        |
 | `/DisableFetch`                           | Disable auto-fetch in the current channel (admins/mods only)                                                |
-| `/EmojiMode [unicode\|custom]`            | Show or switch reward-emoji rendering at runtime (owner/admin only)                                         |
-| `/Restart`                                | Restart the bot after deploying updates (owner/admin only)                                                  |
+| `/EmojiMode [unicode\|custom]`            | Show or switch reward-emoji rendering at runtime (admins/mods only)                                         |
+| `/Restart`                                | Restart the bot after deploying updates (admins/mods only)                                                  |
 | `/AuditLog [status\|here\|#channel\|off]` | View or configure audit logging for the server (admins/mods only)                                           |
 | `/Test-AuditLog`                          | Send a test event through the audit pipeline to verify delivery (admins/mods only; legacy diagnostic alias) |
 | `/HelpHoyoFetch`                          | Show all commands                                                                                           |
@@ -74,9 +74,8 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 
 - Commands are accepted only from human members in server channels. Direct messages, webhooks, and messages from other bots are ignored.
 - Server owners and members with **Manage Server** permission are treated as administrators.
-- A moderator can manage auto-fetch when they have **Kick Members**, **Ban Members**, **Timeout Members**, or **Manage Messages** in the current channel. Role names are not trusted; Stoat's effective permissions are used.
-- Administrators and those same capability-based moderators can configure and test the audit log.
-- `/Restart` is restricted to the server owner and members with **Manage Server** permission.
+- Every privileged command is available to administrators and capability-based moderators with **Kick Members**, **Ban Members**, **Timeout Members**, or **Manage Messages** in the current channel.
+- Role names are never trusted; access is based on Stoat's effective permissions. This shared policy covers auto-fetch management, emoji mode, restart, and audit-log configuration/testing.
 - Each member can trigger up to five recognised commands in 30 seconds. Concurrent requests for the same game's codes share one upstream fetch.
 
 ### Audit log

@@ -184,7 +184,7 @@ client.on("messageCreate", async (message) => {
 
   if (!authorization.allowed) {
     if (authorization.reason === "insufficient_permission") {
-      await sendNoPermission(message, access);
+      await sendNoPermission(message);
       logCommandAudit(cmd, authorization, "denied");
     }
     return;
@@ -743,11 +743,9 @@ async function seedAllGames() {
 //  Command security
 // ═══════════════════════════════════════════════════
 
-async function sendNoPermission(message, access) {
+async function sendNoPermission(message) {
   const description =
-    access === COMMAND_ACCESS.ADMIN
-      ? "Only the server owner or members with **Manage Server** permission can use this command."
-      : "Only server administrators or members with moderation permissions can use this command.";
+    "Only server administrators or moderators can use this command.";
   await safeSend(message.channel, {
     embeds: [buildStatusEmbed("🔒 Permission Denied", description, "#E74C3C")],
   });

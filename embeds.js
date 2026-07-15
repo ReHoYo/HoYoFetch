@@ -114,11 +114,11 @@ export function buildHelpEmbed(prefix) {
     ],
     [
       `${prefix}EmojiMode [unicode|custom]`,
-      "Show or switch how reward emoji are rendered",
+      "Show or switch how reward emoji are rendered _(admins/mods only)_",
     ],
     [
       `${prefix}Restart`,
-      "Restart the bot process after deploying updates _(owner/admin only)_",
+      "Restart the bot process after deploying updates _(admins/mods only)_",
     ],
     [
       `${prefix}AuditLog [status|here|#channel|off]`,

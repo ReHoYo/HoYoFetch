@@ -54,9 +54,9 @@ export function getCommandAccess(body, commandGameMap = {}) {
   }
   if (AUDIT_LOG_COMMANDS.has(body)) return COMMAND_ACCESS.FETCH_MANAGER;
   if (body === "emojimode" || body.startsWith("emojimode ")) {
-    return COMMAND_ACCESS.ADMIN;
+    return COMMAND_ACCESS.FETCH_MANAGER;
   }
-  if (body === "restart") return COMMAND_ACCESS.ADMIN;
+  if (body === "restart") return COMMAND_ACCESS.FETCH_MANAGER;
   if (PUBLIC_UTILITY_COMMANDS.has(body)) return COMMAND_ACCESS.MEMBER;
   return null;
 }
