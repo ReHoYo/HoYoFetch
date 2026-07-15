@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Client } from "revolt.js";
 
 process.env.HOYOFETCH_DATA_DIR = mkdtempSync(
   join(tmpdir(), "hoyofetch-audit-test-")
@@ -18,6 +19,7 @@ const {
   emitUserIdentityUpdates,
   formatSuspects,
   handleAuditLogCommand,
+  hydrateAuditMemberCache,
   parseChannelArg,
   snapshotMessage,
   truncate,
@@ -88,6 +90,78 @@ test("avatar identity detects add, change, remove, and same-id no-ops", () => {
   assert.equal(avatarChangeState(avatar("AVATAR1"), null), "Removed");
   assert.equal(avatarChangeState(avatar("AVATAR1"), avatar("AVATAR1")), null);
   assert.equal(avatarChangeState({ malformed: true }, null), null);
+});
+
+test("audit member hydration enables real SDK nickname and user updates", async () => {
+  const client = new Client();
+  const serverId = "CACHE_SERVER";
+  const userId = "CACHE_USER";
+  client.servers.getOrCreate(serverId, {
+    _id: serverId,
+    owner: userId,
+    name: "Cache Test",
+    channels: [],
+    roles: {},
+    default_permissions: 0,
+  });
+  client.api.get = async (path) => {
+    assert.equal(path, `/servers/${serverId}/members`);
+    return {
+      members: [
+        {
+          _id: { server: serverId, user: userId },
+          joined_at: new Date().toISOString(),
+          nickname: "Before",
+          roles: [],
+        },
+      ],
+      users: [
+        {
+          _id: userId,
+          username: "OldName",
+          discriminator: "0001",
+        },
+      ],
+    };
+  };
+
+  assert.equal(
+    client.serverMembers.hasByKey({ server: serverId, user: userId }),
+    false
+  );
+  const hydration = await hydrateAuditMemberCache(client, serverId);
+  assert.equal(hydration.ok, true);
+  assert.equal(hydration.members.length, 1);
+  assert.equal(client.users.has(userId), true);
+  assert.equal(
+    client.serverMembers.hasByKey({ server: serverId, user: userId }),
+    true
+  );
+
+  const received = [];
+  client.on("serverMemberUpdate", (member, previous) =>
+    received.push({ type: "member", member, previous })
+  );
+  client.on("userUpdate", (user, previous) =>
+    received.push({ type: "user", user, previous })
+  );
+  await client.events.emit("event", {
+    type: "ServerMemberUpdate",
+    id: { server: serverId, user: userId },
+    data: { nickname: "After" },
+  });
+  await client.events.emit("event", {
+    type: "UserUpdate",
+    id: userId,
+    data: { username: "NewName" },
+  });
+
+  assert.equal(received[0].type, "member");
+  assert.equal(received[0].previous.nickname, "Before");
+  assert.equal(received[0].member.nickname, "After");
+  assert.equal(received[1].type, "user");
+  assert.equal(received[1].previous.username, "OldName");
+  assert.equal(received[1].user.username, "NewName");
 });
 
 test("user identity sections separate username and profile avatar changes", () => {

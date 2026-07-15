@@ -95,6 +95,7 @@ function makeClient() {
     user: { id: "BOT1" },
     users: new Map(),
     serverMembers: { hasByKey: () => false },
+    servers: new Map(),
     channels: new Map(),
     configuration: { features: { autumn: { url: "https://autumn.test" } } },
     authenticationHeader: ["X-Bot-Token", "secret"],
@@ -567,6 +568,30 @@ test("live user identity events enter the protected audit pipeline", async () =>
     identityRecords.map((record) => record.payload.embeds[0].title),
     ["🪪 Username Changed", "🖼️ Profile Avatar Changed"]
   );
+  storeModule.disableAuditLog(serverId);
+});
+
+test("audit startup and enablement hydrate member caches before monitoring", async () => {
+  const client = makeClient();
+  const serverId = "HYDRATIONSERVER";
+  const channelId = "HYDRATIONCHANNEL";
+  let fetches = 0;
+  client.servers.set(serverId, {
+    async fetchMembers() {
+      fetches++;
+      return { members: [], users: [] };
+    },
+  });
+  const monitor = initAuditLog(client, {
+    sendProtected: async () => ({ _id: "UNUSED" }),
+    request: async () => ({ ok: false, status: 404, data: undefined }),
+  });
+
+  storeModule.enableAuditLog(serverId, channelId);
+  await monitor.configurationChanged(serverId);
+  assert.equal(fetches, 1);
+  await monitor.start();
+  assert.equal(fetches, 2);
   storeModule.disableAuditLog(serverId);
 });
 

@@ -43,6 +43,7 @@ import {
   startEvidenceMaintenance,
 } from "./evidence-store.js";
 import { createSettingsMonitor } from "./settings-monitor.js";
+import { auditAlias, safeErrorSummary } from "./security.js";
 
 const UNBAN_POLL_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_PENDING_SENDS = 50;
@@ -254,22 +255,36 @@ function formatUserLabel(client, userId) {
   return user?.username ? `@${user.username}` : null;
 }
 
+export async function hydrateAuditMemberCache(client, serverId) {
+  const server = client.servers.get(serverId);
+  if (!server?.fetchMembers) {
+    return { ok: false, reason: "server_unavailable", members: [] };
+  }
+
+  try {
+    const result = await server.fetchMembers();
+    const members = result?.members ?? [];
+    memberSnapshots.set(serverId, { refreshedAt: Date.now(), members });
+    return { ok: true, members };
+  } catch (error) {
+    console.warn(
+      `auditlog: member cache hydration failed server=${auditAlias(serverId)} ${safeErrorSummary(error)}`
+    );
+    return { ok: false, reason: "fetch_failed", members: [] };
+  }
+}
+
 async function getServerMembers(client, server) {
   const cached = memberSnapshots.get(server.id);
   if (cached && Date.now() - cached.refreshedAt < MEMBER_REFRESH_TTL_MS) {
     return cached.members;
   }
 
-  try {
-    const result = await server.fetchMembers();
-    const members = result?.members ?? [];
-    memberSnapshots.set(server.id, { refreshedAt: Date.now(), members });
-    return members;
-  } catch {
-    return [...client.serverMembers.values()].filter(
-      (member) => member.id?.server === server.id
-    );
-  }
+  const hydration = await hydrateAuditMemberCache(client, server.id);
+  if (hydration.ok) return hydration.members;
+  return [...client.serverMembers.values()].filter(
+    (member) => member.id?.server === server.id
+  );
 }
 
 export async function computeSuspects(client, channel, authorId) {
@@ -1028,7 +1043,26 @@ export function initAuditLog(client, { sendProtected, request, fetchImpl }) {
     }
   });
 
-  return settingsMonitorRef;
+  return {
+    ...settingsMonitorRef,
+    async start() {
+      // revolt.js only emits hydrated user/member update callbacks for objects
+      // already present in its collections. Seed every audited server so
+      // nickname, username, and avatar changes are not silently discarded.
+      for (const { serverId } of getAuditLogServers()) {
+        await hydrateAuditMemberCache(client, serverId);
+      }
+      return settingsMonitorRef.start();
+    },
+    async configurationChanged(serverId) {
+      if (isAuditLogEnabled(serverId)) {
+        await hydrateAuditMemberCache(client, serverId);
+      } else {
+        memberSnapshots.delete(serverId);
+      }
+      return settingsMonitorRef.configurationChanged(serverId);
+    },
+  };
 }
 
 // ═══════════════════════════════════════════════════
