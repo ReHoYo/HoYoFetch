@@ -77,9 +77,11 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/Kick @member reason: ...`                                 | Immediately kick a member; this cannot be undone (Kick Members only)                                        |
 | `/Mute @member [10m\|30m\|1h\|4h\|24h\|3d\|7d] reason: ...` | Apply a native timeout, or omit duration for a reaction picker (Timeout Members only)                       |
 | `/Purge-User @member window:1h\|6h\|1d\|3d\|7d reason: ...` | Confirm and delete the member's observed messages in the selected window (Manage Messages only)             |
-| `/HelpHoyoFetch`                                            | Show all commands                                                                                           |
+| `/HelpHoyoFetch`                                            | Show the two-page command reference; the opener navigates with ◀️/▶️                                        |
 
 > **Note:** Revolt does not support Discord-style slash commands. These are message-based prefix commands using `/` as the prefix. Command names are case-insensitive; channel IDs are preserved exactly.
+
+`/HelpHoyoFetch` opens on the code and setup reference. The person who opened it can use ◀️/▶️ for five minutes to switch between that page and the moderation reference; other members' navigation reactions are ignored.
 
 ### Command security
 

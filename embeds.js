@@ -80,11 +80,21 @@ export function buildNoCodesEmbed(gameKey) {
   };
 }
 
+const HELP_ICON =
+  "https://img-os-static.hoyolab.com/communityWeb/upload/1d7dd8f33c5ccdfdeac86e1e86ddd652.png";
+
+function commandList(commands) {
+  return commands
+    .map(([command, description]) => `**\`${command}\`**\n${description}`)
+    .join("\n\n");
+}
+
 /**
- * Build the help embed listing all commands.
+ * Build the paginated help reference. Stoat has no interaction buttons, so
+ * callers can attach ◀️/▶️ reactions and replace the embed in place.
  */
-export function buildHelpEmbed(prefix) {
-  const cmds = [
+export function buildHelpEmbeds(prefix) {
+  const utilityCommands = [
     [`${prefix}FetchGI`, "Fetch active **Genshin Impact** redemption codes"],
     [
       `${prefix}FetchHSR`,
@@ -128,43 +138,65 @@ export function buildHelpEmbed(prefix) {
       `${prefix}Test-AuditLog`,
       "Test protected delivery and show settings-monitor coverage _(admins/mods only)_",
     ],
-    [
-      `${prefix}Automod [status|monitor|enforce|off|quorum|approve|release]`,
-      "Configure anti-raid moderation _(ban approval: Ban Members)_",
-    ],
-    [
-      `${prefix}Ban @member [delete:window] reason: ...`,
-      "Ban with optional observed-message cleanup _(Ban Members; cleanup: Manage Messages)_",
-    ],
-    [
-      `${prefix}Kick @member reason: ...`,
-      "Kick immediately; cannot be undone _(Kick Members)_",
-    ],
-    [
-      `${prefix}Mute @member [duration] reason: ...`,
-      "Timeout for 10m–7d or use the picker _(Timeout Members)_",
-    ],
-    [
-      `${prefix}Purge-User @member window:... reason: ...`,
-      "Confirm deletion of observed messages from 1h–7d _(Manage Messages)_",
-    ],
     [`${prefix}HelpHoyoFetch`, "Show this help message"],
   ];
 
-  const description = cmds
-    .map(([cmd, desc]) => `**\`${cmd}\`**\n${desc}`)
-    .join("\n\n");
+  const moderationCommands = [
+    [
+      `${prefix}Ban @member [delete:1h|6h|1d|3d|7d] reason: ...`,
+      "Ban immediately; optional cleanup covers messages observed by HoYoFetch. The 10-minute ↩️ undo only unbans _(Ban Members; cleanup also needs Manage Messages)_",
+    ],
+    [
+      `${prefix}Kick @member reason: ...`,
+      "Kick immediately. There is no undo; the member must rejoin with an invite _(Kick Members)_",
+    ],
+    [
+      `${prefix}Mute @member [10m|30m|1h|4h|24h|3d|7d] reason: ...`,
+      "Apply a timeout, or omit the duration for the 1️⃣–7️⃣ picker. The 10-minute ↩️ undo releases it _(Timeout Members)_",
+    ],
+    [
+      `${prefix}Purge-User @member window:1h|6h|1d|3d|7d reason: ...`,
+      "Use ✅/❌ to confirm deletion of messages observed by HoYoFetch. Audit evidence is preserved _(Manage Messages)_",
+    ],
+    [
+      `${prefix}Automod release @member reason: ...`,
+      "Release the timeout immediately and reset that member's automod strikes _(Timeout Members)_",
+    ],
+    [
+      `${prefix}Automod [status|monitor|enforce|off|quorum|approve]`,
+      "Configure anti-raid moderation. Enforcement escalates 10m → 1h → 24h → 7d; strikes reset after 14 quiet days _(ban approval: Ban Members)_",
+    ],
+  ];
 
-  return {
-    title: "📖 HoyoFetch — Command Reference",
-    description:
-      description +
-      "\n\n_Command names are **case-insensitive**; IDs are preserved exactly._\n" +
-      "_Sources: [HoYo](https://hoyo-codes.seria.moe), [HI3](https://api.ennead.cc/mihoyo), [NTE](https://game8.co/games/Neverness-to-Everness/archives/593718)_",
-    colour: "#5865F2",
-    icon_url:
-      "https://img-os-static.hoyolab.com/communityWeb/upload/1d7dd8f33c5ccdfdeac86e1e86ddd652.png",
-  };
+  return [
+    {
+      title: "📖 HoyoFetch Help — Codes & Setup (1/2)",
+      description:
+        commandList(utilityCommands) +
+        "\n\n_Use ▶️ for moderation commands. Command names are case-insensitive._\n" +
+        "_Sources: [HoYo](https://hoyo-codes.seria.moe), [HI3](https://api.ennead.cc/mihoyo), [NTE](https://game8.co/games/Neverness-to-Everness/archives/593718)_",
+      colour: "#5865F2",
+      icon_url: HELP_ICON,
+    },
+    {
+      title: "🛡️ HoyoFetch Help — Moderation (2/2)",
+      description:
+        "🔒 **Moderator-only commands:** regular members cannot use the commands on this page. Each action requires the matching moderation permission shown below.\n\n" +
+        "**Before taking a manual action:** configure an audit channel with `/AuditLog here`. Ban, kick, mute, purge, and release require exactly one member/ID plus a mandatory `reason:` (maximum 300 characters).\n\n" +
+        commandList(moderationCommands) +
+        "\n\n_History cleanup is best-effort and only covers messages HoYoFetch observed. Use ◀️ to return._",
+      colour: "#E67E22",
+      icon_url: HELP_ICON,
+    },
+  ];
+}
+
+/**
+ * Backwards-compatible single-page helper for consumers that only need the
+ * first page. Interactive help should use buildHelpEmbeds().
+ */
+export function buildHelpEmbed(prefix) {
+  return buildHelpEmbeds(prefix)[0];
 }
 
 /**

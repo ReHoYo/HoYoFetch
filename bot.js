@@ -36,7 +36,6 @@ import {
 import {
   buildCodesEmbed,
   buildNoCodesEmbed,
-  buildHelpEmbed,
   buildStatusEmbed,
   buildAuditLogEnabledEmbed,
 } from "./embeds.js";
@@ -72,6 +71,7 @@ import {
 import { createTamperProtection } from "./tamper-protection.js";
 import { createAutomod } from "./automod.js";
 import { createModeration } from "./moderation.js";
+import { createHelpMenu } from "./help-menu.js";
 
 // ── Validate token ─────────────────────────────────
 if (!CONFIG.token || CONFIG.token === "your_bot_token_here") {
@@ -99,6 +99,11 @@ const moderation = createModeration(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
   sendProtected: tamperProtection.sendProtected,
   request: apiRequest,
+});
+const helpMenu = createHelpMenu(client, {
+  send: (channelId, data) => safeSend({ id: channelId }, data),
+  request: apiRequest,
+  prefix: CONFIG.prefix,
 });
 
 // ── Audit log ───────────────────────────────────────
@@ -632,9 +637,7 @@ async function handleTestAuditLog(message) {
 }
 
 async function handleHelp(message) {
-  await safeSend(message.channel, {
-    embeds: [buildHelpEmbed(CONFIG.prefix)],
-  });
+  await helpMenu.open(message);
 }
 
 async function handleEmojiMode(message, arg) {
