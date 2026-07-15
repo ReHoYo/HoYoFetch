@@ -6,6 +6,10 @@ export const COMMAND_ACCESS = Object.freeze({
   FETCH_MANAGER: "fetch_manager",
   ADMIN: "admin",
   BAN_APPROVER: "ban_approver",
+  BAN: "ban",
+  KICK: "kick",
+  TIMEOUT: "timeout",
+  MANAGE_MESSAGES: "manage_messages",
 });
 
 const FETCH_MANAGEMENT_COMMANDS = new Set([
@@ -50,8 +54,19 @@ const AUDIT_SALT = randomBytes(16);
 
 export function getCommandAccess(body, commandGameMap = {}) {
   if (Object.hasOwn(commandGameMap, body)) return COMMAND_ACCESS.MEMBER;
+  if (body === "ban" || body.startsWith("ban ")) return COMMAND_ACCESS.BAN;
+  if (body === "kick" || body.startsWith("kick ")) return COMMAND_ACCESS.KICK;
+  if (body === "mute" || body.startsWith("mute ")) {
+    return COMMAND_ACCESS.TIMEOUT;
+  }
+  if (body === "purge-user" || body.startsWith("purge-user ")) {
+    return COMMAND_ACCESS.MANAGE_MESSAGES;
+  }
   if (body === "automod approve" || body.startsWith("automod approve ")) {
     return COMMAND_ACCESS.BAN_APPROVER;
+  }
+  if (body === "automod release" || body.startsWith("automod release ")) {
+    return COMMAND_ACCESS.TIMEOUT;
   }
   if (body === "automod" || body.startsWith("automod ")) {
     return COMMAND_ACCESS.FETCH_MANAGER;
@@ -105,6 +120,26 @@ export function authorizeCommand(message, access = COMMAND_ACCESS.MEMBER) {
       };
     }
     return denied("insufficient_permission", cachedContext);
+  }
+
+  const exactPermission =
+    access === COMMAND_ACCESS.BAN
+      ? "BanMembers"
+      : access === COMMAND_ACCESS.KICK
+        ? "KickMembers"
+        : access === COMMAND_ACCESS.TIMEOUT
+          ? "TimeoutMembers"
+          : access === COMMAND_ACCESS.MANAGE_MESSAGES
+            ? "ManageMessages"
+            : null;
+  if (exactPermission) {
+    const scope = exactPermission === "ManageMessages" ? channel : server;
+    return isAdmin || hasPermission(member, scope, exactPermission)
+      ? {
+          ...cachedContext,
+          reason: isOwner ? "owner" : isAdmin ? "admin" : "moderator",
+        }
+      : denied("insufficient_permission", cachedContext);
   }
 
   if (access === COMMAND_ACCESS.FETCH_MANAGER) {
@@ -206,12 +241,29 @@ export async function refreshCommandAuthorization(
         PERMISSION_BITS.ManageServer
       ) ||
       hasPermissionBit(evaluated.serverPermissions, PERMISSION_BITS.BanMembers);
+    const exactBit =
+      access === COMMAND_ACCESS.BAN
+        ? PERMISSION_BITS.BanMembers
+        : access === COMMAND_ACCESS.KICK
+          ? PERMISSION_BITS.KickMembers
+          : access === COMMAND_ACCESS.TIMEOUT
+            ? PERMISSION_BITS.TimeoutMembers
+            : access === COMMAND_ACCESS.MANAGE_MESSAGES
+              ? PERMISSION_BITS.ManageMessages
+              : null;
+    const exactPermissions =
+      access === COMMAND_ACCESS.MANAGE_MESSAGES
+        ? evaluated.channelPermissions
+        : evaluated.serverPermissions;
     const allowed =
       access === COMMAND_ACCESS.ADMIN
         ? isAdmin
         : access === COMMAND_ACCESS.FETCH_MANAGER
           ? isAdmin || isModerator
-          : access === COMMAND_ACCESS.BAN_APPROVER && canApproveBan;
+          : access === COMMAND_ACCESS.BAN_APPROVER
+            ? canApproveBan
+            : exactBit !== null &&
+              (isAdmin || hasPermissionBit(exactPermissions, exactBit));
 
     if (!allowed) {
       return denied("insufficient_permission", {
@@ -306,6 +358,101 @@ export async function authorizeServerActor(
       identityVerified: false,
       permissionSource: "refresh_failed",
     };
+  }
+}
+
+/**
+ * Freshly verify Manage Messages across several channels while fetching the
+ * shared server/member/user snapshots only once. Used by cross-channel purge.
+ */
+export async function authorizeMessageManagerAcrossChannels(
+  client,
+  { serverId, channelIds, authorId },
+  { allowBot = false, logger = console } = {}
+) {
+  const invalid = {
+    allowed: false,
+    reason: "insufficient_permission",
+    authorId,
+    server: { id: serverId },
+    permissionSource: "refresh_failed",
+    identityVerified: false,
+  };
+  const uniqueChannelIds = [...new Set(channelIds ?? [])];
+  if (
+    !client?.api?.get ||
+    !isSafeId(serverId) ||
+    !isSafeId(authorId) ||
+    !uniqueChannelIds.length ||
+    uniqueChannelIds.some((channelId) => !isSafeId(channelId))
+  ) {
+    return invalid;
+  }
+  try {
+    const [server, memberResponse, user] = await Promise.all([
+      client.api.get(`/servers/${serverId}`),
+      client.api.get(`/servers/${serverId}/members/${authorId}`, {
+        roles: false,
+      }),
+      client.api.get(`/users/${authorId}`),
+    ]);
+    if (user?._id !== authorId) return invalid;
+    const isBot = Boolean(user.bot);
+    if (isBot && !allowBot) {
+      return {
+        ...invalid,
+        reason: "bot",
+        identityVerified: true,
+        isBot: true,
+      };
+    }
+    const member = memberResponse?.member ?? memberResponse;
+    let isOwner = false;
+    for (const channelId of uniqueChannelIds) {
+      const channel = await client.api.get(`/channels/${channelId}`);
+      const evaluated = evaluatePermissionSnapshot({
+        authorId,
+        server,
+        member,
+        channel,
+      });
+      if (!evaluated.valid) return invalid;
+      isOwner = evaluated.isOwner;
+      const allowed =
+        evaluated.isOwner ||
+        hasPermissionBit(
+          evaluated.serverPermissions,
+          PERMISSION_BITS.ManageServer
+        ) ||
+        hasPermissionBit(
+          evaluated.channelPermissions,
+          PERMISSION_BITS.ManageMessages
+        );
+      if (!allowed) {
+        return {
+          ...invalid,
+          permissionSource: "refreshed",
+          identityVerified: true,
+          isBot,
+        };
+      }
+    }
+    return {
+      allowed: true,
+      reason: isOwner ? "owner" : "moderator",
+      authorId,
+      server: { id: serverId },
+      permissionSource: "refreshed",
+      identityVerified: true,
+      isBot,
+      memberTimeoutAt: member?.timeout ?? null,
+    };
+  } catch (error) {
+    logger.warn?.(
+      `multi-channel permission refresh failed actor=${auditAlias(authorId)} ` +
+        `server=${auditAlias(serverId)} ${safeErrorSummary(error)}`
+    );
+    return invalid;
   }
 }
 

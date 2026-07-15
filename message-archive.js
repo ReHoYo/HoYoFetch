@@ -9,6 +9,7 @@
 // Journal ops, one JSON object per line:
 //   {"op":"create", id, channelId, serverId, authorId, content, attachments, createdAt}
 //   {"op":"edit",   id, content, editedAt}
+//   {"op":"delete", id, deletedAt}
 //
 // `attachments` is an array of descriptors:
 //   {id, filename, size, contentType, url, evidencePath}
@@ -54,7 +55,10 @@ function loadArchive() {
   try {
     raw = readFileSync(ARCHIVE_PATH, "utf-8");
   } catch (err) {
-    console.warn("message-archive: could not read journal:", err?.message || err);
+    console.warn(
+      "message-archive: could not read journal:",
+      err?.message || err
+    );
     return;
   }
 
@@ -78,10 +82,14 @@ function loadArchive() {
         content: op.content,
         attachments: op.attachments ?? [], // legacy journals may carry a plain count
         createdAt: op.createdAt,
+        deletedAt: op.deletedAt ?? null,
       });
     } else if (op.op === "edit" && typeof op.id === "string") {
       const entry = messages.get(op.id);
       if (entry) entry.content = op.content;
+    } else if (op.op === "delete" && typeof op.id === "string") {
+      const entry = messages.get(op.id);
+      if (entry) entry.deletedAt = op.deletedAt ?? Date.now();
     }
   }
 
@@ -108,6 +116,7 @@ export function recordMessage(entry) {
     content: entry.content ?? "",
     attachments: entry.attachments ?? [],
     createdAt: entry.createdAt ?? Date.now(),
+    deletedAt: null,
   };
   messages.set(entry.id, record);
   appendOp({ op: "create", ...record });
@@ -134,6 +143,52 @@ export function getArchivedMessage(id) {
 }
 
 /**
+ * Query message metadata without exposing archived content to moderation code.
+ */
+export function findArchivedMessages({
+  serverId,
+  authorId,
+  since = 0,
+  until = Number.POSITIVE_INFINITY,
+} = {}) {
+  const matches = [];
+  for (const entry of messages.values()) {
+    const createdAt = Number(entry.createdAt) || 0;
+    if (
+      entry.serverId === serverId &&
+      entry.authorId === authorId &&
+      !entry.deletedAt &&
+      createdAt >= since &&
+      createdAt <= until
+    ) {
+      matches.push({
+        id: entry.id,
+        channelId: entry.channelId,
+        serverId: entry.serverId,
+        authorId: entry.authorId,
+        createdAt,
+      });
+    }
+  }
+  return matches.sort((a, b) => a.createdAt - b.createdAt);
+}
+
+export function getArchiveCoverage(serverId) {
+  let count = 0;
+  let earliestAt = null;
+  let latestAt = null;
+  for (const entry of messages.values()) {
+    if (entry.serverId !== serverId) continue;
+    const createdAt = Number(entry.createdAt) || 0;
+    count += 1;
+    earliestAt =
+      earliestAt === null ? createdAt : Math.min(earliestAt, createdAt);
+    latestAt = latestAt === null ? createdAt : Math.max(latestAt, createdAt);
+  }
+  return { count, earliestAt, latestAt };
+}
+
+/**
  * Apply an edit to an archived message.
  * @param  {string} id
  * @param  {string} newContent
@@ -147,6 +202,23 @@ export function applyEdit(id, newContent) {
     appendOp({ op: "edit", id, content: newContent, editedAt: Date.now() });
   }
   return previous;
+}
+
+/** Keep retained evidence while excluding a deleted message from purges. */
+export function markMessageDeleted(id, deletedAt = Date.now()) {
+  return markMessagesDeleted([id], deletedAt) === 1;
+}
+
+export function markMessagesDeleted(ids, deletedAt = Date.now()) {
+  const ops = [];
+  for (const id of new Set(ids)) {
+    const entry = messages.get(id);
+    if (!entry || entry.deletedAt) continue;
+    entry.deletedAt = deletedAt;
+    ops.push({ op: "delete", id, deletedAt });
+  }
+  appendOps(ops);
+  return ops.length;
 }
 
 /**
@@ -182,9 +254,18 @@ export function archiveSize() {
 // ── Internals ──────────────────────────────────────
 
 function appendOp(op) {
+  appendOps([op]);
+}
+
+function appendOps(ops) {
+  if (!ops.length) return;
   try {
-    appendFileSync(ARCHIVE_PATH, JSON.stringify(op) + "\n", "utf-8");
-    journalLineCount++;
+    appendFileSync(
+      ARCHIVE_PATH,
+      ops.map((op) => JSON.stringify(op)).join("\n") + "\n",
+      "utf-8"
+    );
+    journalLineCount += ops.length;
   } catch (err) {
     console.warn("message-archive: append failed:", err?.message || err);
   }

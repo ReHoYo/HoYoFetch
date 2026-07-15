@@ -30,6 +30,8 @@ const SETTINGS_SNAPSHOTS_PATH = join(
 );
 const AUTOMOD_PATH = join(DATA_DIR, "automod.json");
 const AUTOMOD_CASES_PATH = join(DATA_DIR, "automod_cases.json");
+const AUTOMOD_STRIKES_PATH = join(DATA_DIR, "automod_strikes.json");
+const MODERATION_ACTIONS_PATH = join(DATA_DIR, "moderation_actions.json");
 
 // ── Helpers ────────────────────────────────────────
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -577,7 +579,10 @@ export const AUTOMOD_MODES = new Set(["off", "monitor", "enforce"]);
 
 let automodConfigs = readJSON(AUTOMOD_PATH, {});
 let automodCases = readJSON(AUTOMOD_CASES_PATH, {});
+let automodStrikes = readJSON(AUTOMOD_STRIKES_PATH, {});
+let moderationActions = readJSON(MODERATION_ACTIONS_PATH, {});
 const MAX_AUTOMOD_CASES = 5_000;
+const MAX_MODERATION_ACTIONS = 5_000;
 
 function normaliseAutomodConfig(value = {}) {
   return {
@@ -672,4 +677,121 @@ export function pruneAutomodCases(now = Date.now()) {
     }
   }
   if (changed) persistAutomodCases();
+}
+
+function automodStrikeKey(serverId, userId) {
+  return `${serverId}:${userId}`;
+}
+
+export function getAutomodStrike(serverId, userId) {
+  const record = automodStrikes[automodStrikeKey(serverId, userId)];
+  if (!record) return null;
+  return {
+    serverId,
+    userId,
+    level: Math.max(1, Math.min(4, Number(record.level) || 1)),
+    lastContainedAt: Number(record.lastContainedAt) || null,
+    timeoutUntil: Number(record.timeoutUntil) || null,
+  };
+}
+
+export function setAutomodStrike(serverId, userId, record) {
+  const key = automodStrikeKey(serverId, userId);
+  automodStrikes[key] = {
+    serverId,
+    userId,
+    level: Math.max(1, Math.min(4, Number(record?.level) || 1)),
+    lastContainedAt: Number(record?.lastContainedAt) || Date.now(),
+    timeoutUntil: Number(record?.timeoutUntil) || null,
+  };
+  writeJSON(AUTOMOD_STRIKES_PATH, automodStrikes);
+  return structuredClone(automodStrikes[key]);
+}
+
+export function clearAutomodStrike(serverId, userId) {
+  const key = automodStrikeKey(serverId, userId);
+  if (!automodStrikes[key]) return false;
+  delete automodStrikes[key];
+  writeJSON(AUTOMOD_STRIKES_PATH, automodStrikes);
+  return true;
+}
+
+export function cancelAutomodCasesForMember(
+  serverId,
+  userId,
+  now = Date.now()
+) {
+  let cancelled = 0;
+  for (const record of Object.values(automodCases)) {
+    if (
+      record.serverId === serverId &&
+      record.userId === userId &&
+      record.status === "pending"
+    ) {
+      record.status = "released";
+      record.releasedAt = now;
+      cancelled += 1;
+    }
+  }
+  if (cancelled) persistAutomodCases();
+  return cancelled;
+}
+
+function persistModerationActions() {
+  writeJSON(MODERATION_ACTIONS_PATH, moderationActions);
+}
+
+export function createModerationAction(record) {
+  pruneModerationActions();
+  moderationActions[record.actionId] = structuredClone(record);
+  const excess = Object.keys(moderationActions).length - MAX_MODERATION_ACTIONS;
+  if (excess > 0) {
+    const oldest = Object.values(moderationActions)
+      .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
+      .slice(0, excess);
+    for (const entry of oldest) delete moderationActions[entry.actionId];
+  }
+  persistModerationActions();
+  return structuredClone(moderationActions[record.actionId]);
+}
+
+export function getModerationAction(actionId) {
+  const record = moderationActions[actionId];
+  return record ? structuredClone(record) : null;
+}
+
+export function findModerationActionByMessage(messageId) {
+  const record = Object.values(moderationActions).find(
+    (entry) =>
+      entry.logMessageId === messageId ||
+      protectedMessages[entry.logMessageId]?.messageId === messageId
+  );
+  return record ? structuredClone(record) : null;
+}
+
+export function updateModerationAction(actionId, patch = {}) {
+  const record = moderationActions[actionId];
+  if (!record) return null;
+  moderationActions[actionId] = { ...record, ...structuredClone(patch) };
+  persistModerationActions();
+  return structuredClone(moderationActions[actionId]);
+}
+
+export function pruneModerationActions(now = Date.now()) {
+  let changed = false;
+  for (const [actionId, record] of Object.entries(moderationActions)) {
+    const retentionUntil = Number(record.retentionUntil ?? record.expiresAt);
+    if (!Number.isFinite(retentionUntil) || retentionUntil <= now) {
+      delete moderationActions[actionId];
+      changed = true;
+    } else if (
+      record.status === "active" &&
+      Number.isFinite(record.expiresAt) &&
+      record.expiresAt <= now
+    ) {
+      record.status = "expired";
+      changed = true;
+    }
+  }
+  if (changed) persistModerationActions();
 }

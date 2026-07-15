@@ -12,6 +12,7 @@ const {
   AntiRaidDetector,
   AUTOMOD_BAN_EMOJI,
   AUTOMOD_LIMITS,
+  AUTOMOD_TIMEOUT_LADDER,
   buildEvidenceExcerpt,
   createAutomod,
   normalizeAutomodContent,
@@ -31,6 +32,7 @@ function makeMemoryStore({ mode = "off", quorum = 2 } = {}) {
     [SERVER_ID, { mode, logChannelId: CHANNEL_ID, quorum, updatedAt: null }],
   ]);
   const cases = new Map();
+  const strikes = new Map();
   return {
     configs,
     cases,
@@ -88,6 +90,19 @@ function makeMemoryStore({ mode = "off", quorum = 2 } = {}) {
         }
       }
     },
+    getAutomodStrike(serverId, userId) {
+      const record = strikes.get(`${serverId}:${userId}`);
+      return record ? structuredClone(record) : null;
+    },
+    setAutomodStrike(serverId, userId, record) {
+      const stored = { serverId, userId, ...structuredClone(record) };
+      strikes.set(`${serverId}:${userId}`, stored);
+      return structuredClone(stored);
+    },
+    clearAutomodStrike(serverId, userId) {
+      return strikes.delete(`${serverId}:${userId}`);
+    },
+    strikes,
   };
 }
 
@@ -480,6 +495,33 @@ test("repeated activity extends containment without creating vote spam", async (
   );
   assert.equal(harness.prompts.length, 1);
   assert.equal(harness.store.cases.size, 1);
+  assert.equal(harness.store.getAutomodStrike(SERVER_ID, TARGET_ID).level, 1);
+});
+
+test("post-expiry triggers climb the bounded timeout ladder and refresh prompts", async () => {
+  const harness = makeHarness({ mode: "enforce" });
+  for (let expectedLevel = 1; expectedLevel <= 4; expectedLevel += 1) {
+    await harness.sendDuplicates(`LEVEL${expectedLevel}`);
+    const strike = harness.store.getAutomodStrike(SERVER_ID, TARGET_ID);
+    assert.equal(strike.level, expectedLevel);
+    assert.ok(
+      strike.timeoutUntil - strike.lastContainedAt >=
+        AUTOMOD_TIMEOUT_LADDER[expectedLevel - 1]
+    );
+    harness.clock = strike.timeoutUntil + 1;
+  }
+  await harness.sendDuplicates("CAPPED");
+  assert.equal(harness.store.getAutomodStrike(SERVER_ID, TARGET_ID).level, 4);
+  assert.equal(harness.prompts.length, 5);
+});
+
+test("fourteen quiet days reset escalation to strike one", async () => {
+  const harness = makeHarness({ mode: "enforce" });
+  await harness.sendDuplicates("FIRST");
+  const first = harness.store.getAutomodStrike(SERVER_ID, TARGET_ID);
+  harness.clock = first.lastContainedAt + AUTOMOD_LIMITS.strikeResetMs + 1;
+  await harness.sendDuplicates("RESET");
+  assert.equal(harness.store.getAutomodStrike(SERVER_ID, TARGET_ID).level, 1);
 });
 
 test("two fresh authorized approvals ban exactly once", async () => {

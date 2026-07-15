@@ -44,7 +44,9 @@ test("easter egg commands map to the expected bundled images", async () => {
 });
 
 test("easter egg commands stay hidden from help and the README", async () => {
-  const publicHelp = JSON.stringify(buildHelpEmbed("/")).toLowerCase();
+  const helpEmbed = buildHelpEmbed("/");
+  const publicHelp = JSON.stringify(helpEmbed).toLowerCase();
+  assert.ok(helpEmbed.description.length <= 2_000);
   const readme = (
     await readFile(new URL("../README.md", import.meta.url), "utf8")
   ).toLowerCase();

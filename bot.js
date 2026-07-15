@@ -71,6 +71,7 @@ import {
 } from "./auditlog.js";
 import { createTamperProtection } from "./tamper-protection.js";
 import { createAutomod } from "./automod.js";
+import { createModeration } from "./moderation.js";
 
 // ── Validate token ─────────────────────────────────
 if (!CONFIG.token || CONFIG.token === "your_bot_token_here") {
@@ -90,6 +91,11 @@ const tamperProtection = createTamperProtection(client, {
   request: apiRequest,
 });
 const automod = createAutomod(client, {
+  send: (channelId, data) => safeSend({ id: channelId }, data),
+  sendProtected: tamperProtection.sendProtected,
+  request: apiRequest,
+});
+const moderation = createModeration(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
   sendProtected: tamperProtection.sendProtected,
   request: apiRequest,
@@ -154,7 +160,7 @@ client.on("messageCreate", async (message) => {
   const raw = message.content.trim();
 
   // Reject excessively long messages early to avoid unnecessary processing
-  if (raw.length > 200) return;
+  if (raw.length > 500) return;
 
   // Must start with the prefix
   if (!raw.toLowerCase().startsWith(CONFIG.prefix.toLowerCase())) return;
@@ -295,12 +301,26 @@ client.on("messageCreate", async (message) => {
 
     // ── Automod [status|monitor|enforce|off|quorum|approve] ──
     if (cmd === "automod") {
+      if (cmdArgs[0]?.toLowerCase() === "release") {
+        await moderation.handleCommand(
+          message,
+          "automod-release",
+          cmdArgs.slice(1)
+        );
+        return;
+      }
       const embed = await automod.handleCommand(
         message,
         cmdArgs,
         CONFIG.prefix
       );
       await safeSend(message.channel, { embeds: [embed] });
+      return;
+    }
+
+    // ── Manual moderation ──────────────────────────
+    if (["ban", "kick", "mute", "purge-user"].includes(cmd)) {
+      await moderation.handleCommand(message, cmd, cmdArgs);
       return;
     }
 
@@ -807,7 +827,15 @@ async function sendNoPermission(message, access) {
       ? "Only the server owner or members with Manage Server permission can use this command."
       : access === COMMAND_ACCESS.BAN_APPROVER
         ? "Only the server owner or members with Manage Server or Ban Members permission can approve a ban."
-        : "Only server administrators or moderators can use this command.";
+        : access === COMMAND_ACCESS.BAN
+          ? "Only the server owner or members with Manage Server or Ban Members permission can use this command."
+          : access === COMMAND_ACCESS.KICK
+            ? "Only the server owner or members with Manage Server or Kick Members permission can use this command."
+            : access === COMMAND_ACCESS.TIMEOUT
+              ? "Only the server owner or members with Manage Server or Timeout Members permission can use this command."
+              : access === COMMAND_ACCESS.MANAGE_MESSAGES
+                ? "Only the server owner or members with Manage Server or Manage Messages permission can use this command."
+                : "Only server administrators or moderators can use this command.";
   await safeSend(message.channel, {
     embeds: [buildStatusEmbed("🔒 Permission Denied", description, "#E74C3C")],
   });

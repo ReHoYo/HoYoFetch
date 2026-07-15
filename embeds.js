@@ -129,8 +129,24 @@ export function buildHelpEmbed(prefix) {
       "Test protected delivery and show settings-monitor coverage _(admins/mods only)_",
     ],
     [
-      `${prefix}Automod [status|monitor|enforce|off|quorum|approve]`,
-      "Configure anti-raid monitoring or approve a contained case _(configuration: admins/mods; bans: Ban Members)_",
+      `${prefix}Automod [status|monitor|enforce|off|quorum|approve|release]`,
+      "Configure anti-raid moderation _(ban approval: Ban Members)_",
+    ],
+    [
+      `${prefix}Ban @member [delete:window] reason: ...`,
+      "Ban with optional observed-message cleanup _(Ban Members; cleanup: Manage Messages)_",
+    ],
+    [
+      `${prefix}Kick @member reason: ...`,
+      "Kick immediately; cannot be undone _(Kick Members)_",
+    ],
+    [
+      `${prefix}Mute @member [duration] reason: ...`,
+      "Timeout for 10m–7d or use the picker _(Timeout Members)_",
+    ],
+    [
+      `${prefix}Purge-User @member window:... reason: ...`,
+      "Confirm deletion of observed messages from 1h–7d _(Manage Messages)_",
     ],
     [`${prefix}HelpHoyoFetch`, "Show this help message"],
   ];
@@ -144,10 +160,7 @@ export function buildHelpEmbed(prefix) {
     description:
       description +
       "\n\n_Command names are **case-insensitive**; IDs are preserved exactly._\n" +
-      "_Commands are accepted from human server members only._\n" +
-      "_GI / HSR / ZZZ codes from [hoyo-codes.seria.moe](https://hoyo-codes.seria.moe)_\n" +
-      "_HI3 codes from [api.ennead.cc](https://api.ennead.cc/mihoyo)_\n" +
-      "_NTE codes from [Game8](https://game8.co/games/Neverness-to-Everness/archives/593718)_",
+      "_Sources: [HoYo](https://hoyo-codes.seria.moe), [HI3](https://api.ennead.cc/mihoyo), [NTE](https://game8.co/games/Neverness-to-Everness/archives/593718)_",
     colour: "#5865F2",
     icon_url:
       "https://img-os-static.hoyolab.com/communityWeb/upload/1d7dd8f33c5ccdfdeac86e1e86ddd652.png",

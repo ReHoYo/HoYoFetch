@@ -28,6 +28,8 @@ import {
   recordMessage,
   getArchivedMessage,
   applyEdit,
+  markMessageDeleted,
+  markMessagesDeleted,
   startArchiveMaintenance,
   archiveSize,
 } from "./message-archive.js";
@@ -656,6 +658,7 @@ export function initAuditLog(client, { sendProtected, request, fetchImpl }) {
     if (ignoredSystemMessages.delete(event.id)) return;
 
     const entry = getArchivedMessage(event.id);
+    markMessageDeleted(event.id);
     if (entry && isSelf(entry.authorId)) {
       debugLog(`MessageDelete ${event.id}: skipped (bot's own message)`);
       return;
@@ -723,6 +726,7 @@ export function initAuditLog(client, { sendProtected, request, fetchImpl }) {
     const entries = (event.ids ?? [])
       .filter((id) => !ignoredSystemMessages.delete(id))
       .map((id) => ({ id, entry: getArchivedMessage(id) }));
+    markMessagesDeleted(entries.map(({ id }) => id));
     const relevant = entries.filter(
       ({ entry }) => !entry || !isSelf(entry.authorId)
     );

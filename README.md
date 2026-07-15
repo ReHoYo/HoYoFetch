@@ -51,28 +51,33 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 
 ## 📋 Commands
 
-| Command                                   | Description                                                                                                 |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `/FetchGI`                                | Fetch active Genshin Impact codes                                                                           |
-| `/FetchHSR`                               | Fetch active Honkai: Star Rail codes                                                                        |
-| `/FetchZZZ`                               | Fetch active Zenless Zone Zero codes                                                                        |
-| `/FetchHI3`                               | Fetch active Honkai Impact 3rd codes                                                                        |
-| `/FetchNTE`                               | Fetch active Neverness to Everness codes                                                                    |
-| `/EnableFetch`                            | Enable HoYoverse + NTE auto-fetch in the current channel (admins/mods only)                                 |
-| `/EnableFetchHoyo`                        | Enable HoYoverse-only auto-fetch in the current channel (admins/mods only)                                  |
-| `/EnableFetchNTE`                         | Enable NTE-only auto-fetch in the current channel (admins/mods only)                                        |
-| `/DisableFetch`                           | Disable auto-fetch in the current channel (admins/mods only)                                                |
-| `/EmojiMode [unicode\|custom]`            | Show or switch reward-emoji rendering at runtime (admins/mods only)                                         |
-| `/Restart`                                | Restart the bot after deploying updates (admins/mods only)                                                  |
-| `/AuditLog [status\|here\|#channel\|off]` | View or configure audit logging for the server (admins/mods only)                                           |
-| `/Test-AuditLog`                          | Send a test event through the audit pipeline to verify delivery (admins/mods only; legacy diagnostic alias) |
-| `/Automod status`                         | Show this server's automod mode, logger, and ban quorum (admins/mods only)                                  |
-| `/Automod monitor [here\|#channel]`       | Detect and log cases without changing messages or members (admins/mods only)                                |
-| `/Automod enforce [here\|#channel]`       | Enable temporary containment and staff-approved ban cases (admins/mods only)                                |
-| `/Automod off`                            | Disable anti-raid evaluation for this server (admins/mods only)                                             |
-| `/Automod quorum 1\|2`                    | Set the approval quorum for new cases; production defaults to two (admins/mods only)                        |
-| `/Automod approve CASE_ID`                | Approve a pending ban case (owner, Manage Server, or Ban Members only)                                      |
-| `/HelpHoyoFetch`                          | Show all commands                                                                                           |
+| Command                                                     | Description                                                                                                 |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `/FetchGI`                                                  | Fetch active Genshin Impact codes                                                                           |
+| `/FetchHSR`                                                 | Fetch active Honkai: Star Rail codes                                                                        |
+| `/FetchZZZ`                                                 | Fetch active Zenless Zone Zero codes                                                                        |
+| `/FetchHI3`                                                 | Fetch active Honkai Impact 3rd codes                                                                        |
+| `/FetchNTE`                                                 | Fetch active Neverness to Everness codes                                                                    |
+| `/EnableFetch`                                              | Enable HoYoverse + NTE auto-fetch in the current channel (admins/mods only)                                 |
+| `/EnableFetchHoyo`                                          | Enable HoYoverse-only auto-fetch in the current channel (admins/mods only)                                  |
+| `/EnableFetchNTE`                                           | Enable NTE-only auto-fetch in the current channel (admins/mods only)                                        |
+| `/DisableFetch`                                             | Disable auto-fetch in the current channel (admins/mods only)                                                |
+| `/EmojiMode [unicode\|custom]`                              | Show or switch reward-emoji rendering at runtime (admins/mods only)                                         |
+| `/Restart`                                                  | Restart the bot after deploying updates (admins/mods only)                                                  |
+| `/AuditLog [status\|here\|#channel\|off]`                   | View or configure audit logging for the server (admins/mods only)                                           |
+| `/Test-AuditLog`                                            | Send a test event through the audit pipeline to verify delivery (admins/mods only; legacy diagnostic alias) |
+| `/Automod status`                                           | Show this server's automod mode, logger, and ban quorum (admins/mods only)                                  |
+| `/Automod monitor [here\|#channel]`                         | Detect and log cases without changing messages or members (admins/mods only)                                |
+| `/Automod enforce [here\|#channel]`                         | Enable temporary containment and staff-approved ban cases (admins/mods only)                                |
+| `/Automod off`                                              | Disable anti-raid evaluation for this server (admins/mods only)                                             |
+| `/Automod quorum 1\|2`                                      | Set the approval quorum for new cases; production defaults to two (admins/mods only)                        |
+| `/Automod approve CASE_ID`                                  | Approve a pending ban case (owner, Manage Server, or Ban Members only)                                      |
+| `/Automod release @member reason: ...`                      | Remove a timeout and reset that member's automod escalation history (Timeout Members only)                  |
+| `/Ban @member [delete:1h\|6h\|1d\|3d\|7d] reason: ...`      | Ban with optional best-effort observed-message cleanup (Ban Members; cleanup also needs Manage Messages)    |
+| `/Kick @member reason: ...`                                 | Immediately kick a member; this cannot be undone (Kick Members only)                                        |
+| `/Mute @member [10m\|30m\|1h\|4h\|24h\|3d\|7d] reason: ...` | Apply a native timeout, or omit duration for a reaction picker (Timeout Members only)                       |
+| `/Purge-User @member window:1h\|6h\|1d\|3d\|7d reason: ...` | Confirm and delete the member's observed messages in the selected window (Manage Messages only)             |
+| `/HelpHoyoFetch`                                            | Show all commands                                                                                           |
 
 > **Note:** Revolt does not support Discord-style slash commands. These are message-based prefix commands using `/` as the prefix. Command names are case-insensitive; channel IDs are preserved exactly.
 
@@ -82,8 +87,21 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 - Server owners and members with **Manage Server** permission are treated as administrators.
 - Fetch, emoji, restart, and audit-log management commands are available to administrators and capability-based moderators with **Kick Members**, **Ban Members**, **Timeout Members**, or **Manage Messages** in the current channel.
 - Automod configuration uses the same capability-based moderator policy as other management commands: owner, **Manage Server**, **Kick Members**, **Ban Members**, **Timeout Members**, or **Manage Messages** in the current channel. Ban approvals remain stricter and require the owner, **Manage Server**, or **Ban Members**; **Manage Messages** alone cannot approve a ban.
+- Manual moderation commands use exact effective permissions and refresh both the moderator and bot before acting: **Ban Members** for `/Ban`, **Kick Members** for `/Kick`, **Timeout Members** for `/Mute` and `/Automod release`, and **Manage Messages** for `/Purge-User`. An active `/AuditLog` channel is required so actor, target, reason, and outcome are durably protected.
 - Role names are never trusted; access is based on Stoat's effective permissions. This shared policy covers auto-fetch management, emoji mode, restart, and audit-log configuration/testing.
 - Each member can trigger up to five recognised commands in 30 seconds. Concurrent requests for the same game's codes share one upstream fetch.
+
+### Manual moderation
+
+Reasons are mandatory, use the literal `reason:` delimiter, and may contain up to 300 characters. Commands accept one member mention or one raw user ID. Stoat has no interaction buttons, so HoYoFetch uses reactions for duration selection, destructive confirmation, and undo.
+
+- `/Ban @member reason: repeated spam` bans immediately. Add `delete:1h`, `delete:6h`, `delete:1d`, `delete:3d`, or `delete:7d` before `reason:` to request message cleanup. The ↩️ reaction on the protected record is available for 10 minutes to any freshly authorized ban moderator; it unbans but cannot restore membership or deleted messages.
+- `/Kick @member reason: raid account` kicks immediately. Stoat cannot put a kicked member back, so no undo reaction is offered and the reason is retained in HoYoFetch's protected log.
+- `/Mute @member 1h reason: cooldown` applies that duration immediately. Omitting the duration opens a two-minute invoker-only picker: 10m, 30m, 1h, 4h, 24h, 3d, or 7d. The protected record has a 10-minute ↩️ undo reaction for authorized timeout moderators.
+- `/Purge-User @member window:1d reason: cleanup` shows a two-minute ✅/❌ confirmation. Only one purge runs per server at a time.
+- `/Automod release @member reason: false positive` removes the native timeout, resets the member's automod strike history, and closes pending ban reviews for that containment. It can also remove a manually applied timeout.
+
+**History cleanup limitations:** Stoat's ban API has no message-history option and its bulk-delete endpoint accepts only messages from the last seven days. HoYoFetch therefore groups message IDs recorded while audit logging was active and deletes them separately in bounded batches. Results always report selected, deleted, and failed counts and must not be read as guaranteed-complete. Protected audit entries, locally retained evidence, quotations, reactions, and external copies are never erased by a purge.
 
 ### Audit log
 
@@ -124,9 +142,9 @@ The detector keeps bounded, in-memory message and join windows. It opens a case 
 
 Five joins within 60 seconds activate heightened weighting for 10 minutes and write a warning to the automod logger. A join surge by itself never changes a member. Bots, webhooks, the server owner, and verified moderation staff are excluded. If fresh permission verification is unavailable, an enforcement trigger is downgraded to monitor-only.
 
-In enforcement mode, the bot first applies or extends a 10-minute native timeout, then best-effort bulk deletes the triggering messages, and finally writes a protected evidence record. A successfully contained case gets a separate 10-minute ban prompt. Permanent bans are **never automatic**: two distinct authorized staff approvals are required by default, using the 🔨 reaction or `/Automod approve CASE_ID`. `/Automod quorum 1` exists for a one-moderator sandbox; restore it to `2` before production use.
+In enforcement mode, successful containment advances a persistent, bounded timeout ladder: **10 minutes → 1 hour → 24 hours → 7 days**. Further triggers remain capped at seven days, and the ladder resets after 14 quiet days. Monitor mode displays the projected strike without changing it. The bot then best-effort deletes the triggering messages and writes a protected evidence record. A successfully contained case gets a separate 10-minute ban prompt. Permanent bans are **never automatic**: two distinct authorized staff approvals are required by default, using the 🔨 reaction or `/Automod approve CASE_ID`. `/Automod quorum 1` exists for a one-moderator sandbox; restore it to `2` before production use.
 
-Repeated triggers within 15 minutes can extend containment but do not create extra vote prompts. Pending case IDs, approval state, and per-server configuration survive restarts in `data/automod_cases.json` and `data/automod.json`; message-rate windows intentionally reset on restart.
+Queued triggers while the same timeout is still active extend that containment without creating vote spam or another strike. Once the timeout expires, another trigger advances the ladder and opens a fresh approval window even if the older case is less than 15 minutes old. Pending case IDs, approval state, strike history, reversible manual actions, and per-server configuration survive restarts in `data/automod_cases.json`, `data/automod_strikes.json`, `data/moderation_actions.json`, and `data/automod.json`; message-rate windows and uncommitted reaction pickers intentionally reset on restart.
 
 For the sandbox acceptance pass:
 

@@ -181,6 +181,26 @@ test("every privileged command and alias uses manager access", () => {
     getCommandAccess("automod approve AM123", GAME_COMMANDS),
     COMMAND_ACCESS.BAN_APPROVER
   );
+  assert.equal(
+    getCommandAccess("automod release <@USER123> reason: x", GAME_COMMANDS),
+    COMMAND_ACCESS.TIMEOUT
+  );
+  assert.equal(
+    getCommandAccess("ban <@USER123> reason: x", GAME_COMMANDS),
+    COMMAND_ACCESS.BAN
+  );
+  assert.equal(
+    getCommandAccess("kick <@USER123> reason: x", GAME_COMMANDS),
+    COMMAND_ACCESS.KICK
+  );
+  assert.equal(
+    getCommandAccess("mute <@USER123> 1h reason: x", GAME_COMMANDS),
+    COMMAND_ACCESS.TIMEOUT
+  );
+  assert.equal(
+    getCommandAccess("purge-user USER123 window:1h reason: x", GAME_COMMANDS),
+    COMMAND_ACCESS.MANAGE_MESSAGES
+  );
   assert.equal(getCommandAccess("unknown", GAME_COMMANDS), null);
   assert.equal(getCommandAccess("chison now", GAME_COMMANDS), null);
 });
@@ -290,6 +310,27 @@ test("ban approval requires owner, Manage Server, or Ban Members", () => {
       false
     );
   }
+});
+
+test("manual moderation access requires the matching effective capability", () => {
+  const policies = [
+    [COMMAND_ACCESS.BAN, "BanMembers", "serverPermissions"],
+    [COMMAND_ACCESS.KICK, "KickMembers", "serverPermissions"],
+    [COMMAND_ACCESS.TIMEOUT, "TimeoutMembers", "serverPermissions"],
+    [COMMAND_ACCESS.MANAGE_MESSAGES, "ManageMessages", "channelPermissions"],
+  ];
+  for (const [access, permission, scope] of policies) {
+    const allowed = makeMessage({ [scope]: [permission] });
+    assert.equal(authorizeCommand(allowed, access).allowed, true);
+    assert.equal(authorizeCommand(makeMessage(), access).allowed, false);
+  }
+  assert.equal(
+    authorizeCommand(
+      makeMessage({ serverPermissions: ["ManageMessages"] }),
+      COMMAND_ACCESS.MANAGE_MESSAGES
+    ).allowed,
+    false
+  );
 });
 
 test("permission snapshots preserve high bits and ordered allow/deny precedence", () => {

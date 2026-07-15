@@ -29,8 +29,22 @@ before(async () => {
 
 test("record → lookup round trip with attachment descriptors", () => {
   const descriptors = [
-    { id: "att1", filename: "a.png", size: 100, contentType: "image/png", url: "https://x/a.png", evidencePath: null },
-    { id: "att2", filename: "b.png", size: 200, contentType: "image/png", url: "https://x/b.png", evidencePath: "/data/evidence/msg1_1.png" },
+    {
+      id: "att1",
+      filename: "a.png",
+      size: 100,
+      contentType: "image/png",
+      url: "https://x/a.png",
+      evidencePath: null,
+    },
+    {
+      id: "att2",
+      filename: "b.png",
+      size: 200,
+      contentType: "image/png",
+      url: "https://x/b.png",
+      evidencePath: "/data/evidence/msg1_1.png",
+    },
   ];
   archive.recordMessage({
     id: "msg1",
@@ -58,7 +72,61 @@ test("recordMessage defaults attachments to an empty array", () => {
     authorId: "userA",
     content: "no files here",
   });
-  assert.deepEqual(archive.getArchivedMessage("msgNoAttachments").attachments, []);
+  assert.deepEqual(
+    archive.getArchivedMessage("msgNoAttachments").attachments,
+    []
+  );
+});
+
+test("metadata queries filter by server, author, and time without content", () => {
+  const now = Date.now();
+  archive.recordMessage({
+    id: "queryRecent",
+    channelId: "chanQuery",
+    serverId: "srvQuery",
+    authorId: "userQuery",
+    content: "must not be returned",
+    createdAt: now - 1_000,
+  });
+  archive.recordMessage({
+    id: "queryOld",
+    channelId: "chanQuery",
+    serverId: "srvQuery",
+    authorId: "userQuery",
+    content: "old",
+    createdAt: now - 100_000,
+  });
+  const matches = archive.findArchivedMessages({
+    serverId: "srvQuery",
+    authorId: "userQuery",
+    since: now - 10_000,
+    until: now,
+  });
+  assert.deepEqual(matches, [
+    {
+      id: "queryRecent",
+      channelId: "chanQuery",
+      serverId: "srvQuery",
+      authorId: "userQuery",
+      createdAt: now - 1_000,
+    },
+  ]);
+  assert.equal(Object.hasOwn(matches[0], "content"), false);
+  assert.equal(archive.getArchiveCoverage("srvQuery").count, 2);
+  assert.equal(archive.markMessageDeleted("queryRecent", now), true);
+  assert.equal(
+    archive.findArchivedMessages({
+      serverId: "srvQuery",
+      authorId: "userQuery",
+      since: now - 10_000,
+      until: now,
+    }).length,
+    0
+  );
+  assert.equal(
+    archive.getArchivedMessage("queryRecent").content,
+    "must not be returned"
+  );
 });
 
 test("legacy numeric attachment counts survive journal replay unchanged", async () => {
@@ -157,7 +225,9 @@ test("retention prune drops expired entries and compaction rewrites the journal"
   assert.equal(fresh.getArchivedMessage("recent1").content, "still fresh");
 
   // Dead entries vastly outnumbered live ones → journal must have compacted.
-  const lines = readFileSync(archivePath, "utf-8").split("\n").filter((l) => l.trim());
+  const lines = readFileSync(archivePath, "utf-8")
+    .split("\n")
+    .filter((l) => l.trim());
   assert.ok(
     lines.length === fresh.archiveSize(),
     `journal should be compacted to live entries (lines=${lines.length}, live=${fresh.archiveSize()})`

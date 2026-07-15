@@ -9,8 +9,10 @@ import {
   findAutomodCaseByPromptMessage,
   getAutomodCase,
   getAutomodConfig,
+  getAutomodStrike,
   pruneAutomodCases,
   setAutomodConfig,
+  setAutomodStrike,
   updateAutomodCase,
 } from "./store.js";
 import {
@@ -22,6 +24,12 @@ import {
 } from "./security.js";
 
 export const AUTOMOD_BAN_EMOJI = "🔨";
+export const AUTOMOD_TIMEOUT_LADDER = Object.freeze([
+  10 * 60 * 1_000,
+  60 * 60 * 1_000,
+  24 * 60 * 60 * 1_000,
+  7 * 24 * 60 * 60 * 1_000,
+]);
 export const AUTOMOD_LIMITS = Object.freeze({
   rapidMessages: 5,
   rapidWindowMs: 5_000,
@@ -35,6 +43,7 @@ export const AUTOMOD_LIMITS = Object.freeze({
   joinSurgeWindowMs: 60_000,
   raidModeMs: 10 * 60 * 1_000,
   timeoutMs: 10 * 60 * 1_000,
+  strikeResetMs: 14 * 24 * 60 * 60 * 1_000,
   approvalWindowMs: 10 * 60 * 1_000,
   dedupeWindowMs: 15 * 60 * 1_000,
 });
@@ -51,8 +60,10 @@ const DEFAULT_STORE = Object.freeze({
   findAutomodCaseByPromptMessage,
   getAutomodCase,
   getAutomodConfig,
+  getAutomodStrike,
   pruneAutomodCases,
   setAutomodConfig,
+  setAutomodStrike,
   updateAutomodCase,
 });
 
@@ -64,6 +75,16 @@ function asTime(value) {
 
 function isRecent(time, now, windowMs) {
   return time !== null && time <= now && now - time < windowMs;
+}
+
+function formatDuration(durationMs) {
+  if (durationMs < 60 * 60_000) return `${durationMs / 60_000} minutes`;
+  if (durationMs < 24 * 60 * 60_000) {
+    const hours = durationMs / (60 * 60_000);
+    return `${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+  const days = durationMs / (24 * 60 * 60_000);
+  return `${days} day${days === 1 ? "" : "s"}`;
 }
 
 export function normalizeAutomodContent(value) {
@@ -251,6 +272,7 @@ function formatCaseEmbed({
   joinedAt,
   verification,
   containment,
+  escalation,
   repeat = false,
 }) {
   const activeSignals = [
@@ -270,7 +292,7 @@ function formatCaseEmbed({
     mode === "monitor"
       ? ["**Action:** monitor only; no messages or member state were changed."]
       : [
-          `**Timeout:** ${containment?.timeoutOk ? "applied/extended to at least 10 minutes" : "failed or skipped"}`,
+          `**Timeout:** ${containment?.timeoutOk ? `applied/extended for ${formatDuration(escalation.durationMs)}` : "failed or skipped"}`,
           `**Cleanup:** ${containment?.deletedCount ?? 0} message(s) deleted across ${containment?.deletedChannels ?? 0} channel(s); ${containment?.deleteFailures ?? 0} channel operation(s) failed`,
         ];
   const evidence = result.messages
@@ -289,6 +311,7 @@ function formatCaseEmbed({
       `**Target:** <@${userId}>`,
       `**Mode:** ${mode}`,
       `**Score:** ${result.score}`,
+      `**Escalation:** strike ${escalation.level}/4 (${formatDuration(escalation.durationMs)})${mode === "monitor" ? " projected" : ""}`,
       `**Signals:** ${activeSignals.join(", ")}`,
       `**Account age:** ${formatAge(accountCreatedAt, now)}`,
       `**Server membership age:** ${formatAge(joinedAt, now)}`,
@@ -376,12 +399,39 @@ export function createAutomod(
     );
   }
 
-  async function contain(serverId, targetAuthorization, messages) {
+  function escalationFor(serverId, userId, memberTimeoutAt) {
+    const current = now();
+    const stored = store.getAutomodStrike(serverId, userId);
+    const quietReset =
+      !stored ||
+      !Number.isFinite(stored.lastContainedAt) ||
+      current - stored.lastContainedAt >= AUTOMOD_LIMITS.strikeResetMs;
+    const memberTimeout = asTime(memberTimeoutAt) ?? 0;
+    const active =
+      !quietReset &&
+      Number(stored.timeoutUntil) > current &&
+      memberTimeout > current;
+    const level = active
+      ? stored.level
+      : quietReset
+        ? 1
+        : Math.min(4, stored.level + 1);
+    return {
+      active,
+      level,
+      durationMs: AUTOMOD_TIMEOUT_LADDER[level - 1],
+      stored,
+    };
+  }
+
+  async function contain(serverId, targetAuthorization, messages, escalation) {
     const current = now();
     const existingTimeout = asTime(targetAuthorization.memberTimeoutAt) ?? 0;
-    const timeoutUntil = new Date(
-      Math.max(existingTimeout, current + AUTOMOD_LIMITS.timeoutMs)
-    ).toISOString();
+    const timeoutUntilMs = Math.max(
+      existingTimeout,
+      current + escalation.durationMs
+    );
+    const timeoutUntil = new Date(timeoutUntilMs).toISOString();
     const timeout = await request(
       "PATCH",
       `/servers/${serverId}/members/${targetAuthorization.authorId}`,
@@ -416,6 +466,7 @@ export function createAutomod(
     return {
       timeoutOk: Boolean(timeout.ok),
       timeoutStatus: timeout.status,
+      timeoutUntil: timeoutUntilMs,
       deletedCount,
       deletedChannels,
       deleteFailures,
@@ -440,7 +491,6 @@ export function createAutomod(
     actorLocks.add(key);
 
     try {
-      const existing = getRecent(serverId, userId);
       const targetAuthorization = await freshTargetCheck(
         serverId,
         channelId,
@@ -459,14 +509,31 @@ export function createAutomod(
         targetAuthorization.reason === "insufficient_permission";
       const effectiveMode =
         config.mode === "enforce" && verifiedOrdinary ? "enforce" : "monitor";
+      const escalation = escalationFor(
+        serverId,
+        userId,
+        targetAuthorization.memberTimeoutAt
+      );
+      // Only queued events while the native timeout is still active reuse a
+      // case. Once it expires, another trigger is a new strike and gets a new
+      // approval window even if the old 15-minute record still exists.
+      const existing = escalation.active ? getRecent(serverId, userId) : null;
       const caseId = existing?.caseId ?? caseIdFactory();
       let containment = null;
       if (effectiveMode === "enforce") {
         containment = await contain(
           serverId,
           targetAuthorization,
-          result.messages
+          result.messages,
+          escalation
         );
+        if (containment.timeoutOk) {
+          store.setAutomodStrike(serverId, userId, {
+            level: escalation.level,
+            lastContainedAt: now(),
+            timeoutUntil: containment.timeoutUntil,
+          });
+        }
       }
 
       const openedAt = now();
@@ -482,6 +549,7 @@ export function createAutomod(
           joinedAt: message.member?.joinedAt,
           verification: targetAuthorization.permissionSource,
           containment,
+          escalation,
           repeat: Boolean(existing),
         })
       );
@@ -889,7 +957,7 @@ export function createAutomod(
 
     return buildStatusEmbed(
       "🛡️ Automod Commands",
-      `Use \`${command} status\`, \`${command} monitor [here|#channel]\`, \`${command} enforce [here|#channel]\`, \`${command} off\`, \`${command} quorum 1|2\`, or \`${command} approve CASE_ID\`.`,
+      `Use \`${command} status\`, \`${command} monitor [here|#channel]\`, \`${command} enforce [here|#channel]\`, \`${command} off\`, \`${command} quorum 1|2\`, \`${command} approve CASE_ID\`, or \`${command} release @member reason: ...\`.`,
       "#3498DB"
     );
   }

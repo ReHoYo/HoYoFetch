@@ -169,3 +169,68 @@ test("automod pending cases support lookup, approval updates, and expiry", () =>
   store.pruneAutomodCases(now + 25_000);
   assert.equal(store.getAutomodCase("AMCASE1"), null);
 });
+
+test("automod strike state persists and can be reset", () => {
+  const now = Date.now();
+  store.setAutomodStrike("SERVER1", "USER1", {
+    level: 3,
+    lastContainedAt: now,
+    timeoutUntil: now + 60_000,
+  });
+  assert.deepEqual(store.getAutomodStrike("SERVER1", "USER1"), {
+    serverId: "SERVER1",
+    userId: "USER1",
+    level: 3,
+    lastContainedAt: now,
+    timeoutUntil: now + 60_000,
+  });
+  assert.equal(store.clearAutomodStrike("SERVER1", "USER1"), true);
+  assert.equal(store.getAutomodStrike("SERVER1", "USER1"), null);
+});
+
+test("manual release can close pending automod ban reviews", () => {
+  const now = Date.now();
+  store.createAutomodCase({
+    caseId: "AMRELEASE1",
+    serverId: "SERVERREL",
+    userId: "USERREL",
+    promptMessageId: "PROMPTREL",
+    approvals: [],
+    status: "pending",
+    createdAt: now,
+    expiresAt: now + 10_000,
+    dedupeUntil: now + 20_000,
+  });
+  assert.equal(
+    store.cancelAutomodCasesForMember("SERVERREL", "USERREL", now + 1),
+    1
+  );
+  assert.equal(store.getAutomodCase("AMRELEASE1").status, "released");
+});
+
+test("reversible moderation actions support message lookup and expiry", () => {
+  const now = Date.now();
+  store.createModerationAction({
+    actionId: "MDACTION1",
+    type: "mute",
+    logMessageId: "LOG1",
+    status: "active",
+    createdAt: now,
+    expiresAt: now + 10_000,
+    retentionUntil: now + 20_000,
+  });
+  assert.equal(
+    store.findModerationActionByMessage("LOG1").actionId,
+    "MDACTION1"
+  );
+  store.addProtectedMessage("CHANNEL1", "LOG1", { content: "protected" });
+  store.updateProtectedMessage("LOG1", { messageId: "RESTOREDLOG1" });
+  assert.equal(
+    store.findModerationActionByMessage("RESTOREDLOG1").actionId,
+    "MDACTION1"
+  );
+  store.pruneModerationActions(now + 15_000);
+  assert.equal(store.getModerationAction("MDACTION1").status, "expired");
+  store.pruneModerationActions(now + 25_000);
+  assert.equal(store.getModerationAction("MDACTION1"), null);
+});
