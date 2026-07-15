@@ -66,6 +66,12 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/Restart`                                | Restart the bot after deploying updates (admins/mods only)                                                  |
 | `/AuditLog [status\|here\|#channel\|off]` | View or configure audit logging for the server (admins/mods only)                                           |
 | `/Test-AuditLog`                          | Send a test event through the audit pipeline to verify delivery (admins/mods only; legacy diagnostic alias) |
+| `/Automod status`                         | Show this server's automod mode, logger, and ban quorum (admins only)                                       |
+| `/Automod monitor [here\|#channel]`       | Detect and log cases without changing messages or members (admins only)                                     |
+| `/Automod enforce [here\|#channel]`       | Enable temporary containment and staff-approved ban cases (admins only)                                     |
+| `/Automod off`                            | Disable anti-raid evaluation for this server (admins only)                                                  |
+| `/Automod quorum 1\|2`                    | Set the approval quorum for new cases; production defaults to two (admins only)                             |
+| `/Automod approve CASE_ID`                | Approve a pending ban case (owner, Manage Server, or Ban Members only)                                      |
 | `/HelpHoyoFetch`                          | Show all commands                                                                                           |
 
 > **Note:** Revolt does not support Discord-style slash commands. These are message-based prefix commands using `/` as the prefix. Command names are case-insensitive; channel IDs are preserved exactly.
@@ -74,7 +80,8 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 
 - Commands are accepted only from human members in server channels. Direct messages, webhooks, and messages from other bots are ignored.
 - Server owners and members with **Manage Server** permission are treated as administrators.
-- Every privileged command is available to administrators and capability-based moderators with **Kick Members**, **Ban Members**, **Timeout Members**, or **Manage Messages** in the current channel.
+- Fetch, emoji, restart, and audit-log management commands are available to administrators and capability-based moderators with **Kick Members**, **Ban Members**, **Timeout Members**, or **Manage Messages** in the current channel.
+- Automod configuration is limited to the server owner or **Manage Server** members. Ban approvals require the owner, **Manage Server**, or **Ban Members**; **Manage Messages** alone cannot approve a ban.
 - Role names are never trusted; access is based on Stoat's effective permissions. This shared policy covers auto-fetch management, emoji mode, restart, and audit-log configuration/testing.
 - Each member can trigger up to five recognised commands in 30 seconds. Concurrent requests for the same game's codes share one upstream fetch.
 
@@ -96,6 +103,34 @@ The bot needs the **Ban Members** permission to detect bans (checked when a memb
 - Newer backends can label a member departure as `Leave`, `Kick`, or `Ban`. When the backend omits that reason, the bot can only report that the member left or was removed.
 - Messages sent before audit logging was enabled, or while the bot was offline, can't have their content recovered.
 - Invites, webhooks, permission-override details, and voice actions produce no usable gateway events.
+
+### Anti-raid automod
+
+Automod is **off by default for every server**. Start with `/Automod monitor here` in a sandbox or logger channel. Monitor mode runs the complete detector and writes protected case records, but never deletes messages, times out members, or creates ban votes. `/Automod enforce here` must be selected explicitly before containment is allowed.
+
+The detector keeps bounded, in-memory message and join windows. It opens a case at two points when at least one message-behavior signal is present:
+
+- 5 messages within 5 seconds: 1 point
+- 4 normalized duplicates within 10 seconds: 2 points
+- 5 unique mentions within 10 seconds: 2 points
+- Account younger than 7 days or server membership younger than 24 hours: 1 point
+- Joined during heightened raid mode: 1 point
+
+Five joins within 60 seconds activate heightened weighting for 10 minutes and write a warning to the automod logger. A join surge by itself never changes a member. Bots, webhooks, the server owner, and verified moderation staff are excluded. If fresh permission verification is unavailable, an enforcement trigger is downgraded to monitor-only.
+
+In enforcement mode, the bot first applies or extends a 10-minute native timeout, then best-effort bulk deletes the triggering messages, and finally writes a protected evidence record. A successfully contained case gets a separate 10-minute ban prompt. Permanent bans are **never automatic**: two distinct authorized staff approvals are required by default, using the 🔨 reaction or `/Automod approve CASE_ID`. `/Automod quorum 1` exists for a one-moderator sandbox; restore it to `2` before production use.
+
+Repeated triggers within 15 minutes can extend containment but do not create extra vote prompts. Pending case IDs, approval state, and per-server configuration survive restarts in `data/automod_cases.json` and `data/automod.json`; message-rate windows intentionally reset on restart.
+
+For the sandbox acceptance pass:
+
+1. Enable monitor mode and send five messages within five seconds from a recent-join test account; confirm one case and no moderation action.
+2. Confirm five unique rapid messages from an established account do not cause containment.
+3. Enable enforcement and repeat a recent-join or four-message duplicate flood; confirm timeout plus cleanup.
+4. Use quorum one or two staff accounts to approve, verify the case ID in the ban reason, then unban the test account.
+5. Test missing Timeout Members, Manage Messages, and Ban Members permissions; each failure must be logged without escalating to another action.
+
+After sandbox acceptance, keep production in monitor mode for 48 hours, review false positives, verify quorum is two, and only then enable enforcement.
 
 ## 🔌 API Sources
 
@@ -151,17 +186,20 @@ In Revolt, custom emoji are globally referenced by their unique ID. A bot can us
 ```
 hoyofetch/
 ├── bot.js              Main entry, command router, auto-fetch scheduler
+├── automod.js          Anti-raid detection, containment, and ban approvals
 ├── config.js           Game definitions, API config, custom emoji loader
 ├── api.js              Code source integration (hoyo-codes + ennead + Game8)
 ├── embeds.js           Revolt SendableEmbed builder
-├── store.js            JSON persistence (channels, known codes)
+├── store.js            JSON persistence (channels, codes, audit, automod)
 ├── custom_emojis.json  Optional: custom Revolt emoji IDs
 ├── .env.example        Configuration template
 ├── package.json
 └── data/               Runtime data (auto-created, gitignored)
     ├── channels.json
     ├── known_codes.json
-    └── source_cache.json
+    ├── source_cache.json
+    ├── automod.json
+    └── automod_cases.json
 ```
 
 ### Data flow

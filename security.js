@@ -5,6 +5,7 @@ export const COMMAND_ACCESS = Object.freeze({
   MEMBER: "member",
   FETCH_MANAGER: "fetch_manager",
   ADMIN: "admin",
+  BAN_APPROVER: "ban_approver",
 });
 
 const FETCH_MANAGEMENT_COMMANDS = new Set([
@@ -49,6 +50,12 @@ const AUDIT_SALT = randomBytes(16);
 
 export function getCommandAccess(body, commandGameMap = {}) {
   if (Object.hasOwn(commandGameMap, body)) return COMMAND_ACCESS.MEMBER;
+  if (body === "automod approve" || body.startsWith("automod approve ")) {
+    return COMMAND_ACCESS.BAN_APPROVER;
+  }
+  if (body === "automod" || body.startsWith("automod ")) {
+    return COMMAND_ACCESS.ADMIN;
+  }
   if (FETCH_MANAGEMENT_COMMANDS.has(body)) {
     return COMMAND_ACCESS.FETCH_MANAGER;
   }
@@ -87,6 +94,17 @@ export function authorizeCommand(message, access = COMMAND_ACCESS.MEMBER) {
     return isAdmin
       ? { ...cachedContext, reason: isOwner ? "owner" : "admin" }
       : denied("insufficient_permission", cachedContext);
+  }
+
+  if (access === COMMAND_ACCESS.BAN_APPROVER) {
+    const canBan = hasPermission(member, server, "BanMembers");
+    if (isAdmin || canBan) {
+      return {
+        ...cachedContext,
+        reason: isOwner ? "owner" : isAdmin ? "admin" : "ban_moderator",
+      };
+    }
+    return denied("insufficient_permission", cachedContext);
   }
 
   if (access === COMMAND_ACCESS.FETCH_MANAGER) {
@@ -181,23 +199,40 @@ export async function refreshCommandAuthorization(
         evaluated.channelPermissions,
         PERMISSION_BITS.ManageMessages
       );
+    const canApproveBan =
+      evaluated.isOwner ||
+      hasPermissionBit(
+        evaluated.serverPermissions,
+        PERMISSION_BITS.ManageServer
+      ) ||
+      hasPermissionBit(evaluated.serverPermissions, PERMISSION_BITS.BanMembers);
     const allowed =
       access === COMMAND_ACCESS.ADMIN
         ? isAdmin
-        : access === COMMAND_ACCESS.FETCH_MANAGER && (isAdmin || isModerator);
+        : access === COMMAND_ACCESS.FETCH_MANAGER
+          ? isAdmin || isModerator
+          : access === COMMAND_ACCESS.BAN_APPROVER && canApproveBan;
 
     if (!allowed) {
       return denied("insufficient_permission", {
         ...cachedAuthorization,
         permissionSource: "refreshed",
+        memberTimeoutAt: memberSnapshot?.timeout ?? null,
       });
     }
 
     return {
       ...cachedAuthorization,
       allowed: true,
-      reason: evaluated.isOwner ? "owner" : isAdmin ? "admin" : "moderator",
+      reason: evaluated.isOwner
+        ? "owner"
+        : isAdmin
+          ? "admin"
+          : access === COMMAND_ACCESS.BAN_APPROVER
+            ? "ban_moderator"
+            : "moderator",
       permissionSource: "refreshed",
+      memberTimeoutAt: memberSnapshot?.timeout ?? null,
     };
   } catch (error) {
     logger.warn?.(
@@ -209,6 +244,68 @@ export async function refreshCommandAuthorization(
       ...cachedAuthorization,
       permissionSource: "refresh_failed",
     });
+  }
+}
+
+/**
+ * Authorize a server actor from fresh REST snapshots without relying on a
+ * hydrated command message. Automod uses this before targeting a member and
+ * before accepting a ban approval.
+ */
+export async function authorizeServerActor(
+  client,
+  { serverId, channelId, authorId },
+  access,
+  { allowBot = false, logger = console } = {}
+) {
+  const authorization = await refreshCommandAuthorization(
+    client,
+    {
+      allowed: false,
+      reason: "insufficient_permission",
+      authorId,
+      channelId,
+      server: { id: serverId },
+      permissionSource: "unverified",
+    },
+    access,
+    { logger }
+  );
+
+  try {
+    const user = await client.api.get(`/users/${authorId}`);
+    if (user?._id !== authorId) {
+      return {
+        ...authorization,
+        allowed: false,
+        reason: "identity_refresh_failed",
+        identityVerified: false,
+        permissionSource: "refresh_failed",
+      };
+    }
+    const isBot = Boolean(user.bot);
+    if (isBot && !allowBot) {
+      return {
+        ...authorization,
+        allowed: false,
+        reason: "bot",
+        identityVerified: true,
+        isBot: true,
+      };
+    }
+    return { ...authorization, identityVerified: true, isBot };
+  } catch (error) {
+    logger.warn?.(
+      `identity refresh failed actor=${auditAlias(authorId)} ` +
+        `server=${auditAlias(serverId)} ${safeErrorSummary(error)}`
+    );
+    return {
+      ...authorization,
+      allowed: false,
+      reason: "identity_refresh_failed",
+      identityVerified: false,
+      permissionSource: "refresh_failed",
+    };
   }
 }
 

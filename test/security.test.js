@@ -163,6 +163,24 @@ test("every privileged command and alias uses manager access", () => {
       COMMAND_ACCESS.FETCH_MANAGER
     );
   }
+  for (const command of [
+    "automod",
+    "automod status",
+    "automod monitor",
+    "automod monitor here",
+    "automod enforce <#CHANNEL123>",
+    "automod off",
+    "automod quorum 2",
+  ]) {
+    assert.equal(
+      getCommandAccess(command, GAME_COMMANDS),
+      COMMAND_ACCESS.ADMIN
+    );
+  }
+  assert.equal(
+    getCommandAccess("automod approve AM123", GAME_COMMANDS),
+    COMMAND_ACCESS.BAN_APPROVER
+  );
   assert.equal(getCommandAccess("unknown", GAME_COMMANDS), null);
   assert.equal(getCommandAccess("chison now", GAME_COMMANDS), null);
 });
@@ -223,6 +241,29 @@ test("Manage Messages is evaluated against the current channel", () => {
     authorizeCommand(serverOnlyValue, COMMAND_ACCESS.FETCH_MANAGER).allowed,
     false
   );
+});
+
+test("ban approval requires owner, Manage Server, or Ban Members", () => {
+  for (const message of [
+    makeMessage({ owner: true }),
+    makeMessage({ serverPermissions: ["ManageServer"] }),
+    makeMessage({ serverPermissions: ["BanMembers"] }),
+  ]) {
+    assert.equal(
+      authorizeCommand(message, COMMAND_ACCESS.BAN_APPROVER).allowed,
+      true
+    );
+  }
+  for (const message of [
+    makeMessage(),
+    makeMessage({ serverPermissions: ["TimeoutMembers"] }),
+    makeMessage({ channelPermissions: ["ManageMessages"] }),
+  ]) {
+    assert.equal(
+      authorizeCommand(message, COMMAND_ACCESS.BAN_APPROVER).allowed,
+      false
+    );
+  }
 });
 
 test("permission snapshots preserve high bits and ordered allow/deny precedence", () => {

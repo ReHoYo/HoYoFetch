@@ -70,6 +70,7 @@ import {
   runAuditLogTest,
 } from "./auditlog.js";
 import { createTamperProtection } from "./tamper-protection.js";
+import { createAutomod } from "./automod.js";
 
 // ── Validate token ─────────────────────────────────
 if (!CONFIG.token || CONFIG.token === "your_bot_token_here") {
@@ -86,6 +87,11 @@ const commandRateLimiter = new CommandRateLimiter();
 const codeFetchSingleFlight = new SingleFlight();
 const tamperProtection = createTamperProtection(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
+  request: apiRequest,
+});
+const automod = createAutomod(client, {
+  send: (channelId, data) => safeSend({ id: channelId }, data),
+  sendProtected: tamperProtection.sendProtected,
   request: apiRequest,
 });
 
@@ -184,7 +190,7 @@ client.on("messageCreate", async (message) => {
 
   if (!authorization.allowed) {
     if (authorization.reason === "insufficient_permission") {
-      await sendNoPermission(message);
+      await sendNoPermission(message, access);
       logCommandAudit(cmd, authorization, "denied");
     }
     return;
@@ -271,6 +277,17 @@ client.on("messageCreate", async (message) => {
     if (cmd === "auditlog") {
       const embed = handleAuditLogCommand(
         client,
+        message,
+        cmdArgs,
+        CONFIG.prefix
+      );
+      await safeSend(message.channel, { embeds: [embed] });
+      return;
+    }
+
+    // ── Automod [status|monitor|enforce|off|quorum|approve] ──
+    if (cmd === "automod") {
+      const embed = await automod.handleCommand(
         message,
         cmdArgs,
         CONFIG.prefix
@@ -743,9 +760,13 @@ async function seedAllGames() {
 //  Command security
 // ═══════════════════════════════════════════════════
 
-async function sendNoPermission(message) {
+async function sendNoPermission(message, access) {
   const description =
-    "Only server administrators or moderators can use this command.";
+    access === COMMAND_ACCESS.ADMIN
+      ? "Only the server owner or members with Manage Server permission can use this command."
+      : access === COMMAND_ACCESS.BAN_APPROVER
+        ? "Only the server owner or members with Manage Server or Ban Members permission can approve a ban."
+        : "Only server administrators or moderators can use this command.";
   await safeSend(message.channel, {
     embeds: [buildStatusEmbed("🔒 Permission Denied", description, "#E74C3C")],
   });

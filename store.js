@@ -17,6 +17,8 @@ const KNOWN_CODES_PATH = join(DATA_DIR, "known_codes.json");
 const SOURCE_CACHE_PATH = join(DATA_DIR, "source_cache.json");
 const PROTECTED_PATH = join(DATA_DIR, "protected_messages.json");
 const AUDITLOG_PATH = join(DATA_DIR, "auditlog.json");
+const AUTOMOD_PATH = join(DATA_DIR, "automod.json");
+const AUTOMOD_CASES_PATH = join(DATA_DIR, "automod_cases.json");
 
 // ── Helpers ────────────────────────────────────────
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -509,4 +511,114 @@ export function setKnownBans(serverId, userIds) {
   if (!auditLogs[serverId]) return;
   auditLogs[serverId].knownBans = userIds;
   writeJSON(AUDITLOG_PATH, auditLogs);
+}
+
+// ═══════════════════════════════════════════════════
+//  Anti-raid automod
+// ═══════════════════════════════════════════════════
+// Configuration shape:
+// { "<serverId>": { mode: "off"|"monitor"|"enforce",
+//                    logChannelId: string|null, quorum: 1|2, updatedAt } }
+// Cases intentionally omit message content. The protected logger entry is the
+// durable evidence record; this file only keeps short-lived approval state.
+
+export const AUTOMOD_MODES = new Set(["off", "monitor", "enforce"]);
+
+let automodConfigs = readJSON(AUTOMOD_PATH, {});
+let automodCases = readJSON(AUTOMOD_CASES_PATH, {});
+const MAX_AUTOMOD_CASES = 5_000;
+
+function normaliseAutomodConfig(value = {}) {
+  return {
+    mode: AUTOMOD_MODES.has(value.mode) ? value.mode : "off",
+    logChannelId:
+      typeof value.logChannelId === "string" ? value.logChannelId : null,
+    quorum: value.quorum === 1 ? 1 : 2,
+    updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : null,
+  };
+}
+
+export function getAutomodConfig(serverId) {
+  return normaliseAutomodConfig(automodConfigs[serverId]);
+}
+
+export function setAutomodConfig(serverId, patch = {}) {
+  const previous = getAutomodConfig(serverId);
+  const next = normaliseAutomodConfig({
+    ...previous,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  });
+  automodConfigs[serverId] = next;
+  writeJSON(AUTOMOD_PATH, automodConfigs);
+  return { previous, current: next };
+}
+
+function persistAutomodCases() {
+  writeJSON(AUTOMOD_CASES_PATH, automodCases);
+}
+
+export function createAutomodCase(record) {
+  pruneAutomodCases();
+  automodCases[record.caseId] = structuredClone(record);
+  const excess = Object.keys(automodCases).length - MAX_AUTOMOD_CASES;
+  if (excess > 0) {
+    const oldest = Object.values(automodCases)
+      .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
+      .slice(0, excess);
+    for (const entry of oldest) delete automodCases[entry.caseId];
+  }
+  persistAutomodCases();
+  return structuredClone(automodCases[record.caseId]);
+}
+
+export function getAutomodCase(caseId) {
+  const record = automodCases[caseId];
+  return record ? structuredClone(record) : null;
+}
+
+export function updateAutomodCase(caseId, patch = {}) {
+  const record = automodCases[caseId];
+  if (!record) return null;
+  automodCases[caseId] = { ...record, ...structuredClone(patch) };
+  persistAutomodCases();
+  return structuredClone(automodCases[caseId]);
+}
+
+export function findAutomodCaseByPromptMessage(messageId) {
+  const record = Object.values(automodCases).find(
+    (entry) => entry.promptMessageId === messageId
+  );
+  return record ? structuredClone(record) : null;
+}
+
+export function findActiveAutomodCase(serverId, userId, now = Date.now()) {
+  const record = Object.values(automodCases)
+    .filter(
+      (entry) =>
+        entry.serverId === serverId &&
+        entry.userId === userId &&
+        Number.isFinite(entry.dedupeUntil) &&
+        entry.dedupeUntil > now
+    )
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
+  return record ? structuredClone(record) : null;
+}
+
+export function pruneAutomodCases(now = Date.now()) {
+  let changed = false;
+  for (const [caseId, record] of Object.entries(automodCases)) {
+    if (!Number.isFinite(record.dedupeUntil) || record.dedupeUntil <= now) {
+      delete automodCases[caseId];
+      changed = true;
+    } else if (
+      record.status === "pending" &&
+      Number.isFinite(record.expiresAt) &&
+      record.expiresAt <= now
+    ) {
+      record.status = "expired";
+      changed = true;
+    }
+  }
+  if (changed) persistAutomodCases();
 }

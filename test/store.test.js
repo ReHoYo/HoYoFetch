@@ -85,3 +85,59 @@ test("audit log channel configuration round-trips and disables", () => {
   store.disableAuditLog("server-audit");
   assert.equal(store.getAuditLogChannel("server-audit"), null);
 });
+
+test("automod configuration defaults off and persists mode, channel, and quorum", () => {
+  assert.deepEqual(store.getAutomodConfig("server-automod"), {
+    mode: "off",
+    logChannelId: null,
+    quorum: 2,
+    updatedAt: null,
+  });
+  store.setAutomodConfig("server-automod", {
+    mode: "monitor",
+    logChannelId: "channel-automod",
+    quorum: 1,
+  });
+  const config = store.getAutomodConfig("server-automod");
+  assert.equal(config.mode, "monitor");
+  assert.equal(config.logChannelId, "channel-automod");
+  assert.equal(config.quorum, 1);
+  assert.ok(config.updatedAt);
+  assert.doesNotThrow(() =>
+    JSON.parse(readFileSync(join(dataDir, "automod.json"), "utf-8"))
+  );
+});
+
+test("automod pending cases support lookup, approval updates, and expiry", () => {
+  const now = Date.now();
+  store.createAutomodCase({
+    caseId: "AMCASE1",
+    serverId: "SERVER1",
+    userId: "USER1",
+    promptMessageId: "PROMPT1",
+    approvals: [],
+    status: "pending",
+    createdAt: now,
+    expiresAt: now + 10_000,
+    dedupeUntil: now + 20_000,
+  });
+  assert.equal(
+    store.findAutomodCaseByPromptMessage("PROMPT1").caseId,
+    "AMCASE1"
+  );
+  assert.equal(
+    store.findActiveAutomodCase("SERVER1", "USER1", now).caseId,
+    "AMCASE1"
+  );
+  store.updateAutomodCase("AMCASE1", { approvals: ["MOD1"] });
+  assert.deepEqual(store.getAutomodCase("AMCASE1").approvals, ["MOD1"]);
+
+  store.pruneAutomodCases(now + 15_000);
+  assert.equal(store.getAutomodCase("AMCASE1").status, "expired");
+  assert.equal(
+    store.findActiveAutomodCase("SERVER1", "USER1", now + 15_000).caseId,
+    "AMCASE1"
+  );
+  store.pruneAutomodCases(now + 25_000);
+  assert.equal(store.getAutomodCase("AMCASE1"), null);
+});
