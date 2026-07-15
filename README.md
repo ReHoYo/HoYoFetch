@@ -66,11 +66,11 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/Restart`                                | Restart the bot after deploying updates (admins/mods only)                                                  |
 | `/AuditLog [status\|here\|#channel\|off]` | View or configure audit logging for the server (admins/mods only)                                           |
 | `/Test-AuditLog`                          | Send a test event through the audit pipeline to verify delivery (admins/mods only; legacy diagnostic alias) |
-| `/Automod status`                         | Show this server's automod mode, logger, and ban quorum (admins only)                                       |
-| `/Automod monitor [here\|#channel]`       | Detect and log cases without changing messages or members (admins only)                                     |
-| `/Automod enforce [here\|#channel]`       | Enable temporary containment and staff-approved ban cases (admins only)                                     |
-| `/Automod off`                            | Disable anti-raid evaluation for this server (admins only)                                                  |
-| `/Automod quorum 1\|2`                    | Set the approval quorum for new cases; production defaults to two (admins only)                             |
+| `/Automod status`                         | Show this server's automod mode, logger, and ban quorum (admins/mods only)                                  |
+| `/Automod monitor [here\|#channel]`       | Detect and log cases without changing messages or members (admins/mods only)                                |
+| `/Automod enforce [here\|#channel]`       | Enable temporary containment and staff-approved ban cases (admins/mods only)                                |
+| `/Automod off`                            | Disable anti-raid evaluation for this server (admins/mods only)                                             |
+| `/Automod quorum 1\|2`                    | Set the approval quorum for new cases; production defaults to two (admins/mods only)                        |
 | `/Automod approve CASE_ID`                | Approve a pending ban case (owner, Manage Server, or Ban Members only)                                      |
 | `/HelpHoyoFetch`                          | Show all commands                                                                                           |
 
@@ -81,7 +81,7 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 - Commands are accepted only from human members in server channels. Direct messages, webhooks, and messages from other bots are ignored.
 - Server owners and members with **Manage Server** permission are treated as administrators.
 - Fetch, emoji, restart, and audit-log management commands are available to administrators and capability-based moderators with **Kick Members**, **Ban Members**, **Timeout Members**, or **Manage Messages** in the current channel.
-- Automod configuration is limited to the server owner or **Manage Server** members. Ban approvals require the owner, **Manage Server**, or **Ban Members**; **Manage Messages** alone cannot approve a ban.
+- Automod configuration uses the same capability-based moderator policy as other management commands: owner, **Manage Server**, **Kick Members**, **Ban Members**, **Timeout Members**, or **Manage Messages** in the current channel. Ban approvals remain stricter and require the owner, **Manage Server**, or **Ban Members**; **Manage Messages** alone cannot approve a ban.
 - Role names are never trusted; access is based on Stoat's effective permissions. This shared policy covers auto-fetch management, emoji mode, restart, and audit-log configuration/testing.
 - Each member can trigger up to five recognised commands in 30 seconds. Concurrent requests for the same game's codes share one upstream fetch.
 

@@ -126,7 +126,7 @@ export function buildHelpEmbed(prefix) {
     ],
     [
       `${prefix}Automod [status|monitor|enforce|off|quorum|approve]`,
-      "Configure anti-raid monitoring or approve a contained case _(configuration: admins; bans: Ban Members)_",
+      "Configure anti-raid monitoring or approve a contained case _(configuration: admins/mods; bans: Ban Members)_",
     ],
     [`${prefix}HelpHoyoFetch`, "Show this help message"],
   ];

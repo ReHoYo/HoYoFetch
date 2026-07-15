@@ -174,7 +174,7 @@ test("every privileged command and alias uses manager access", () => {
   ]) {
     assert.equal(
       getCommandAccess(command, GAME_COMMANDS),
-      COMMAND_ACCESS.ADMIN
+      COMMAND_ACCESS.FETCH_MANAGER
     );
   }
   assert.equal(

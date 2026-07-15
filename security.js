@@ -54,7 +54,7 @@ export function getCommandAccess(body, commandGameMap = {}) {
     return COMMAND_ACCESS.BAN_APPROVER;
   }
   if (body === "automod" || body.startsWith("automod ")) {
-    return COMMAND_ACCESS.ADMIN;
+    return COMMAND_ACCESS.FETCH_MANAGER;
   }
   if (FETCH_MANAGEMENT_COMMANDS.has(body)) {
     return COMMAND_ACCESS.FETCH_MANAGER;
