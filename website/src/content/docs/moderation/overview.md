@@ -5,6 +5,8 @@ description: The safety model behind Irminsul manual moderation, protected recor
 
 Irminsul moderation is designed around exact permission checks, explicit reasons, durable protected records, and clear limitations.
 
+Member safety reports use the same protected-record destination but are not moderation actions. A report can raise a staff-review priority when several independent members report the same account, but it never changes the target's account or server state.
+
 ## Before the first action
 
 Configure an audit destination and test it:
@@ -40,4 +42,4 @@ Reaction handlers re-check the reacting moderator's current permission before ap
 
 History cleanup covers only messages Irminsul observed while archiving was active, and Stoat's bulk-delete route is limited to recent messages. Results report selected, deleted, and failed counts instead of claiming complete erasure.
 
-Continue to [Manual actions](/HoYoFetch/moderation/manual-actions/), [Audit log](/HoYoFetch/moderation/audit-log/), or [Automod](/HoYoFetch/moderation/automod/).
+Continue to [Spam reports](/HoYoFetch/moderation/spam-reports/), [Manual actions](/HoYoFetch/moderation/manual-actions/), [Audit log](/HoYoFetch/moderation/audit-log/), or [Automod](/HoYoFetch/moderation/automod/).

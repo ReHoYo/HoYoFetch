@@ -136,6 +136,7 @@ test("every privileged command and alias uses manager access", () => {
     ...Object.keys(GAME_COMMANDS),
     "helphoyofetch",
     "docs",
+    "report-spam",
     "harhar",
     "chison",
     "potential",

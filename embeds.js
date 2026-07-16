@@ -110,10 +110,10 @@ export function buildHelpEmbeds(prefix) {
 
   return [
     {
-      title: "📖 Irminsul Help — Codes & Setup (1/2)",
+      title: "📖 Irminsul Help — Codes, Safety & Setup (1/2)",
       description:
         commandList(utilityCommands) +
-        "\n\n_Use ▶️ for moderation commands. Command names are case-insensitive._\n" +
+        "\n\n_Use `/Report-Spam` only in a channel where Irminsul can remove the invocation. Use ▶️ for moderation commands. Command names are case-insensitive._\n" +
         `_Full reference: [Irminsul Docs](${DOCS_URL})_\n` +
         "_Sources: [HoYo](https://hoyo-codes.seria.moe), [HI3](https://api.ennead.cc/mihoyo), [NTE](https://game8.co/games/Neverness-to-Everness/archives/593718)_",
       colour: "#5865F2",

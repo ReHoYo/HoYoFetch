@@ -61,6 +61,7 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/FetchZZZ`                                                 | Fetch active Zenless Zone Zero codes                                                                        |
 | `/FetchHI3`                                                 | Fetch active Honkai Impact 3rd codes                                                                        |
 | `/FetchNTE`                                                 | Fetch active Neverness to Everness codes                                                                    |
+| `/Report-Spam @member reason: ...`                          | Privately report suspected friend-request or DM spam to the protected staff log                             |
 | `/EnableFetch`                                              | Enable HoYoverse + NTE auto-fetch in the current channel (admins/mods only)                                 |
 | `/EnableFetchHoyo`                                          | Enable HoYoverse-only auto-fetch in the current channel (admins/mods only)                                  |
 | `/EnableFetchNTE`                                           | Enable NTE-only auto-fetch in the current channel (admins/mods only)                                        |
@@ -85,17 +86,26 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 
 > **Note:** Revolt does not support Discord-style slash commands. These are message-based prefix commands using `/` as the prefix. Command names are case-insensitive; channel IDs are preserved exactly.
 
-`/HelpHoyoFetch` opens on the code and setup reference. The person who opened it can use ◀️/▶️ for five minutes to switch between that page and the moderation reference; other members' navigation reactions are ignored. Run `/Docs` for the full searchable reference at any time.
+`/HelpHoyoFetch` opens on the code, member-safety, and setup reference. The person who opened it can use ◀️/▶️ for five minutes to switch between that page and the moderation reference; other members' navigation reactions are ignored. Run `/Docs` for the full searchable reference at any time.
 
 ### Command security
 
 - Commands are accepted only from human members in server channels. Direct messages, webhooks, and messages from other bots are ignored.
+- `/Report-Spam` is available to human members, but only in a channel where Irminsul can freshly verify its Manage Messages permission and remove the invocation before reading the target and reason.
 - Server owners and members with **Manage Server** permission are treated as administrators.
 - Fetch, emoji, restart, and audit-log management commands are available to administrators and capability-based moderators with **Kick Members**, **Ban Members**, **Timeout Members**, or **Manage Messages** in the current channel.
 - Automod configuration uses the same capability-based moderator policy as other management commands: owner, **Manage Server**, **Kick Members**, **Ban Members**, **Timeout Members**, or **Manage Messages** in the current channel. Ban approvals remain stricter and require the owner, **Manage Server**, or **Ban Members**; **Manage Messages** alone cannot approve a ban.
 - Manual moderation commands use exact effective permissions and refresh both the moderator and bot before acting: **Ban Members** for `/Ban`, **Kick Members** for `/Kick`, **Timeout Members** for `/Mute` and `/Automod release`, and **Manage Messages** for `/Purge-User`. An active `/AuditLog` channel is required so actor, target, reason, and outcome are durably protected.
 - Role names are never trusted; access is based on Stoat's effective permissions. This shared policy covers auto-fetch management, emoji mode, restart, and audit-log configuration/testing.
 - Each member can trigger up to five recognised commands in 30 seconds. Concurrent requests for the same game's codes share one upstream fetch.
+
+### Member spam reports
+
+`/Report-Spam @member reason: ...` forwards suspected friend-request, DM, commission, or scam spam to the server's protected audit channel. The reason must be 10–300 characters. Irminsul removes the command message before parsing it, verifies that the reporter and target are current members, strips active links and formatting from the reason, and posts only a generic report ID acknowledgement publicly.
+
+The command has its own abuse controls: one attempt per reporter per minute, at most three accepted reports per reporter per server within 24 hours, and one accepted report against the same target per reporter within 24 hours. Three unique reporters against one target within 24 hours mark the staff record as priority. Reports are allegations, not proof, and never create an automatic timeout, deletion, kick, ban, or automod strike.
+
+Irminsul cannot observe private friend requests or DMs between ordinary members. Members must submit reports themselves, and staff must independently verify the available evidence.
 
 ### Manual moderation
 

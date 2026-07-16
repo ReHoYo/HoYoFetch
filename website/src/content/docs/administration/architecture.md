@@ -19,6 +19,7 @@ The codebase retains **HoYoFetch** as its internal repository and package name f
 | `security.js`          | Command authorization, permission refresh, rate limits, and redaction |
 | `moderation.js`        | Ban, kick, timeout, purge, confirmation, and undo workflows           |
 | `automod.js`           | Detection windows, containment ladder, and staff approvals            |
+| `spam-report.js`       | Secure member-report intake, correlation, and abuse limits            |
 | `auditlog.js`          | Message, member, and server event pipeline                            |
 | `settings-monitor.js`  | Persisted REST baselines and offline-change reconciliation            |
 | `message-archive.js`   | Bounded message journal for edit/delete context                       |

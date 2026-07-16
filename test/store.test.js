@@ -208,6 +208,52 @@ test("manual release can close pending automod ban reviews", () => {
   assert.equal(store.getAutomodCase("AMRELEASE1").status, "released");
 });
 
+test("spam-report metadata persists without reasons and reloads safely", async () => {
+  const now = Date.now();
+  store.createSpamReport({
+    reportId: "SRSTORE1",
+    serverId: "SERVERSPAM",
+    reporterId: "REPORTER1",
+    targetId: "TARGET1",
+    sourceChannelId: "CHANNEL1",
+    protectedChannelId: "AUDIT1",
+    protectedMessageId: "LOG1",
+    createdAt: now,
+  });
+  assert.equal(
+    store.findRecentSpamReport("SERVERSPAM", "REPORTER1", "TARGET1", now - 1)
+      .reportId,
+    "SRSTORE1"
+  );
+  const persisted = readFileSync(join(dataDir, "spam_reports.json"), "utf-8");
+  assert.doesNotMatch(persisted, /reason/i);
+
+  const reloaded = await import(`../store.js?spam-reload=${now}`);
+  assert.equal(
+    reloaded.getRecentSpamReports("SERVERSPAM", now - 1)[0].reportId,
+    "SRSTORE1"
+  );
+});
+
+test("spam-report retention drops expired and over-cap metadata", () => {
+  const now = 2_100_000_000_000;
+  const records = Object.fromEntries(
+    [
+      ["EXPIRED", now - store.SPAM_REPORT_RETENTION_MS - 1],
+      ["SRKEEP1", now - 3],
+      ["SRKEEP2", now - 2],
+      ["SRKEEP3", now - 1],
+    ].map(([reportId, createdAt]) => [
+      reportId,
+      { reportId, serverId: "SERVER1", createdAt },
+    ])
+  );
+  assert.deepEqual(
+    Object.keys(store.selectRetainedSpamReports(records, now, 2)),
+    ["SRKEEP2", "SRKEEP3"]
+  );
+});
+
 test("reversible moderation actions support message lookup and expiry", () => {
   const now = Date.now();
   store.createModerationAction({

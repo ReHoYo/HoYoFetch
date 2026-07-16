@@ -35,7 +35,7 @@ The bot token grants control of the bot account. Keep it in secret storage on th
 
 ## Runtime changes
 
-`/EmojiMode unicode` and `/EmojiMode custom` change the current process without editing `.env`. Channel subscriptions, audit configuration, automod configuration, cases, strikes, protected records, and known codes are persisted locally.
+`/EmojiMode unicode` and `/EmojiMode custom` change the current process without editing `.env`. Channel subscriptions, audit configuration, automod configuration, cases, strikes, spam-report correlation metadata, protected records, and known codes are persisted locally.
 
 ## Debug logging
 

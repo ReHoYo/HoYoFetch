@@ -19,6 +19,14 @@ Run the command for the game you want:
 
 Irminsul returns active codes with reward details and a redemption link when the game supports web redemption. HI3 and NTE codes are redeemed in-game.
 
+To privately notify server staff about suspected friend-request or DM spam, use a channel where Irminsul has Manage Messages:
+
+```text
+/Report-Spam @member reason: sent an unsolicited commission scam DM
+```
+
+Irminsul removes the invocation before processing it. Reports never punish an account automatically.
+
 For an in-chat summary, run `/HelpHoyoFetch`. For this full site, run `/Docs`.
 
 ## Set up code announcements
@@ -64,6 +72,7 @@ Manual moderation fails closed when Irminsul cannot verify the actor's matching 
 - Direct messages, webhooks, and other bots are ignored.
 - Command names are case-insensitive.
 - Reasons use the literal `reason:` delimiter and may be up to 300 characters.
+- Spam-report reasons must be at least 10 characters, and the command has separate anti-abuse limits.
 - Each member can trigger up to five recognized commands within 30 seconds.
 - Multiple simultaneous requests for the same game's codes share one upstream fetch.
 

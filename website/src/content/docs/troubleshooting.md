@@ -15,6 +15,19 @@ Confirm that:
 
 Irminsul intentionally ignores other bots, webhooks, direct messages, overlong messages, and unknown commands.
 
+## `/Report-Spam` was not accepted
+
+Confirm that:
+
+- the server has an active protected audit channel;
+- the command was used in a text channel where Irminsul has Manage Messages;
+- the invocation was successfully removed;
+- reporter and target are current members of the same server;
+- the reason contains 10–300 characters; and
+- the reporter has not hit the one-minute, duplicate-target, or three-per-day limit.
+
+If Irminsul cannot delete the invocation or deliver the protected record, it retains no report.
+
 ## A moderator command is denied
 
 Irminsul checks effective permissions, not role names. Confirm the permission that matches the action:

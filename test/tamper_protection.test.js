@@ -14,6 +14,8 @@ const storeModule = await import("../store.js");
 const { buildTamperNotice, buildRestoredEmbed } = await import("../embeds.js");
 const { createTamperProtection } = await import("../tamper-protection.js");
 const { initAuditLog, runAuditLogTest } = await import("../auditlog.js");
+const { getArchivedMessage } = await import("../message-archive.js");
+const { isSpamReportInvocation } = await import("../spam-report.js");
 
 const NOW = 1_800_000_000_000;
 const HOUR = 60 * 60 * 1000;
@@ -527,6 +529,52 @@ test("the audit pipeline requires and uses a protected sender", async () => {
         (record) => record.payload.embeds?.[0]?.title === "🧪 Audit Log Test"
       )
   );
+});
+
+test("excluded safety reports never enter the message archive or delete log", async () => {
+  const client = makeClient();
+  const serverId = "REPORTSERVER";
+  const sourceChannelId = "REPORTSOURCE";
+  const auditChannelId = "REPORTAUDIT";
+  const messageId = "REPORTCOMMAND";
+  client.channels.set(sourceChannelId, {
+    id: sourceChannelId,
+    serverId,
+  });
+
+  let nextId = 0;
+  const protection = createTamperProtection(client, {
+    send: async () => ({ _id: `REPORTLOG${++nextId}` }),
+    request: async () => ({ ok: true, status: 200, data: {} }),
+    logger: silentLogger,
+  });
+  storeModule.enableAuditLog(serverId, auditChannelId);
+  initAuditLog(client, {
+    sendProtected: protection.sendProtected,
+    request: async () => ({ ok: true, status: 200, data: {} }),
+    shouldExcludeMessage: (message) =>
+      isSpamReportInvocation(message.content, "/"),
+    shouldExcludeMessageDelete: (deletedMessageId) =>
+      deletedMessageId === messageId,
+  });
+
+  client.emit("messageCreate", {
+    id: messageId,
+    channelId: sourceChannelId,
+    authorId: "REPORTER1",
+    content: "/Report-Spam TARGET1 reason: private scam evidence",
+  });
+  assert.equal(getArchivedMessage(messageId), null);
+
+  const protectedBefore = storeModule.getAllProtectedMessages().length;
+  client.emitRaw({
+    type: "MessageDelete",
+    id: messageId,
+    channel: sourceChannelId,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(storeModule.getAllProtectedMessages().length, protectedBefore);
+  storeModule.disableAuditLog(serverId);
 });
 
 test("live user identity events enter the protected audit pipeline", async () => {

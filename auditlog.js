@@ -717,7 +717,16 @@ async function resolveAttachmentEvidence(client, entry) {
 //  Event wiring
 // ═══════════════════════════════════════════════════
 
-export function initAuditLog(client, { sendProtected, request, fetchImpl }) {
+export function initAuditLog(
+  client,
+  {
+    sendProtected,
+    request,
+    fetchImpl,
+    shouldExcludeMessage = () => false,
+    shouldExcludeMessageDelete = () => false,
+  }
+) {
   if (typeof sendProtected !== "function") {
     throw new TypeError("Audit logging requires a protected sender.");
   }
@@ -745,6 +754,10 @@ export function initAuditLog(client, { sendProtected, request, fetchImpl }) {
     if (!serverId || !isAuditLogEnabled(serverId)) return;
     if (message.channelId === getAuditLogChannel(serverId)) return;
     if (message.systemMessage) {
+      ignoredSystemMessages.set(message.id, true);
+      return;
+    }
+    if (await shouldExcludeMessage(message)) {
       ignoredSystemMessages.set(message.id, true);
       return;
     }
@@ -798,6 +811,7 @@ export function initAuditLog(client, { sendProtected, request, fetchImpl }) {
     if (!isAuditLogEnabled(serverId)) return;
     if (event.channel === getAuditLogChannel(serverId)) return;
     if (ignoredSystemMessages.delete(event.id)) return;
+    if (await shouldExcludeMessageDelete(event.id)) return;
 
     const entry = getArchivedMessage(event.id);
     markMessageDeleted(event.id);

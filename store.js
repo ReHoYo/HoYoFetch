@@ -32,6 +32,7 @@ const AUTOMOD_PATH = join(DATA_DIR, "automod.json");
 const AUTOMOD_CASES_PATH = join(DATA_DIR, "automod_cases.json");
 const AUTOMOD_STRIKES_PATH = join(DATA_DIR, "automod_strikes.json");
 const MODERATION_ACTIONS_PATH = join(DATA_DIR, "moderation_actions.json");
+const SPAM_REPORTS_PATH = join(DATA_DIR, "spam_reports.json");
 
 // ── Helpers ────────────────────────────────────────
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -581,8 +582,11 @@ let automodConfigs = readJSON(AUTOMOD_PATH, {});
 let automodCases = readJSON(AUTOMOD_CASES_PATH, {});
 let automodStrikes = readJSON(AUTOMOD_STRIKES_PATH, {});
 let moderationActions = readJSON(MODERATION_ACTIONS_PATH, {});
+let spamReports = readJSON(SPAM_REPORTS_PATH, {});
 const MAX_AUTOMOD_CASES = 5_000;
 const MAX_MODERATION_ACTIONS = 5_000;
+export const SPAM_REPORT_RETENTION_MS = 30 * 24 * 60 * 60_000;
+export const MAX_SPAM_REPORTS = 10_000;
 
 function normaliseAutomodConfig(value = {}) {
   return {
@@ -735,6 +739,86 @@ export function cancelAutomodCasesForMember(
   }
   if (cancelled) persistAutomodCases();
   return cancelled;
+}
+
+// ═══════════════════════════════════════════════════
+//  Member spam reports
+// ═══════════════════════════════════════════════════
+// Reports intentionally persist correlation metadata only. The member-supplied
+// reason lives solely inside the protected audit record referenced here.
+
+function persistSpamReports() {
+  writeJSON(SPAM_REPORTS_PATH, spamReports);
+}
+
+export function selectRetainedSpamReports(
+  records,
+  now = Date.now(),
+  maxRecords = MAX_SPAM_REPORTS
+) {
+  const cutoff = now - SPAM_REPORT_RETENTION_MS;
+  const limit = Math.max(0, maxRecords);
+  const retained = Object.values(records ?? {})
+    .filter(
+      (record) =>
+        Number.isFinite(record.createdAt) && record.createdAt >= cutoff
+    )
+    .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
+    .slice(limit === 0 ? 0 : -limit);
+  if (limit === 0) return {};
+  return Object.fromEntries(
+    retained.map((record) => [record.reportId, structuredClone(record)])
+  );
+}
+
+export function pruneSpamReports(now = Date.now()) {
+  const retained = selectRetainedSpamReports(spamReports, now);
+  if (Object.keys(retained).length === Object.keys(spamReports).length) return;
+  spamReports = retained;
+  persistSpamReports();
+}
+
+export function createSpamReport(record) {
+  pruneSpamReports(record?.createdAt ?? Date.now());
+  spamReports[record.reportId] = structuredClone(record);
+  spamReports = selectRetainedSpamReports(
+    spamReports,
+    record?.createdAt ?? Date.now()
+  );
+  persistSpamReports();
+  return structuredClone(spamReports[record.reportId]);
+}
+
+export function getRecentSpamReports(serverId, since = 0) {
+  return Object.values(spamReports)
+    .filter(
+      (record) =>
+        record.serverId === serverId &&
+        Number.isFinite(record.createdAt) &&
+        record.createdAt >= since
+    )
+    .map((record) => structuredClone(record));
+}
+
+export function findRecentSpamReport(
+  serverId,
+  reporterId,
+  targetId,
+  since = 0
+) {
+  const record = Object.values(spamReports).find(
+    (entry) =>
+      entry.serverId === serverId &&
+      entry.reporterId === reporterId &&
+      entry.targetId === targetId &&
+      Number.isFinite(entry.createdAt) &&
+      entry.createdAt >= since
+  );
+  return record ? structuredClone(record) : null;
+}
+
+export function getAllSpamReports() {
+  return Object.values(spamReports).map((record) => structuredClone(record));
 }
 
 function persistModerationActions() {

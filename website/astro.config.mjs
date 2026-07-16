@@ -65,6 +65,7 @@ export default defineConfig({
           label: "Moderation",
           items: [
             { slug: "moderation/overview" },
+            { slug: "moderation/spam-reports" },
             { slug: "moderation/manual-actions" },
             { slug: "moderation/audit-log" },
             { slug: "moderation/automod" },

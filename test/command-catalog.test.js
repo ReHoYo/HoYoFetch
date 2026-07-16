@@ -36,6 +36,9 @@ test("help tuples are generated from the shared catalog with a custom prefix", (
   const memberHelp = getHelpCommandTuples(COMMAND_SECTIONS.MEMBER, "!");
   assert.ok(memberHelp.some(([syntax]) => syntax === "!FetchGI"));
   assert.ok(memberHelp.some(([syntax]) => syntax === "!Docs"));
+  assert.ok(
+    memberHelp.some(([syntax]) => syntax === "!Report-Spam @member reason: ...")
+  );
   assert.equal(
     formatCommandSyntax("/AuditLog status", "!"),
     "!AuditLog status"

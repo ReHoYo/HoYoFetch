@@ -3,6 +3,12 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Member safety reporting
+
+- Added `/Report-Spam` for protected member-submitted friend-request, DM, commission, and scam-spam reports.
+- Added secure invocation deletion, fresh membership checks, per-member abuse limits, and 24-hour unique-reporter correlation.
+- Priority reports remain staff-review signals only and never trigger automatic moderation.
+
 ## Documentation site
 
 - Added a permanent searchable reference for members, moderators, and operators.

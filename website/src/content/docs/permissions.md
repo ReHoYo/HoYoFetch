@@ -9,7 +9,7 @@ Irminsul uses Stoat's **effective permissions**, not role names. A role called â
 
 | Capability                                                 | Commands                                                                                |
 | ---------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Every human server member                                  | `/Fetch*`, `/HelpHoyoFetch`, `/Docs`                                                    |
+| Every human server member                                  | `/Fetch*`, `/HelpHoyoFetch`, `/Docs`, `/Report-Spam`                                    |
 | Owner, Manage Server, or a recognized moderator capability | Auto-fetch, emoji mode, audit-log configuration/testing, restart, automod configuration |
 | Ban Members                                                | `/Ban`, automod ban approval                                                            |
 | Kick Members                                               | `/Kick`                                                                                 |
@@ -17,6 +17,8 @@ Irminsul uses Stoat's **effective permissions**, not role names. A role called â
 | Manage Messages in the current channel                     | `/Purge-User`; also required for `/Ban ... delete:...` cleanup                          |
 
 Recognized moderator capabilities for management commands are **Kick Members**, **Ban Members**, **Timeout Members**, or effective **Manage Messages** in the current channel. The server owner and members with **Manage Server** also qualify.
+
+`/Report-Spam` is member-accessible, but Irminsul itself must have freshly verified **Manage Messages** in the source channel. This lets it remove the sensitive invocation before parsing or recording the report.
 
 ## Exact checks for destructive actions
 

@@ -83,6 +83,22 @@ export const COMMAND_CATALOG = Object.freeze([
     examples: ["/Docs"],
   },
   {
+    id: "report-spam",
+    section: COMMAND_SECTIONS.MEMBER,
+    route: "report-spam",
+    access: "member",
+    syntax: "/Report-Spam @member reason: ...",
+    summary:
+      "Privately report suspected friend-request, DM, commission, or scam spam to server staff.",
+    help: "Privately report suspected friend-request or DM spam to the protected staff log",
+    examples: [
+      "/Report-Spam @member reason: sent an unsolicited commission scam DM",
+    ],
+    notes: [
+      "The command works only where Irminsul can remove the invocation. Reports never punish an account automatically.",
+    ],
+  },
+  {
     id: "enable-fetch",
     section: COMMAND_SECTIONS.SETUP,
     route: "enablefetch",

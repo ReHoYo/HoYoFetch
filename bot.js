@@ -72,6 +72,7 @@ import { createTamperProtection } from "./tamper-protection.js";
 import { createAutomod } from "./automod.js";
 import { createModeration } from "./moderation.js";
 import { createHelpMenu } from "./help-menu.js";
+import { createSpamReporter } from "./spam-report.js";
 import { DOCS_URL } from "./command-catalog.js";
 
 // ── Validate token ─────────────────────────────────
@@ -101,6 +102,12 @@ const moderation = createModeration(client, {
   sendProtected: tamperProtection.sendProtected,
   request: apiRequest,
 });
+const spamReporter = createSpamReporter(client, {
+  send: (channelId, data) => safeSend({ id: channelId }, data),
+  sendProtected: tamperProtection.sendProtected,
+  request: apiRequest,
+  prefix: CONFIG.prefix,
+});
 const helpMenu = createHelpMenu(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
   request: apiRequest,
@@ -111,6 +118,8 @@ const helpMenu = createHelpMenu(client, {
 const auditLog = initAuditLog(client, {
   sendProtected: tamperProtection.sendProtected,
   request: apiRequest,
+  shouldExcludeMessage: spamReporter.shouldExcludeMessage,
+  shouldExcludeMessageDelete: spamReporter.shouldExcludeMessageDelete,
 });
 
 // ── Error handler ──────────────────────────────────
@@ -174,8 +183,23 @@ client.on("messageCreate", async (message) => {
   // Preserve arguments exactly (Stoat IDs are case-sensitive) while matching
   // only the command word case-insensitively.
   const rawBody = raw.slice(CONFIG.prefix.length).trim();
-  const [cmdWord = "", ...cmdArgs] = rawBody.split(/\s+/);
+  const [cmdWord = ""] = rawBody.split(/\s+/, 1);
   const cmd = cmdWord.toLowerCase();
+
+  // Safety reports have their own abuse limiter and must remove the invoking
+  // message before parsing its target or reason.
+  if (cmd === "report-spam") {
+    const authorization = authorizeCommand(message, COMMAND_ACCESS.MEMBER);
+    if (!authorization.allowed) return;
+    await spamReporter.handleCommand(
+      message,
+      rawBody.slice(cmdWord.length).trim()
+    );
+    return;
+  }
+
+  const cmdArgs = rawBody.slice(cmdWord.length).trim().split(/\s+/);
+  if (cmdArgs.length === 1 && cmdArgs[0] === "") cmdArgs.length = 0;
   const accessKey =
     cmd === "auditlog" || cmd === "emojimode" ? cmd : rawBody.toLowerCase();
   const access = getCommandAccess(accessKey, COMMAND_GAME_MAP);
