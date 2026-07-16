@@ -61,7 +61,7 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/FetchZZZ`                                                 | Fetch active Zenless Zone Zero codes                                                                        |
 | `/FetchHI3`                                                 | Fetch active Honkai Impact 3rd codes                                                                        |
 | `/FetchNTE`                                                 | Fetch active Neverness to Everness codes                                                                    |
-| `/Report-Spam @member reason: ...`                          | Privately report suspected friend-request or DM spam to the protected staff log                             |
+| `/Report-Spam @member reason: ...`                          | Privately submit suspected friend-request or DM spam for review                                             |
 | `/EnableFetch`                                              | Enable HoYoverse + NTE auto-fetch in the current channel (admins/mods only)                                 |
 | `/EnableFetchHoyo`                                          | Enable HoYoverse-only auto-fetch in the current channel (admins/mods only)                                  |
 | `/EnableFetchNTE`                                           | Enable NTE-only auto-fetch in the current channel (admins/mods only)                                        |
@@ -101,9 +101,9 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 
 ### Member spam reports
 
-`/Report-Spam @member reason: ...` forwards suspected friend-request, DM, commission, or scam spam to the server's protected audit channel. The reason must be 10–300 characters. Irminsul removes the command message before parsing it, verifies that the reporter and target are current members, strips active links and formatting from the reason, and posts only a generic report ID acknowledgement publicly.
+`/Report-Spam @member reason: ...` privately submits suspected friend-request, DM, commission, or scam spam for review. The reason must be 10–300 characters. Irminsul removes the command message before parsing it, verifies that the reporter and target are current members, strips active links and formatting from the reason, and posts only a generic report ID acknowledgement publicly.
 
-The command has its own abuse controls: one attempt per reporter per minute, at most three accepted reports per reporter per server within 24 hours, and one accepted report against the same target per reporter within 24 hours. Three unique reporters against one target within 24 hours mark the staff record as priority. Reports are allegations, not proof, and never create an automatic timeout, deletion, kick, ban, or automod strike.
+The command has its own abuse controls: one attempt per reporter per minute, at most three accepted reports per reporter per server within 24 hours, and one accepted report against the same target per reporter within 24 hours. Three unique reporters against one target within 24 hours raise the review priority. Reports are allegations, not proof, and never create an automatic timeout, deletion, kick, ban, or automod strike.
 
 Irminsul cannot observe private friend requests or DMs between ordinary members. Members must submit reports themselves, and staff must independently verify the available evidence.
 

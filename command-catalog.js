@@ -89,8 +89,8 @@ export const COMMAND_CATALOG = Object.freeze([
     access: "member",
     syntax: "/Report-Spam @member reason: ...",
     summary:
-      "Privately report suspected friend-request, DM, commission, or scam spam to server staff.",
-    help: "Privately report suspected friend-request or DM spam to the protected staff log",
+      "Privately submit suspected friend-request, DM, commission, or scam spam for review.",
+    help: "Privately submit suspected friend-request or DM spam for review",
     examples: [
       "/Report-Spam @member reason: sent an unsolicited commission scam DM",
     ],

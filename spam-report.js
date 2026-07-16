@@ -303,8 +303,8 @@ export function createSpamReporter(
       if (!isSafeId(auditChannelId)) {
         await respond(
           channelId,
-          "📝 Report Not Accepted",
-          "This server must configure a protected audit channel before member safety reports can be recorded.",
+          "⚠️ Secure Reporting Unavailable",
+          "Secure reporting is not currently available in this server.",
           "#E67E22"
         );
         return;
@@ -438,7 +438,7 @@ export function createSpamReporter(
           await respond(
             channelId,
             "⚠️ Report Not Accepted",
-            "The protected staff record could not be delivered, so no report was retained.",
+            "The report could not be securely recorded, so no report was retained.",
             "#E74C3C"
           );
           return { outcome: "delivery_failed" };
@@ -461,8 +461,8 @@ export function createSpamReporter(
         );
         await respond(
           channelId,
-          "✅ Safety Report Delivered",
-          `Report \`${reportId}\` was delivered to the protected staff log.`,
+          "✅ Safety Report Submitted",
+          `Report \`${reportId}\` was submitted successfully.`,
           "#2ECC71"
         );
         return { outcome: "accepted", reportId, correlationCount, priority };

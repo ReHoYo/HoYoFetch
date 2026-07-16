@@ -441,4 +441,8 @@ test("three unique reporters raise priority without calling moderation endpoints
     harness.sent.at(-1).payload.embeds[0].description,
     new RegExp(`${TARGET_ONE}|${REPORTER_THREE}`)
   );
+  assert.doesNotMatch(
+    `${harness.sent.at(-1).payload.embeds[0].title} ${harness.sent.at(-1).payload.embeds[0].description}`,
+    /staff|audit|log/i
+  );
 });
