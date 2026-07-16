@@ -434,41 +434,6 @@ function auditCodeValue(value, max = 100) {
   return `\`${truncate(singleLine, max)}\``;
 }
 
-function avatarFileId(avatar) {
-  if (typeof avatar === "string" && avatar) return avatar;
-  const id = avatar?.id ?? avatar?._id;
-  return typeof id === "string" && id ? id : null;
-}
-
-export function avatarChangeState(beforeAvatar, afterAvatar) {
-  const beforeId = avatarFileId(beforeAvatar);
-  const afterId = avatarFileId(afterAvatar);
-  if (beforeId === afterId) return null;
-  if (!beforeId && afterId) return "Added";
-  if (beforeId && !afterId) return "Removed";
-  if (beforeId && afterId) return "Changed";
-  return null;
-}
-
-function trustedAvatarPreview(client, avatar) {
-  const url = avatar?.createFileURL?.();
-  return isTrustedAttachmentUrl(client, url) ? url : null;
-}
-
-function avatarAuditSection(client, title, beforeAvatar, afterAvatar) {
-  const state = avatarChangeState(beforeAvatar, afterAvatar);
-  if (!state) return null;
-  return {
-    title,
-    colour: "#9B59B6",
-    lines: [`**Change:** ${state}`, ACTOR_UNAVAILABLE_LINE],
-    iconUrl:
-      state === "Added" || state === "Changed"
-        ? trustedAvatarPreview(client, afterAvatar)
-        : null,
-  };
-}
-
 export function buildUserIdentityAuditSections(
   client,
   user,
@@ -492,13 +457,6 @@ export function buildUserIdentityAuditSections(
     });
   }
 
-  const avatarSection = avatarAuditSection(
-    client,
-    "🖼️ Profile Avatar Changed",
-    previousUser.avatar,
-    user?.avatar
-  );
-  if (avatarSection) sections.push(avatarSection);
   return sections;
 }
 
@@ -572,14 +530,6 @@ export function buildMemberUpdateAuditSections(
       ],
     });
   }
-
-  const avatarSection = avatarAuditSection(
-    client,
-    "🖼️ Server Avatar Changed",
-    previousMember.avatar,
-    member.avatar
-  );
-  if (avatarSection) sections.push(avatarSection);
 
   const prevRoles = new Set(previousMember.roles ?? []);
   const curRoles = new Set(member.roles ?? []);
@@ -1048,7 +998,7 @@ export function initAuditLog(client, { sendProtected, request, fetchImpl }) {
     async start() {
       // revolt.js only emits hydrated user/member update callbacks for objects
       // already present in its collections. Seed every audited server so
-      // nickname, username, and avatar changes are not silently discarded.
+      // nickname and username changes are not silently discarded.
       for (const { serverId } of getAuditLogServers()) {
         await hydrateAuditMemberCache(client, serverId);
       }
