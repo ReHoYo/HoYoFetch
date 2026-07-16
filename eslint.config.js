@@ -29,6 +29,12 @@ export default [
       "no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
     },
   },
+  {
+    files: ["website/public/**/*.js"],
+    languageOptions: {
+      globals: { ...globals.browser },
+    },
+  },
   // Disable stylistic rules that conflict with Prettier.
   prettier,
 ];
