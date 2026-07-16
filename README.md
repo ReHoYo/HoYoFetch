@@ -1,6 +1,8 @@
-# 🎮 HoyoFetch — HoYoverse Code Bot for Revolt / Stoat.chat
+# 🌿 Irminsul — HoYoverse Code Bot for Revolt / Stoat.chat
 
 Automatically fetches and posts redemption codes for **Genshin Impact**, **Honkai: Star Rail**, **Zenless Zone Zero**, **Honkai Impact 3rd**, and **Neverness to Everness** in your Revolt server channels.
+
+📚 **Documentation:** [Irminsul Docs](https://rehoyo.github.io/HoYoFetch/) — searchable commands, setup, moderation, audit-log, automod, troubleshooting, and self-hosting guides.
 
 ## ✨ Features
 
@@ -44,6 +46,7 @@ On first boot, the bot seeds all existing codes into memory so it won't announce
 ```bash
 npm test          # node:test unit suite (no network needed)
 npm run lint      # ESLint (flat config)
+npm run docs:build # Build the searchable documentation site
 npm run format    # Prettier — format all files
 ```
 
@@ -78,10 +81,11 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/Mute @member [10m\|30m\|1h\|4h\|24h\|3d\|7d] reason: ...` | Apply a native timeout, or omit duration for a reaction picker (Timeout Members only)                       |
 | `/Purge-User @member window:1h\|6h\|1d\|3d\|7d reason: ...` | Confirm and delete the member's observed messages in the selected window (Manage Messages only)             |
 | `/HelpHoyoFetch`                                            | Show the two-page command reference; the opener navigates with ◀️/▶️                                        |
+| `/Docs`                                                     | Open the permanent searchable documentation site                                                            |
 
 > **Note:** Revolt does not support Discord-style slash commands. These are message-based prefix commands using `/` as the prefix. Command names are case-insensitive; channel IDs are preserved exactly.
 
-`/HelpHoyoFetch` opens on the code and setup reference. The person who opened it can use ◀️/▶️ for five minutes to switch between that page and the moderation reference; other members' navigation reactions are ignored.
+`/HelpHoyoFetch` opens on the code and setup reference. The person who opened it can use ◀️/▶️ for five minutes to switch between that page and the moderation reference; other members' navigation reactions are ignored. Run `/Docs` for the full searchable reference at any time.
 
 ### Command security
 
@@ -95,19 +99,19 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 
 ### Manual moderation
 
-Reasons are mandatory, use the literal `reason:` delimiter, and may contain up to 300 characters. Commands accept one member mention or one raw user ID. Stoat has no interaction buttons, so HoYoFetch uses reactions for duration selection, destructive confirmation, and undo.
+Reasons are mandatory, use the literal `reason:` delimiter, and may contain up to 300 characters. Commands accept one member mention or one raw user ID. Stoat has no interaction buttons, so Irminsul uses reactions for duration selection, destructive confirmation, and undo.
 
 - `/Ban @member reason: repeated spam` bans immediately. Add `delete:1h`, `delete:6h`, `delete:1d`, `delete:3d`, or `delete:7d` before `reason:` to request message cleanup. The ↩️ reaction on the protected record is available for 10 minutes to any freshly authorized ban moderator; it unbans but cannot restore membership or deleted messages.
-- `/Kick @member reason: raid account` kicks immediately. Stoat cannot put a kicked member back, so no undo reaction is offered and the reason is retained in HoYoFetch's protected log.
+- `/Kick @member reason: raid account` kicks immediately. Stoat cannot put a kicked member back, so no undo reaction is offered and the reason is retained in Irminsul's protected log.
 - `/Mute @member 1h reason: cooldown` applies that duration immediately. Omitting the duration opens a two-minute invoker-only picker: 10m, 30m, 1h, 4h, 24h, 3d, or 7d. The protected record has a 10-minute ↩️ undo reaction for authorized timeout moderators.
 - `/Purge-User @member window:1d reason: cleanup` shows a two-minute ✅/❌ confirmation. Only one purge runs per server at a time.
 - `/Automod release @member reason: false positive` removes the native timeout, resets the member's automod strike history, and closes pending ban reviews for that containment. It can also remove a manually applied timeout.
 
-**History cleanup limitations:** Stoat's ban API has no message-history option and its bulk-delete endpoint accepts only messages from the last seven days. HoYoFetch therefore groups message IDs recorded while audit logging was active and deletes them separately in bounded batches. Results always report selected, deleted, and failed counts and must not be read as guaranteed-complete. Protected audit entries, locally retained evidence, quotations, reactions, and external copies are never erased by a purge.
+**History cleanup limitations:** Stoat's ban API has no message-history option and its bulk-delete endpoint accepts only messages from the last seven days. Irminsul therefore groups message IDs recorded while audit logging was active and deletes them separately in bounded batches. Results always report selected, deleted, and failed counts and must not be read as guaranteed-complete. Protected audit entries, locally retained evidence, quotations, reactions, and external copies are never erased by a purge.
 
 ### Audit log
 
-Stoat/Revolt has no built-in audit log, so `/AuditLog here` turns the current channel into one. `/AuditLog #channel` targets another text channel, `/AuditLog status` reports the current setting, and `/AuditLog off` disables it. The bot relays message edits/deletes (with original content), bulk deletes, channel/role/server changes, member joins/leaves, bans, unbans, timeouts, username changes, nickname/role changes, and emoji changes. Username coverage is live-only while HoYoFetch is online. The older `/Enable-AuditLog` and `/Disable-AuditLog` forms remain accepted for compatibility.
+Stoat/Revolt has no built-in audit log, so `/AuditLog here` turns the current channel into one. `/AuditLog #channel` targets another text channel, `/AuditLog status` reports the current setting, and `/AuditLog off` disables it. The bot relays message edits/deletes (with original content), bulk deletes, channel/role/server changes, member joins/leaves, bans, unbans, timeouts, username changes, nickname/role changes, and emoji changes. Username coverage is live-only while Irminsul is online. The older `/Enable-AuditLog` and `/Disable-AuditLog` forms remain accepted for compatibility.
 
 Server-setting monitoring combines live raw gateway events with a persisted REST baseline in `data/server_settings_snapshots.json`. It records detailed before/after changes for server identity and discovery settings, categories and system-message routing, channels, role and channel permission overrides, roles, emoji, invites, and webhooks. A reconciliation runs at startup and about every five minutes, so changes made while the bot was offline are detected after it returns. Webhooks require one request per channel and are scanned in bounded rotating batches; `/Test-AuditLog` reports the current baseline and webhook coverage.
 
@@ -176,7 +180,7 @@ You can use custom Revolt server emoji instead of Unicode emoji for reward icons
 
 ### How it works
 
-1. **Create a dedicated server** on Revolt (e.g. "HoyoFetch Emoji Hub")
+1. **Create a dedicated server** on Revolt (e.g. "Irminsul Emoji Hub")
 2. **Upload emoji** — game icons for Primogems, Mora, Stellar Jade, etc.
 3. **Get each emoji's ID** — in the emoji picker, hover/select an emoji before sending; the format is `:EMOJI_ID:` where EMOJI_ID is a long alphanumeric string like `01H7K9RTHKEPJM8DM19TX35M8N`
 4. **Invite the bot** to the emoji hub server
@@ -212,6 +216,7 @@ In Revolt, custom emoji are globally referenced by their unique ID. A bot can us
 ```
 hoyofetch/
 ├── bot.js              Main entry, command router, auto-fetch scheduler
+├── command-catalog.js  Shared command metadata for the bot help and docs site
 ├── automod.js          Anti-raid detection, containment, and ban approvals
 ├── config.js           Game definitions, API config, custom emoji loader
 ├── api.js              Code source integration (hoyo-codes + ennead + Game8)
@@ -223,6 +228,7 @@ hoyofetch/
 ├── custom_emojis.json  Optional: custom Revolt emoji IDs
 ├── .env.example        Configuration template
 ├── package.json
+├── website/            Astro Starlight documentation site
 └── data/               Runtime data (auto-created, gitignored)
     ├── channels.json
     ├── known_codes.json

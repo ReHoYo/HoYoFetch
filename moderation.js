@@ -743,7 +743,7 @@ export function createModeration(
     let cleanup = null;
     if (parsed.deleteWindow) cleanup = await purgeSelected(entries);
     const cleanupLine = cleanup
-      ? `**History cleanup (${parsed.deleteWindow}):** ${cleanup.deleted}/${cleanup.selected} deleted; ${cleanup.failed} failed across ${cleanup.channels} channel(s). Coverage is limited to messages observed by HoYoFetch.`
+      ? `**History cleanup (${parsed.deleteWindow}):** ${cleanup.deleted}/${cleanup.selected} deleted; ${cleanup.failed} failed across ${cleanup.channels} channel(s). Coverage is limited to messages observed by Irminsul.`
       : "**History cleanup:** not requested.";
     const recorded = await recordAction({
       type: "ban",

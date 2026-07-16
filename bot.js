@@ -72,6 +72,7 @@ import { createTamperProtection } from "./tamper-protection.js";
 import { createAutomod } from "./automod.js";
 import { createModeration } from "./moderation.js";
 import { createHelpMenu } from "./help-menu.js";
+import { DOCS_URL } from "./command-catalog.js";
 
 // ── Validate token ─────────────────────────────────
 if (!CONFIG.token || CONFIG.token === "your_bot_token_here") {
@@ -279,6 +280,12 @@ client.on("messageCreate", async (message) => {
     // ── HelpHoyoFetch ────────────────────────────
     if (cmd === "helphoyofetch") {
       await handleHelp(message);
+      return;
+    }
+
+    // ── Docs ───────────────────────────────────────
+    if (cmd === "docs") {
+      await handleDocs(message);
       return;
     }
 
@@ -640,6 +647,18 @@ async function handleHelp(message) {
   await helpMenu.open(message);
 }
 
+async function handleDocs(message) {
+  await safeSend(message.channel, {
+    embeds: [
+      buildStatusEmbed(
+        "📚 Irminsul Documentation",
+        `Use the searchable command, moderation, audit-log, and automod guides at [${DOCS_URL}](${DOCS_URL}).`,
+        "#5865F2"
+      ),
+    ],
+  });
+}
+
 async function handleEmojiMode(message, arg) {
   // No argument → report the current mode.
   if (!arg) {
@@ -703,7 +722,7 @@ async function handleRestart(message) {
   await safeSend(message.channel, {
     embeds: [
       buildStatusEmbed(
-        "🔄 Restarting HoyoFetch",
+        "🔄 Restarting Irminsul",
         `Restart requested. I will disconnect now and come back through ${restartMode}.`,
         "#F1C40F"
       ),

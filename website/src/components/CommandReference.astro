@@ -1,0 +1,63 @@
+---
+import {
+  COMMAND_CATALOG,
+  COMMAND_SECTIONS,
+} from "../../../command-catalog.js";
+
+const sections = [
+  {
+    key: COMMAND_SECTIONS.MEMBER,
+    title: "Member commands",
+    description: "Available to every human member in a server channel.",
+  },
+  {
+    key: COMMAND_SECTIONS.SETUP,
+    title: "Setup and management",
+    description: "For server owners, administrators, and authorized moderators.",
+  },
+  {
+    key: COMMAND_SECTIONS.MODERATION,
+    title: "Moderation commands",
+    description: "Each action checks its exact effective permission before changing anything.",
+  },
+];
+---
+
+{
+  sections.map((section) => {
+    const commands = COMMAND_CATALOG.filter(
+      (command) => command.section === section.key
+    );
+    return (
+      <section class="command-section" aria-labelledby={`section-${section.key}`}>
+        <div class="command-section-heading">
+          <div>
+            <h2 id={`section-${section.key}`}>{section.title}</h2>
+            <p>{section.description}</p>
+          </div>
+          <span class="command-count">{commands.length} commands</span>
+        </div>
+        <div class="command-grid">
+          {commands.map((command) => (
+            <article class="command-card" id={command.id}>
+              <code>{command.syntax}</code>
+              <p>{command.summary}</p>
+              {command.permission && (
+                <dl class="command-meta">
+                  <div>
+                    <dt>Permission</dt>
+                    <dd>{command.permission}</dd>
+                  </div>
+                </dl>
+              )}
+              <div class="command-examples" aria-label="Examples">
+                {command.examples.map((example) => <code>{example}</code>)}
+              </div>
+              {command.notes?.map((note) => <p class="command-note">{note}</p>)}
+            </article>
+          ))}
+        </div>
+      </section>
+    );
+  })
+}
