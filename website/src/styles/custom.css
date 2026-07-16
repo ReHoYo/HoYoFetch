@@ -57,6 +57,60 @@ header.header {
   object-fit: cover;
 }
 
+.site-title > .scroll-wordmark {
+  --wordmark-expanded-width: 8.5rem;
+  --wordmark-collapsed-width: 1.55rem;
+  display: inline-grid;
+  grid-template-areas: "wordmark";
+  align-items: center;
+  width: var(--wordmark-expanded-width);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: width 360ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.scroll-wordmark > .wordmark-label {
+  grid-area: wordmark;
+  width: max-content;
+  justify-self: start;
+  transform-origin: left center;
+  transition:
+    opacity 180ms ease,
+    transform 360ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.scroll-wordmark > .wordmark-label--full {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.scroll-wordmark > .wordmark-label--short {
+  opacity: 0;
+  transform: translateX(0.65rem);
+}
+
+html[data-wordmark-collapsed] .site-title > .scroll-wordmark {
+  width: var(--wordmark-collapsed-width);
+}
+
+html[data-wordmark-collapsed] .scroll-wordmark > .wordmark-label--full {
+  opacity: 0;
+  transform: translateX(-0.65rem);
+}
+
+html[data-wordmark-collapsed] .scroll-wordmark > .wordmark-label--short {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-title > .scroll-wordmark,
+  .scroll-wordmark > .wordmark-label {
+    transition: none;
+  }
+}
+
 .hero {
   padding-block: clamp(4rem, 9vw, 6.5rem);
   border-bottom: 1px solid var(--sl-color-gray-5);

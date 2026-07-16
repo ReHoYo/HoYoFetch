@@ -36,6 +36,13 @@ export default defineConfig({
           tag: "meta",
           attrs: { property: "og:type", content: "website" },
         },
+        {
+          tag: "script",
+          attrs: {
+            src: `${projectBase}/header-wordmark.js`,
+            defer: true,
+          },
+        },
       ],
       sidebar: [
         {
