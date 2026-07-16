@@ -728,7 +728,7 @@ export function createAutomod(
         "PUT",
         `/servers/${current.serverId}/bans/${current.userId}`,
         {
-          reason: `HoYoFetch automod case ${current.caseId}: approved by ${current.approvals.length} staff`,
+          reason: `Irminsul automod case ${current.caseId}: approved by ${current.approvals.length} staff`,
         }
       );
       if (!response.ok) {

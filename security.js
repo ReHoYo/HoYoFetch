@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "crypto";
 import { EASTER_EGG_COMMAND_NAMES } from "./easter-eggs.js";
+import { COMMAND_ACCESS_BY_ROUTE } from "./command-catalog.js";
 
 export const COMMAND_ACCESS = Object.freeze({
   MEMBER: "member",
@@ -12,25 +13,7 @@ export const COMMAND_ACCESS = Object.freeze({
   MANAGE_MESSAGES: "manage_messages",
 });
 
-const FETCH_MANAGEMENT_COMMANDS = new Set([
-  "enablefetch",
-  "enablefetchhoyo",
-  "enablefetchnte",
-  "disablefetch",
-]);
-
-const AUDIT_LOG_COMMANDS = new Set([
-  "auditlog",
-  "enable-auditlog",
-  "enableauditlog",
-  "disable-auditlog",
-  "disableauditlog",
-  "test-auditlog",
-  "testauditlog",
-]);
-
 const PUBLIC_UTILITY_COMMANDS = new Set([
-  "helphoyofetch",
   "harhar",
   ...EASTER_EGG_COMMAND_NAMES,
 ]);
@@ -71,14 +54,10 @@ export function getCommandAccess(body, commandGameMap = {}) {
   if (body === "automod" || body.startsWith("automod ")) {
     return COMMAND_ACCESS.FETCH_MANAGER;
   }
-  if (FETCH_MANAGEMENT_COMMANDS.has(body)) {
-    return COMMAND_ACCESS.FETCH_MANAGER;
+  const baseCommand = body.split(/\s+/, 1)[0];
+  if (COMMAND_ACCESS_BY_ROUTE[baseCommand]) {
+    return COMMAND_ACCESS_BY_ROUTE[baseCommand];
   }
-  if (AUDIT_LOG_COMMANDS.has(body)) return COMMAND_ACCESS.FETCH_MANAGER;
-  if (body === "emojimode" || body.startsWith("emojimode ")) {
-    return COMMAND_ACCESS.FETCH_MANAGER;
-  }
-  if (body === "restart") return COMMAND_ACCESS.FETCH_MANAGER;
   if (PUBLIC_UTILITY_COMMANDS.has(body)) return COMMAND_ACCESS.MEMBER;
   return null;
 }

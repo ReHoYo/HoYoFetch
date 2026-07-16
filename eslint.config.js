@@ -6,10 +6,18 @@ import prettier from "eslint-config-prettier";
 import globals from "globals";
 
 export default [
-  { ignores: ["node_modules/", "data/"] },
+  {
+    ignores: [
+      "node_modules/",
+      "data/",
+      "website/node_modules/",
+      "website/.astro/",
+      "website/dist/",
+    ],
+  },
   js.configs.recommended,
   {
-    files: ["**/*.js"],
+    files: ["**/*.{js,mjs}"],
     plugins: { import: importPlugin },
     languageOptions: {
       ecmaVersion: 2023,

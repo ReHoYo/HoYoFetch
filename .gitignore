@@ -2,3 +2,5 @@
 data/
 node_modules/
 .DS_Store
+website/.astro/
+website/dist/

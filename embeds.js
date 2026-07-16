@@ -3,6 +3,11 @@
 import { GAMES } from "./config.js";
 import { formatRewards } from "./api.js";
 import { isEvidenceEnabled, perFileCapBytes } from "./evidence-store.js";
+import {
+  COMMAND_SECTIONS,
+  DOCS_URL,
+  getHelpCommandTuples,
+} from "./command-catalog.js";
 
 /**
  * Build an embed for a batch of codes for one game.
@@ -95,96 +100,32 @@ function commandList(commands) {
  */
 export function buildHelpEmbeds(prefix) {
   const utilityCommands = [
-    [`${prefix}FetchGI`, "Fetch active **Genshin Impact** redemption codes"],
-    [
-      `${prefix}FetchHSR`,
-      "Fetch active **Honkai: Star Rail** redemption codes",
-    ],
-    [
-      `${prefix}FetchZZZ`,
-      "Fetch active **Zenless Zone Zero** redemption codes",
-    ],
-    [`${prefix}FetchHI3`, "Fetch active **Honkai Impact 3rd** codes"],
-    [`${prefix}FetchNTE`, "Fetch active **Neverness to Everness** codes"],
-    [
-      `${prefix}EnableFetch`,
-      "Enable hourly auto-fetch of **HoYoverse + NTE** codes in this channel _(admins/mods only)_",
-    ],
-    [
-      `${prefix}EnableFetchHoyo`,
-      "Enable hourly auto-fetch of **HoYoverse-only** codes in this channel _(admins/mods only)_",
-    ],
-    [
-      `${prefix}EnableFetchNTE`,
-      "Enable hourly auto-fetch of **NTE-only** codes in this channel _(admins/mods only)_",
-    ],
-    [
-      `${prefix}DisableFetch`,
-      "Disable auto-fetch in this channel _(admins/mods only)_",
-    ],
-    [
-      `${prefix}EmojiMode [unicode|custom]`,
-      "Show or switch how reward emoji are rendered _(admins/mods only)_",
-    ],
-    [
-      `${prefix}Restart`,
-      "Restart the bot process after deploying updates _(admins/mods only)_",
-    ],
-    [
-      `${prefix}AuditLog [status|here|#channel|off]`,
-      "Log messages, moderation, username changes, and server settings _(admins/mods only)_",
-    ],
-    [
-      `${prefix}Test-AuditLog`,
-      "Test protected delivery and show settings-monitor coverage _(admins/mods only)_",
-    ],
-    [`${prefix}HelpHoyoFetch`, "Show this help message"],
+    ...getHelpCommandTuples(COMMAND_SECTIONS.MEMBER, prefix),
+    ...getHelpCommandTuples(COMMAND_SECTIONS.SETUP, prefix),
   ];
-
-  const moderationCommands = [
-    [
-      `${prefix}Ban @member [delete:1h|6h|1d|3d|7d] reason: ...`,
-      "Ban immediately; optional cleanup covers messages observed by HoYoFetch. The 10-minute ↩️ undo only unbans _(Ban Members; cleanup also needs Manage Messages)_",
-    ],
-    [
-      `${prefix}Kick @member reason: ...`,
-      "Kick immediately. There is no undo; the member must rejoin with an invite _(Kick Members)_",
-    ],
-    [
-      `${prefix}Mute @member [10m|30m|1h|4h|24h|3d|7d] reason: ...`,
-      "Apply a timeout, or omit the duration for the 1️⃣–7️⃣ picker. The 10-minute ↩️ undo releases it _(Timeout Members)_",
-    ],
-    [
-      `${prefix}Purge-User @member window:1h|6h|1d|3d|7d reason: ...`,
-      "Use ✅/❌ to confirm deletion of messages observed by HoYoFetch. Audit evidence is preserved _(Manage Messages)_",
-    ],
-    [
-      `${prefix}Automod release @member reason: ...`,
-      "Release the timeout immediately and reset that member's automod strikes _(Timeout Members)_",
-    ],
-    [
-      `${prefix}Automod [status|monitor|enforce|off|quorum|approve]`,
-      "Configure anti-raid moderation. Enforcement escalates 10m → 1h → 24h → 7d; strikes reset after 14 quiet days _(ban approval: Ban Members)_",
-    ],
-  ];
+  const moderationCommands = getHelpCommandTuples(
+    COMMAND_SECTIONS.MODERATION,
+    prefix
+  );
 
   return [
     {
-      title: "📖 HoyoFetch Help — Codes & Setup (1/2)",
+      title: "📖 Irminsul Help — Codes & Setup (1/2)",
       description:
         commandList(utilityCommands) +
         "\n\n_Use ▶️ for moderation commands. Command names are case-insensitive._\n" +
+        `_Full reference: [Irminsul Docs](${DOCS_URL})_\n` +
         "_Sources: [HoYo](https://hoyo-codes.seria.moe), [HI3](https://api.ennead.cc/mihoyo), [NTE](https://game8.co/games/Neverness-to-Everness/archives/593718)_",
       colour: "#5865F2",
       icon_url: HELP_ICON,
     },
     {
-      title: "🛡️ HoyoFetch Help — Moderation (2/2)",
+      title: "🛡️ Irminsul Help — Moderation (2/2)",
       description:
         "🔒 **Moderator-only commands:** regular members cannot use the commands on this page. Each action requires the matching moderation permission shown below.\n\n" +
         "**Before taking a manual action:** configure an audit channel with `/AuditLog here`. Ban, kick, mute, purge, and release require exactly one member/ID plus a mandatory `reason:` (maximum 300 characters).\n\n" +
         commandList(moderationCommands) +
-        "\n\n_History cleanup is best-effort and only covers messages HoYoFetch observed. Use ◀️ to return._",
+        "\n\n_History cleanup is best-effort and only covers messages Irminsul observed. Use ◀️ to return._",
       colour: "#E67E22",
       icon_url: HELP_ICON,
     },

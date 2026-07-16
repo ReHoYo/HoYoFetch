@@ -21,3 +21,20 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+        working-directory: website
+      - run: npm run check
+        working-directory: website
+        env:
+          ASTRO_TELEMETRY_DISABLED: "1"
