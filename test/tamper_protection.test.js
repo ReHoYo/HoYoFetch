@@ -533,7 +533,7 @@ test("live user identity events enter the protected audit pipeline", async () =>
   const client = makeClient();
   const serverId = "IDENTITYSERVER";
   const channelId = "IDENTITYCHANNEL";
-  const user = { id: "IDENTITYUSER", username: "After", avatar: null };
+  const user = { id: "IDENTITYUSER", username: "After" };
   client.users.set(user.id, user);
   client.serverMembers.hasByKey = ({ server, user: memberUser }) =>
     server === serverId && memberUser === user.id;
@@ -552,21 +552,20 @@ test("live user identity events enter the protected audit pipeline", async () =>
 
   client.emit("userUpdate", user, {
     username: "Before",
-    avatar: { id: "OLDAVATAR" },
   });
 
   await waitFor(
     () =>
       storeModule
         .getAllProtectedMessages()
-        .filter((record) => record.channelId === channelId).length === 2
+        .filter((record) => record.channelId === channelId).length === 1
   );
   const identityRecords = storeModule
     .getAllProtectedMessages()
     .filter((record) => record.channelId === channelId);
   assert.deepEqual(
     identityRecords.map((record) => record.payload.embeds[0].title),
-    ["🪪 Username Changed", "🖼️ Profile Avatar Changed"]
+    ["🪪 Username Changed"]
   );
   storeModule.disableAuditLog(serverId);
 });

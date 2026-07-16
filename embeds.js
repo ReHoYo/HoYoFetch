@@ -132,7 +132,7 @@ export function buildHelpEmbeds(prefix) {
     ],
     [
       `${prefix}AuditLog [status|here|#channel|off]`,
-      "Log messages, moderation, username/avatar changes, and server settings _(admins/mods only)_",
+      "Log messages, moderation, username changes, and server settings _(admins/mods only)_",
     ],
     [
       `${prefix}Test-AuditLog`,
@@ -385,7 +385,7 @@ export function buildAuditLogEnabledEmbed(
     description:
       `${intro}\n\n` +
       "I will post a record of server actions here: message edits/deletes, channel/role/server changes, " +
-      "member joins/leaves, bans, timeouts, username changes, global and server avatar changes, nickname and role changes, emoji changes, invites, and webhooks. " +
+      "member joins/leaves, bans, timeouts, username changes, nickname and role changes, emoji changes, invites, and webhooks. " +
       "Server settings are also reconciled after restarts and gateway outages.\n\n" +
       "**⚠️ Platform limitations (Stoat has no native audit log, so these can't be worked around):**\n" +
       "- Server, channel, role, member, and user-profile update events do not identify who acted. Those records say **Actor unavailable from Stoat** instead of guessing. Emoji and invite creators are shown when Stoat supplies them.\n" +
