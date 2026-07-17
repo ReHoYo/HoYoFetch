@@ -51,6 +51,7 @@ export default defineConfig({
             { slug: "getting-started" },
             { slug: "commands" },
             { slug: "permissions" },
+            { slug: "faq" },
           ],
         },
         {
