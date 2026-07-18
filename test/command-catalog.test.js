@@ -35,6 +35,7 @@ test("all documented routes and compatibility aliases are authorized", () => {
 test("help tuples are generated from the shared catalog with a custom prefix", () => {
   const memberHelp = getHelpCommandTuples(COMMAND_SECTIONS.MEMBER, "!");
   assert.ok(memberHelp.some(([syntax]) => syntax === "!FetchGI"));
+  assert.ok(memberHelp.some(([syntax]) => syntax === "!FetchWuWa"));
   assert.ok(memberHelp.some(([syntax]) => syntax === "!Docs"));
   assert.ok(
     memberHelp.some(([syntax]) => syntax === "!Report-Spam @member reason: ...")
@@ -43,6 +44,10 @@ test("help tuples are generated from the shared catalog with a custom prefix", (
     formatCommandSyntax("/AuditLog status", "!"),
     "!AuditLog status"
   );
+
+  const setupHelp = getHelpCommandTuples(COMMAND_SECTIONS.SETUP, "!");
+  assert.ok(setupHelp.some(([syntax]) => syntax === "!EnableFetchWuWa"));
+  assert.ok(setupHelp.some(([syntax]) => syntax === "!EnableFetchNTEWuWa"));
 });
 
 test("the canonical documentation URL is an HTTPS project page", () => {

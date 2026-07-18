@@ -9,11 +9,13 @@ Irminsul checks its sources on a fixed interval and posts only codes that are ne
 
 Run one of these commands in the destination channel:
 
-| Command            | Feed                              |
-| ------------------ | --------------------------------- |
-| `/EnableFetch`     | HoYoverse games and NTE           |
-| `/EnableFetchHoyo` | Genshin Impact, HSR, ZZZ, and HI3 |
-| `/EnableFetchNTE`  | NTE only                          |
+| Command                 | Feed                              |
+| ----------------------- | --------------------------------- |
+| `/EnableFetch`          | HoYoverse games, NTE, and WuWa    |
+| `/EnableFetchHoyo`      | Genshin Impact, HSR, ZZZ, and HI3 |
+| `/EnableFetchNTE`       | NTE only                          |
+| `/EnableFetchWuWa`      | WuWa only                         |
+| `/EnableFetchNTEWuWa`   | NTE and WuWa                      |
 
 Running a different enable command updates the channel's existing scope. Run `/DisableFetch` in that channel to remove it.
 
@@ -24,17 +26,19 @@ Each announcement includes:
 - the code;
 - parsed reward details when the source provides them;
 - a direct redemption link for Genshin Impact, HSR, and ZZZ;
-- in-game redemption guidance for HI3 and NTE; and
+- in-game redemption guidance for HI3, NTE, and WuWa; and
 - source attribution.
 
 ## Duplicate protection
 
 Known codes are persisted locally. When the bot first starts, it records currently visible codes without announcing them. Later scans compare normalized code identities and stay silent when nothing is new.
 
-NTE identities are compared case-insensitively because the Game8 source can vary capitalization.
+NTE and WuWa identities are compared case-insensitively because Game8 can vary capitalization.
+
+Existing `all`, `hoyo`, and `nte` subscriptions remain valid. The all-games feed now includes WuWa, but startup seeding records currently visible WuWa codes before scheduled announcements so deployment does not replay them as new.
 
 ## Manual requests
 
-`/FetchGI`, `/FetchHSR`, `/FetchZZZ`, `/FetchHI3`, and `/FetchNTE` return the active list on demand. A per-channel cooldown limits repeated manual requests, and concurrent requests for the same game share one upstream operation.
+`/FetchGI`, `/FetchHSR`, `/FetchZZZ`, `/FetchHI3`, `/FetchNTE`, and `/FetchWuWa` return the active list on demand. A per-channel cooldown limits repeated manual requests, and concurrent requests for the same game share one upstream operation.
 
 Operators can tune the scan interval and manual cooldown in [Configuration](/HoYoFetch/administration/configuration/).

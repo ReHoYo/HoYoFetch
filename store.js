@@ -74,9 +74,20 @@ function writeJSON(path, data) {
 // ═══════════════════════════════════════════════════
 //  Channel subscriptions
 // ═══════════════════════════════════════════════════
-// Shape: { "<channelId>": { enabled: true, scope: "all" | "hoyo" | "nte" } }
+// Shape: {
+//   "<channelId>": {
+//     enabled: true,
+//     scope: "all" | "hoyo" | "nte" | "wuwa" | "nte_wuwa"
+//   }
+// }
 
-export const AUTO_FETCH_SCOPES = new Set(["all", "hoyo", "nte"]);
+export const AUTO_FETCH_SCOPES = new Set([
+  "all",
+  "hoyo",
+  "nte",
+  "wuwa",
+  "nte_wuwa",
+]);
 
 let channels = readJSON(CHANNELS_PATH, {});
 
@@ -87,7 +98,7 @@ function normaliseScope(scope) {
 /**
  * Enable auto-fetch in a channel for the selected game scope.
  * @param {string} channelId
- * @param {"all"|"hoyo"|"nte"} scope
+ * @param {"all"|"hoyo"|"nte"|"wuwa"|"nte_wuwa"} scope
  * @return {{wasEnabled: boolean, previousScope: string, currentScope: string, changed: boolean}}
  */
 export function enableChannel(channelId, scope = "all") {
@@ -131,7 +142,7 @@ export function isChannelEnabled(channelId) {
 /**
  * Get the enabled channel's auto-fetch scope. Legacy enabled channels default to all.
  * @param  {string} channelId
- * @return {"all"|"hoyo"|"nte"}
+ * @return {"all"|"hoyo"|"nte"|"wuwa"|"nte_wuwa"}
  */
 export function getChannelScope(channelId) {
   return normaliseScope(channels[channelId]?.scope);
@@ -185,7 +196,7 @@ export function detectNewCodes(gameKey, currentCodes) {
 
 /**
  * Pure helper for comparing current source codes against a previous known set.
- * NTE is scraped from Game8, so casing drift there should not re-announce codes.
+ * Game8 pages can change code capitalization without changing code identity.
  *
  * @param  {string}   gameKey
  * @param  {string[]} previousCodes
@@ -203,7 +214,9 @@ export function detectFreshCodes(gameKey, previousCodes, currentCodes) {
 
 function getCodeIdentity(gameKey, code) {
   const value = String(code ?? "").trim();
-  return gameKey === "nte" ? value.toUpperCase() : value;
+  return gameKey === "nte" || gameKey === "wuwa"
+    ? value.toUpperCase()
+    : value;
 }
 
 /**

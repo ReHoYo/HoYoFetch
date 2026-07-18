@@ -3,6 +3,13 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Unreleased — Wuthering Waves
+
+- Added Wuthering Waves through cached Game8 parsing of limited-time and permanent active-code tables.
+- Added `/FetchWuWa`, `/EnableFetchWuWa`, and `/EnableFetchNTEWuWa`.
+- Expanded the all-games feed to include WuWa while preserving existing HoYoverse-only and NTE-only subscriptions.
+- Added independent NTE and WuWa caches, case-insensitive Game8 identities, source attribution, and in-game redemption guidance.
+
 ## Member safety reporting
 
 - Added `/Report-Spam` for protected member-submitted friend-request, DM, commission, and scam-spam reports.

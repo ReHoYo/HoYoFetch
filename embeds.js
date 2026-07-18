@@ -47,13 +47,11 @@ export function buildCodesEmbed(
     const rewards = formatRewards(entry.rewards, gameKey);
     lines.push(rewards);
 
-    // Clickable redeem link (or in-game note for HI3)
+    // Clickable redeem link or game-specific in-game instructions.
     if (game.redeemUrl) {
       lines.push(`[🔗 Click to redeem](${game.redeemUrl}${entry.code})`);
-    } else if (gameKey === "honkai3rd") {
-      lines.push("_⚠️ Redeem in-game: Account → Exchange Rewards_");
-    } else if (gameKey === "nte") {
-      lines.push("_⚠️ Redeem in-game from the Redeem Code menu_");
+    } else if (game.redeemInstructions) {
+      lines.push(`_⚠️ Redeem in-game: ${game.redeemInstructions}_`);
     }
 
     lines.push(""); // blank separator
@@ -113,9 +111,9 @@ export function buildHelpEmbeds(prefix) {
       title: "📖 Irminsul Help — Codes, Safety & Setup (1/2)",
       description:
         commandList(utilityCommands) +
-        "\n\n_Use `/Report-Spam` only in a channel where Irminsul can remove the invocation. Use ▶️ for moderation commands. Command names are case-insensitive._\n" +
+        "\n\n_Use `/Report-Spam` only where Irminsul can delete it. Use ▶️ for moderation. Commands ignore case._\n" +
         `_Full reference: [Irminsul Docs](${DOCS_URL})_\n` +
-        "_Sources: [HoYo](https://hoyo-codes.seria.moe), [HI3](https://api.ennead.cc/mihoyo), [NTE](https://game8.co/games/Neverness-to-Everness/archives/593718)_",
+        "_Sources: [HoYo](https://hoyo-codes.seria.moe), [HI3](https://api.ennead.cc), [Game8: NTE + WuWa](https://game8.co)_",
       colour: "#5865F2",
       icon_url: HELP_ICON,
     },
@@ -348,7 +346,7 @@ function getSourceLabel(game) {
     return "[ennead API](https://api.ennead.cc/mihoyo)";
   }
   if (game.source === "game8") {
-    return "[Game8](https://game8.co/games/Neverness-to-Everness/archives/593718)";
+    return `[Game8](${game.sourceUrl})`;
   }
   return "[hoyo-codes](https://hoyo-codes.seria.moe)";
 }

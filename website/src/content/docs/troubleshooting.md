@@ -77,6 +77,6 @@ Check that the server is in enforcement mode, the score reached two with a messa
 
 ## Code sources are unavailable
 
-Third-party sources can fail temporarily. Manual fetches report failures instead of inventing results. NTE may serve its last successful one-hour cache when appropriate.
+Third-party sources can fail temporarily. Manual fetches report failures instead of inventing results. NTE and WuWa maintain independent one-hour Game8 caches and may each serve their last successful response when a refresh fails.
 
 For operator-level diagnostics, see [Configuration](/HoYoFetch/administration/configuration/) and [Self-hosting](/HoYoFetch/administration/self-hosting/).

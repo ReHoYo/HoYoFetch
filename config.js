@@ -112,6 +112,10 @@ const UNICODE_EMOJI = {
   "elite hunter guide": "📕", "light dye": "🔷",
   "colorless dye": "🔷", "colourless dye": "🔷", "chaotic dye": "🔮",
   dynamik: "⚡", "clicky fries": "🍟",
+  // ── Wuthering Waves ─────────────────────────────
+  astrite: "💎", "shell credit": "🪙", "resonance potion": "🧪",
+  "revival inhaler": "❤️", "energy bag": "⚡", "energy core": "🔮",
+  "sealed tube": "🔮", tuner: "🔧", "nutrient block": "🍱",
 };
 
 // Fill in your server emoji IDs after uploading icons.
@@ -185,6 +189,7 @@ export const GAMES = {
     colour: "#9B59B6",
     icon: "https://img-os-static.hoyolab.com/communityWeb/upload/bbb364aaa7d51897a2c74f16c2a71521.png",
     redeemUrl: null, // HI3 codes must be redeemed in-game
+    redeemInstructions: "Account → Exchange Rewards",
     source: "hi3_multi",
     deprecated: false,
   },
@@ -195,13 +200,29 @@ export const GAMES = {
     colour: "#00A884",
     icon: "https://img.game8.co/4490666/fa0365bacaedb0ccc466e4beb8de3c5e.png/show",
     redeemUrl: null,
+    redeemInstructions: "Redeem Code menu",
     source: "game8",
+    sourceUrl: "https://game8.co/games/Neverness-to-Everness/archives/593718",
+    deprecated: false,
+  },
+  wuwa: {
+    key: "wuwa",
+    apiParam: "wuwa",
+    name: "Wuthering Waves",
+    colour: "#5C9BB0",
+    icon: "https://img.game8.co/4557859/22a71791e3bdd41f51c7b03a132cd368.png/show",
+    redeemUrl: null,
+    redeemInstructions: "Settings → Other Settings → Redemption Code",
+    source: "game8",
+    sourceUrl: "https://game8.co/games/Wuthering-Waves/archives/453149",
     deprecated: false,
   },
 };
 
 export const HOYO_GAME_KEYS = ["genshin", "hkrpg", "nap", "honkai3rd"];
 export const NTE_GAME_KEY = "nte";
+export const WUWA_GAME_KEY = "wuwa";
+export const GAME8_GAME_KEYS = [NTE_GAME_KEY, WUWA_GAME_KEY];
 
 export const COMMAND_GAME_MAP = {
   fetchgi: "genshin",
@@ -209,6 +230,7 @@ export const COMMAND_GAME_MAP = {
   fetchzzz: "nap",
   fetchhi3: "honkai3rd",
   fetchnte: "nte",
+  fetchwuwa: "wuwa",
 };
 
 // ═══════════════════════════════════════════════════
@@ -231,14 +253,32 @@ export const HI3_SOURCES = [
 ];
 
 // ═══════════════════════════════════════════════════
-//  NTE source
+//  Game8 sources
 // ═══════════════════════════════════════════════════
 
 export const NTE_SOURCE = {
   name: "Game8",
+  gameKey: NTE_GAME_KEY,
+  logLabel: "NTE",
   url: "https://game8.co/games/Neverness-to-Everness/archives/593718",
   cacheKey: "nte",
   cacheTtlMs: 60 * 60 * 1000,
+  parser: "nte",
+};
+
+export const WUWA_SOURCE = {
+  name: "Game8",
+  gameKey: WUWA_GAME_KEY,
+  logLabel: "WuWa",
+  url: "https://game8.co/games/Wuthering-Waves/archives/453149",
+  cacheKey: "wuwa",
+  cacheTtlMs: 60 * 60 * 1000,
+  parser: "wuwa",
+};
+
+export const GAME8_SOURCES = {
+  [NTE_GAME_KEY]: NTE_SOURCE,
+  [WUWA_GAME_KEY]: WUWA_SOURCE,
 };
 
 // ═══════════════════════════════════════════════════

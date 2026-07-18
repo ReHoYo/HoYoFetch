@@ -15,9 +15,10 @@ Run the command for the game you want:
 /FetchZZZ
 /FetchHI3
 /FetchNTE
+/FetchWuWa
 ```
 
-Irminsul returns active codes with reward details and a redemption link when the game supports web redemption. HI3 and NTE codes are redeemed in-game.
+Irminsul returns active codes with reward details and a redemption link when the game supports web redemption. HI3, NTE, and WuWa codes are redeemed in-game.
 
 To privately notify server staff about suspected friend-request or DM spam, use a channel where Irminsul has Manage Messages:
 
@@ -42,9 +43,13 @@ Choose a narrower feed when needed:
 ```text
 /EnableFetchHoyo
 /EnableFetchNTE
+/EnableFetchWuWa
+/EnableFetchNTEWuWa
 ```
 
 Run `/DisableFetch` in the channel to stop its announcements. Irminsul remembers subscribed channels across restarts.
+
+`/EnableFetch` covers every supported game. The narrower commands select HoYoverse-only, NTE-only, WuWa-only, or the combined NTE + WuWa feed.
 
 :::tip[No old-code flood]
 On a fresh installation, Irminsul seeds the codes it can already see. Existing codes are not announced as newly discovered codes.

@@ -63,6 +63,17 @@ export const COMMAND_CATALOG = Object.freeze([
     notes: ["Neverness to Everness codes must be redeemed in-game."],
   },
   {
+    id: "fetch-wuwa",
+    section: COMMAND_SECTIONS.MEMBER,
+    route: "fetchwuwa",
+    access: "member",
+    syntax: "/FetchWuWa",
+    summary: "Fetch active Wuthering Waves redemption codes.",
+    help: "Fetch active **Wuthering Waves** codes",
+    examples: ["/FetchWuWa"],
+    notes: ["Wuthering Waves codes must be redeemed in-game."],
+  },
+  {
     id: "help",
     section: COMMAND_SECTIONS.MEMBER,
     route: "helphoyofetch",
@@ -105,8 +116,8 @@ export const COMMAND_CATALOG = Object.freeze([
     access: "fetch_manager",
     syntax: "/EnableFetch",
     summary:
-      "Enable hourly HoYoverse and NTE code announcements in this channel.",
-    help: "Enable hourly auto-fetch of **HoYoverse + NTE** codes in this channel _(admins/mods only)_",
+      "Enable hourly code announcements for every supported game in this channel.",
+    help: "Enable hourly auto-fetch of **HoYoverse + NTE + WuWa** codes in this channel _(admins/mods only)_",
     permission:
       "Server owner, Manage Server, or a recognized moderation capability",
     examples: ["/EnableFetch"],
@@ -134,6 +145,30 @@ export const COMMAND_CATALOG = Object.freeze([
     permission:
       "Server owner, Manage Server, or a recognized moderation capability",
     examples: ["/EnableFetchNTE"],
+  },
+  {
+    id: "enable-fetch-wuwa",
+    section: COMMAND_SECTIONS.SETUP,
+    route: "enablefetchwuwa",
+    access: "fetch_manager",
+    syntax: "/EnableFetchWuWa",
+    summary: "Enable hourly WuWa-only code announcements in this channel.",
+    help: "Enable hourly auto-fetch of **WuWa-only** codes in this channel _(admins/mods only)_",
+    permission:
+      "Server owner, Manage Server, or a recognized moderation capability",
+    examples: ["/EnableFetchWuWa"],
+  },
+  {
+    id: "enable-fetch-nte-wuwa",
+    section: COMMAND_SECTIONS.SETUP,
+    route: "enablefetchntewuwa",
+    access: "fetch_manager",
+    syntax: "/EnableFetchNTEWuWa",
+    summary: "Enable hourly NTE and WuWa code announcements in this channel.",
+    help: "Enable hourly auto-fetch of **NTE + WuWa** codes in this channel _(admins/mods only)_",
+    permission:
+      "Server owner, Manage Server, or a recognized moderation capability",
+    examples: ["/EnableFetchNTEWuWa"],
   },
   {
     id: "disable-fetch",

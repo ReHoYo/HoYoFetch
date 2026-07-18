@@ -1,6 +1,6 @@
 # 🌿 Irminsul — HoYoverse Code Bot for Revolt / Stoat.chat
 
-Automatically fetches and posts redemption codes for **Genshin Impact**, **Honkai: Star Rail**, **Zenless Zone Zero**, **Honkai Impact 3rd**, and **Neverness to Everness** in your Revolt server channels.
+Automatically fetches and posts redemption codes for **Genshin Impact**, **Honkai: Star Rail**, **Zenless Zone Zero**, **Honkai Impact 3rd**, **Neverness to Everness**, and **Wuthering Waves** in your Revolt server channels.
 
 📚 **Documentation:** [Irminsul Docs](https://rehoyo.github.io/HoYoFetch/) — searchable commands, setup, moderation, audit-log, automod, troubleshooting, and self-hosting guides.
 
@@ -8,8 +8,8 @@ Automatically fetches and posts redemption codes for **Genshin Impact**, **Honka
 
 | Feature                   | Details                                                                                                                                                                                                 |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **5 games supported**     | GI, HSR, ZZZ, HI3, and NTE                                                                                                                                                                              |
-| **Multiple code sources** | [hoyo-codes.seria.moe](https://hoyo-codes.seria.moe) (GI/HSR/ZZZ), [api.ennead.cc](https://api.ennead.cc/mihoyo) (HI3), and [Game8](https://game8.co/games/Neverness-to-Everness/archives/593718) (NTE) |
+| **6 games supported**     | GI, HSR, ZZZ, HI3, NTE, and WuWa                                                                                                                                                                                                                                                                                 |
+| **Multiple code sources** | [hoyo-codes.seria.moe](https://hoyo-codes.seria.moe) (GI/HSR/ZZZ), [api.ennead.cc](https://api.ennead.cc/mihoyo) (HI3), and Game8 ([NTE](https://game8.co/games/Neverness-to-Everness/archives/593718), [WuWa](https://game8.co/games/Wuthering-Waves/archives/453149)) |
 | **Rich embeds**           | Game-coloured embeds with icons, reward details, and redemption links                                                                                                                                   |
 | **Auto-fetch**            | Hourly scan — posts only when **new** codes appear (no spam)                                                                                                                                            |
 | **Audit log**             | Stoat has no native audit log — `/AuditLog` relays server actions (deletes, edits, joins/leaves, bans, role/channel changes) to a channel of your choice                                                |
@@ -61,10 +61,13 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/FetchZZZ`                                                 | Fetch active Zenless Zone Zero codes                                                                        |
 | `/FetchHI3`                                                 | Fetch active Honkai Impact 3rd codes                                                                        |
 | `/FetchNTE`                                                 | Fetch active Neverness to Everness codes                                                                    |
+| `/FetchWuWa`                                                | Fetch active Wuthering Waves codes                                                                          |
 | `/Report-Spam @member reason: ...`                          | Privately submit suspected friend-request or DM spam for review                                             |
-| `/EnableFetch`                                              | Enable HoYoverse + NTE auto-fetch in the current channel (admins/mods only)                                 |
+| `/EnableFetch`                                              | Enable HoYoverse + NTE + WuWa auto-fetch in the current channel (admins/mods only)                          |
 | `/EnableFetchHoyo`                                          | Enable HoYoverse-only auto-fetch in the current channel (admins/mods only)                                  |
 | `/EnableFetchNTE`                                           | Enable NTE-only auto-fetch in the current channel (admins/mods only)                                        |
+| `/EnableFetchWuWa`                                          | Enable WuWa-only auto-fetch in the current channel (admins/mods only)                                       |
+| `/EnableFetchNTEWuWa`                                       | Enable NTE + WuWa auto-fetch in the current channel (admins/mods only)                                      |
 | `/DisableFetch`                                             | Disable auto-fetch in the current channel (admins/mods only)                                                |
 | `/EmojiMode [unicode\|custom]`                              | Show or switch reward-emoji rendering at runtime (admins/mods only)                                         |
 | `/Restart`                                                  | Restart the bot after deploying updates (admins/mods only)                                                  |
@@ -181,8 +184,9 @@ After sandbox acceptance, keep production in monitor mode for 48 hours, review f
 | Zenless Zone Zero     | hoyo-codes   | `https://hoyo-codes.seria.moe/codes?game=nap`                  |
 | Honkai Impact 3rd     | ennead       | `https://api.ennead.cc/mihoyo/honkai/codes`                    |
 | Neverness to Everness | Game8 scrape | `https://game8.co/games/Neverness-to-Everness/archives/593718` |
+| Wuthering Waves       | Game8 scrape | `https://game8.co/games/Wuthering-Waves/archives/453149`       |
 
-The hoyo-codes API returns an array of `{code, rewards, date, source}`. The ennead API returns `{active: [{code, reward: [...]}], inactive: [...]}` with reward arrays. NTE is scraped from Game8's active redeem-code table and cached for one hour between outbound requests.
+The hoyo-codes API returns an array of `{code, rewards, date, source}`. The ennead API returns `{active: [{code, reward: [...]}], inactive: [...]}` with reward arrays. NTE and WuWa are scraped from their Game8 active-code sections and use independent one-hour caches. WuWa parsing combines limited-time promotional tables with the permanent active-code table while excluding expired sections.
 
 ## 🎨 Custom Emoji Hub
 
@@ -259,7 +263,9 @@ API poll (hourly)
   │                                              │
   ├─ HI3 ─────────→ api.ennead.cc ─────────→ normalise
   │                                              │
-  └─ NTE ─────────→ Game8 scrape/cache ────→ normalise
+  ├─ NTE ─────────→ Game8 scrape/cache ────→ normalise
+  │                                              │
+  └─ WuWa ───────→ Game8 scrape/cache ────→ normalise
                                                  │
                                     ┌────────────┘
                                     ▼
@@ -319,6 +325,12 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ## 📝 Changelog
 
+### Unreleased
+
+- Wuthering Waves support via cached, multi-table Game8 parsing
+- New WuWa-only and NTE + WuWa auto-fetch scopes
+- All-games subscriptions now include WuWa
+
 ### v1.1.0
 
 - Neverness to Everness support via cached Game8 scraping
@@ -343,4 +355,5 @@ docker run -d --name hoyofetch --restart unless-stopped \
 - [hoyo-codes](https://github.com/seriaati/hoyo-codes) by seriaati — GI/HSR/ZZZ codes API
 - [hoyoverse-api](https://github.com/torikushiii/hoyoverse-api) by torikushiii — HI3 codes via ennead API
 - [Game8](https://game8.co/games/Neverness-to-Everness/archives/593718) — NTE redeem-code source
+- [Game8](https://game8.co/games/Wuthering-Waves/archives/453149) — WuWa redeem-code source
 - [revolt.js](https://github.com/revoltchat/revolt.js) — Revolt bot framework

@@ -4,8 +4,10 @@ import assert from "node:assert/strict";
 import {
   GAMES,
   COMMAND_GAME_MAP,
+  GAME8_GAME_KEYS,
   HOYO_GAME_KEYS,
   NTE_GAME_KEY,
+  WUWA_GAME_KEY,
   getEmojiMode,
   setEmojiMode,
   getEmojiMap,
@@ -22,9 +24,15 @@ test("every command maps to a real game with a source", () => {
 });
 
 test("scope game-key lists reference real games", () => {
-  for (const key of [...HOYO_GAME_KEYS, NTE_GAME_KEY]) {
+  for (const key of [
+    ...HOYO_GAME_KEYS,
+    ...GAME8_GAME_KEYS,
+    NTE_GAME_KEY,
+    WUWA_GAME_KEY,
+  ]) {
     assert.ok(GAMES[key], `unknown game key ${key}`);
   }
+  assert.deepEqual(GAME8_GAME_KEYS, ["nte", "wuwa"]);
 });
 
 test("default emoji mode is unicode with real emoji characters", () => {

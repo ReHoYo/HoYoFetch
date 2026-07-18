@@ -1,6 +1,14 @@
 // api.js — Fetches codes from multiple sources
 // ────────────────────────────────────────────────
-import { CONFIG, GAMES, HI3_SOURCES, NTE_SOURCE, getEmojiMap } from "./config.js";
+import {
+  CONFIG,
+  GAMES,
+  GAME8_SOURCES,
+  HI3_SOURCES,
+  NTE_SOURCE,
+  WUWA_SOURCE,
+  getEmojiMap,
+} from "./config.js";
 import { getSourceCache, setSourceCache } from "./store.js";
 
 /**
@@ -19,9 +27,9 @@ export async function fetchCodes(gameKey) {
     return fetchHI3Codes();
   }
 
-  // NTE has no public API yet, so scrape Game8 with a one-hour source cache.
+  // NTE and WuWa are scraped from Game8 with independent one-hour caches.
   if (game.source === "game8") {
-    return fetchNTECodes();
+    return fetchGame8Codes(gameKey);
   }
 
   // All other games use seria's hoyo-codes API
@@ -216,34 +224,47 @@ async function fetchFromFandomWiki(url) {
 }
 
 // ═══════════════════════════════════════════════════
-//  Source: Game8 (Neverness to Everness)
+//  Source: Game8 (Neverness to Everness and Wuthering Waves)
 // ═══════════════════════════════════════════════════
 
-export async function fetchNTECodes({
+export function fetchNTECodes(options = {}) {
+  return fetchGame8Codes(NTE_SOURCE.gameKey, options);
+}
+
+export function fetchWuWaCodes(options = {}) {
+  return fetchGame8Codes(WUWA_SOURCE.gameKey, options);
+}
+
+export async function fetchGame8Codes(gameKey, {
   now = Date.now(),
   fetchImpl = fetch,
   readCache = getSourceCache,
   writeCache = setSourceCache,
 } = {}) {
-  const cache = readCache(NTE_SOURCE.cacheKey) || {};
+  const source = GAME8_SOURCES[gameKey];
+  if (!source) throw new Error(`Unknown Game8 game key: ${gameKey}`);
+
+  const cache = readCache(source.cacheKey) || {};
   const lastAttemptAt = Number(cache.lastAttemptAt) || 0;
   const hasCachedCodes = Array.isArray(cache.codes);
 
-  if (lastAttemptAt > 0 && now - lastAttemptAt < NTE_SOURCE.cacheTtlMs) {
+  if (lastAttemptAt > 0 && now - lastAttemptAt < source.cacheTtlMs) {
     if (hasCachedCodes) {
       return cache.codes.map((entry) => normalise(entry, { preserveCodeCase: true }));
     }
-    throw new Error("NTE cache is empty and the Game8 retry window has not elapsed");
+    throw new Error(
+      `${source.logLabel} cache is empty and the Game8 retry window has not elapsed`
+    );
   }
 
-  writeCache(NTE_SOURCE.cacheKey, {
+  writeCache(source.cacheKey, {
     ...cache,
     lastAttemptAt: now,
   });
 
   try {
-    const codes = await scrapeGame8NTECodes(NTE_SOURCE.url, fetchImpl);
-    writeCache(NTE_SOURCE.cacheKey, {
+    const codes = await scrapeGame8Codes(source, fetchImpl);
+    writeCache(source.cacheKey, {
       lastAttemptAt: now,
       lastSuccessAt: now,
       codes,
@@ -251,7 +272,9 @@ export async function fetchNTECodes({
     return codes;
   } catch (err) {
     if (hasCachedCodes) {
-      console.warn(`   [NTE] Game8 failed, serving cached codes: ${err.message}`);
+      console.warn(
+        `   [${source.logLabel}] Game8 failed, serving cached codes: ${err.message}`
+      );
       return cache.codes.map((entry) => normalise(entry, { preserveCodeCase: true }));
     }
     throw err;
@@ -259,7 +282,15 @@ export async function fetchNTECodes({
 }
 
 export async function scrapeGame8NTECodes(url, fetchImpl = fetch) {
-  const res = await fetchImpl(url, {
+  return scrapeGame8Codes({ ...NTE_SOURCE, url }, fetchImpl);
+}
+
+export async function scrapeGame8WuWaCodes(url, fetchImpl = fetch) {
+  return scrapeGame8Codes({ ...WUWA_SOURCE, url }, fetchImpl);
+}
+
+async function scrapeGame8Codes(source, fetchImpl = fetch) {
+  const res = await fetchImpl(source.url, {
     headers: {
       Accept: "text/html",
       "User-Agent": "HoyoFetch-Bot/1.0 (Revolt code fetcher)",
@@ -268,37 +299,53 @@ export async function scrapeGame8NTECodes(url, fetchImpl = fetch) {
   });
 
   if (!res.ok) throw new Error(`Game8 returned HTTP ${res.status}`);
-  return parseGame8NTECodes(await res.text());
+  return parseGame8Codes(await res.text(), source);
 }
 
 export function parseGame8NTECodes(html) {
-  const activeTable = getGame8ActiveCodesTable(html);
+  return parseGame8Codes(html, NTE_SOURCE);
+}
+
+export function parseGame8WuWaCodes(html) {
+  return parseGame8Codes(html, WUWA_SOURCE);
+}
+
+function parseGame8Codes(html, source) {
+  const activeTables = getGame8ActiveCodesTables(html, source.parser);
   const codes = [];
   const seen = new Set();
   const rowRegex = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
-  let rowMatch;
 
-  while ((rowMatch = rowRegex.exec(activeTable)) !== null) {
-    const row = rowMatch[1];
-    const code = extractGame8Code(row);
-    const codeIdentity = getGame8CodeIdentity(code);
-    if (!codeIdentity || seen.has(codeIdentity)) continue;
+  for (const activeTable of activeTables) {
+    rowRegex.lastIndex = 0;
+    let rowMatch;
+    while ((rowMatch = rowRegex.exec(activeTable)) !== null) {
+      const row = rowMatch[1];
+      const code = extractGame8Code(row);
+      const codeIdentity = getGame8CodeIdentity(code);
+      if (!codeIdentity || seen.has(codeIdentity)) continue;
 
-    const cells = extractTableCells(row);
-    const rewards = cells.length >= 2 ? extractGame8Rewards(cells[1]) : null;
+      const cells = extractTableCells(row);
+      const rewards = extractGame8Rewards(row, cells);
 
-    seen.add(codeIdentity);
-    codes.push(normalise({
-      code: code.trim(),
-      rewards,
-      source: NTE_SOURCE.name,
-    }, { preserveCodeCase: true }));
+      seen.add(codeIdentity);
+      codes.push(normalise({
+        code: code.trim(),
+        rewards,
+        source: source.name,
+      }, { preserveCodeCase: true }));
+    }
   }
 
   return codes;
 }
 
-function getGame8ActiveCodesTable(html) {
+function getGame8ActiveCodesTables(html, parser) {
+  if (parser === "wuwa") return getGame8WuWaActiveCodesTables(html);
+  return [getGame8NTEActiveCodesTable(html)];
+}
+
+function getGame8NTEActiveCodesTable(html) {
   const activeStart = getPatternIndex(html, /All\s+Active\s+Redeem\s+Codes/i);
   if (activeStart === -1) {
     throw new Error("Could not find the Game8 active redeem codes section");
@@ -323,11 +370,49 @@ function getGame8ActiveCodesTable(html) {
   return html.slice(tableStart, tableEnd + "</table>".length);
 }
 
+function getGame8WuWaActiveCodesTables(html) {
+  const activeStart = getHeadingIndex(
+    html,
+    2,
+    /Wuthering\s+Waves\s+Codes/i
+  );
+  if (activeStart === -1) {
+    throw new Error("Could not find the Game8 Wuthering Waves codes section");
+  }
+
+  const activeEnd = Math.min(
+    ...[
+      getHeadingIndex(
+        html,
+        2,
+        /How\s+to\s+Redeem\s+Wuthering\s+Waves\s+Codes/i,
+        activeStart + 1
+      ),
+      getHeadingIndex(
+        html,
+        2,
+        /Expired\s+Redeem\s+Codes/i,
+        activeStart + 1
+      ),
+      html.length,
+    ].filter((index) => index !== -1)
+  );
+  const section = html.slice(activeStart, activeEnd === -1 ? html.length : activeEnd);
+  const tables = section.match(/<table\b[^>]*>[\s\S]*?<\/table>/gi) || [];
+
+  if (tables.length === 0) {
+    throw new Error("Could not find the Game8 Wuthering Waves active code tables");
+  }
+
+  return tables;
+}
+
 function extractGame8Code(rowHtml) {
   const preferred = extractGame8InputCode(rowHtml, { requireClipboardClass: true });
   if (preferred) return preferred;
 
   const cells = extractTableCells(rowHtml);
+  if (cells.length === 0) return null;
   const codeCell = cells[0] ?? rowHtml;
   const inputFallback = extractGame8InputCode(codeCell, { requireClipboardClass: false });
   if (inputFallback) return inputFallback;
@@ -403,9 +488,10 @@ function extractTableCells(rowHtml) {
   return cells;
 }
 
-function extractGame8Rewards(cellHtml) {
-  const rewardBlocks = cellHtml.match(/<div\b[^>]*class=['"][^'"]*\balign\b[^'"]*['"][^>]*>[\s\S]*?<\/div>/gi) || [];
-  const parts = (rewardBlocks.length ? rewardBlocks : [cellHtml])
+function extractGame8Rewards(rowHtml, cells) {
+  const rewardBlocks = rowHtml.match(/<div\b[^>]*class=['"][^'"]*\balign\b[^'"]*['"][^>]*>[\s\S]*?<\/div>/gi) || [];
+  const fallback = cells.length >= 2 ? [cells[1]] : [];
+  const parts = (rewardBlocks.length ? rewardBlocks : fallback)
     .map(htmlToText)
     .map((part) => part.replace(/^・\s*/, "").trim())
     .filter(Boolean);
@@ -467,6 +553,22 @@ function getFirstPatternIndex(text, patterns, start = 0) {
     .map((pattern) => getPatternIndex(text, pattern, start))
     .filter((idx) => idx !== -1);
   return matches.length > 0 ? Math.min(...matches) : -1;
+}
+
+function getHeadingIndex(html, level, textPattern, start = 0) {
+  const headingRegex = new RegExp(
+    `<h${level}\\b[^>]*>([\\s\\S]*?)<\\/h${level}>`,
+    "gi"
+  );
+  headingRegex.lastIndex = start;
+
+  let match;
+  while ((match = headingRegex.exec(html)) !== null) {
+    textPattern.lastIndex = 0;
+    if (textPattern.test(htmlToText(match[1]))) return match.index;
+  }
+
+  return -1;
 }
 
 // ═══════════════════════════════════════════════════

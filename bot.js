@@ -23,8 +23,10 @@ import {
   CONFIG,
   GAMES,
   COMMAND_GAME_MAP,
+  GAME8_GAME_KEYS,
   HOYO_GAME_KEYS,
   NTE_GAME_KEY,
+  WUWA_GAME_KEY,
   getEmojiMode,
   setEmojiMode,
 } from "./config.js";
@@ -268,6 +270,18 @@ client.on("messageCreate", async (message) => {
     // ── EnableFetchNTE ───────────────────────────
     if (cmd === "enablefetchnte") {
       await handleEnableFetch(message, "nte");
+      return;
+    }
+
+    // ── EnableFetchWuWa ──────────────────────────
+    if (cmd === "enablefetchwuwa") {
+      await handleEnableFetch(message, "wuwa");
+      return;
+    }
+
+    // ── EnableFetchNTEWuWa ───────────────────────
+    if (cmd === "enablefetchntewuwa") {
+      await handleEnableFetch(message, "nte_wuwa");
       return;
     }
 
@@ -916,13 +930,17 @@ function fetchCodesOnce(gameKey) {
 function scopeIncludesGame(scope, gameKey) {
   if (scope === "hoyo") return HOYO_GAME_KEYS.includes(gameKey);
   if (scope === "nte") return gameKey === NTE_GAME_KEY;
+  if (scope === "wuwa") return gameKey === WUWA_GAME_KEY;
+  if (scope === "nte_wuwa") return GAME8_GAME_KEYS.includes(gameKey);
   return true;
 }
 
 function getScopeLabel(scope) {
   if (scope === "hoyo") return "HoYoverse codes";
   if (scope === "nte") return "NTE codes";
-  return "HoYoverse and NTE codes";
+  if (scope === "wuwa") return "WuWa codes";
+  if (scope === "nte_wuwa") return "NTE and WuWa codes";
+  return "HoYoverse, NTE, and WuWa codes";
 }
 
 function shouldUseSupervisorRestart() {

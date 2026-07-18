@@ -33,6 +33,12 @@ test("channel enable/disable lifecycle with scopes", () => {
   assert.equal(result.currentScope, "nte");
   assert.equal(result.changed, true);
 
+  store.enableChannel("chan-1", "wuwa");
+  assert.equal(store.getChannelScope("chan-1"), "wuwa");
+
+  store.enableChannel("chan-1", "nte_wuwa");
+  assert.equal(store.getChannelScope("chan-1"), "nte_wuwa");
+
   store.disableChannel("chan-1");
   assert.equal(store.isChannelEnabled("chan-1"), false);
   assert.deepEqual(store.getEnabledChannels(), []);
@@ -41,6 +47,13 @@ test("channel enable/disable lifecycle with scopes", () => {
 test("invalid scope normalises to 'all'", () => {
   store.enableChannel("chan-scope", "bogus");
   assert.equal(store.getChannelScope("chan-scope"), "all");
+});
+
+test("all five auto-fetch scopes are accepted", () => {
+  assert.deepEqual(
+    [...store.AUTO_FETCH_SCOPES],
+    ["all", "hoyo", "nte", "wuwa", "nte_wuwa"]
+  );
 });
 
 test("writes are atomic and produce valid JSON (no leftover .tmp)", () => {

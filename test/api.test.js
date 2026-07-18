@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fetchNTECodes, parseGame8NTECodes } from "../api.js";
+import {
+  fetchNTECodes,
+  fetchWuWaCodes,
+  parseGame8NTECodes,
+  parseGame8WuWaCodes,
+} from "../api.js";
 import { detectFreshCodes } from "../store.js";
 
 const NOW = 1_800_000_000_000;
@@ -82,6 +87,53 @@ const textFallbackFixture = `
   </table>
 `;
 
+const game8WuWaFixture = `
+  <h2 class='a-header--2'>Wuthering Waves Codes</h2>
+  <h3 class='a-header--3'>Limited-Time Collaboration Code</h3>
+  <table class='a-table'>
+    <tr><th>Limited-Time Code</th></tr>
+    <tr>
+      <td>
+        <div class='a-clipboard__container'>
+          <input type='text' class='a-clipboard__textInput' value='F5F4D3B2A2' readonly>
+          <div class='a-clipboard__copyMessage'>Copied</div>
+        </div>
+        <b>Expiry:</b> August 19, 2026
+        <div class='align'><a>Escape from Duckov Collab Livery</a> x1</div>
+      </td>
+    </tr>
+  </table>
+  <h3 class='a-header--3'>All Active Codes</h3>
+  <table class='a-table'>
+    <tr><th>All Active Code(s)</th></tr>
+    <tr>
+      <td>
+        <input type='text' class='a-clipboard__textInput' value='WUTHERINGGIFT' readonly>
+        <div class='align'><a>Astrite</a> x50</div>
+        <div class='align'><a>Premium Resonance Potion</a> x2</div>
+        <div class='align'><a>Shell Credit</a> x15,000</div>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <input type='text' class='a-clipboard__textInput' value='wutheringgift' readonly>
+        <div class='align'>Duplicate Reward x1</div>
+      </td>
+    </tr>
+  </table>
+  <h2 class='a-header--2'>How to Redeem Wuthering Waves Codes</h2>
+  <p>Use the Redemption Code feature in-game.</p>
+  <h2 class='a-header--2'>Expired Redeem Codes</h2>
+  <table class='a-table'>
+    <tr>
+      <td>
+        <input type='text' class='a-clipboard__textInput' value='WUWAEXPIRED' readonly>
+        <div class='align'>Expired Reward x1</div>
+      </td>
+    </tr>
+  </table>
+`;
+
 test("parseGame8NTECodes extracts active codes, dedupes casing, and ignores expired codes", () => {
   const codes = parseGame8NTECodes(game8Fixture);
 
@@ -102,10 +154,33 @@ test("parseGame8NTECodes falls back to code-cell text when input markup changes"
   assert.equal(codes[0].rewards, "Elite Hunter Guide x2");
 });
 
-test("detectFreshCodes treats NTE codes as case-insensitive identities only", () => {
+test("parseGame8WuWaCodes aggregates active tables and ignores expired codes", () => {
+  const codes = parseGame8WuWaCodes(game8WuWaFixture);
+
+  assert.deepEqual(codes.map((entry) => entry.code), [
+    "F5F4D3B2A2",
+    "WUTHERINGGIFT",
+  ]);
+  assert.equal(codes[0].rewards, "Escape from Duckov Collab Livery x1");
+  assert.equal(
+    codes[1].rewards,
+    "Astrite x50, Premium Resonance Potion x2, Shell Credit x15,000"
+  );
+  assert.ok(!codes.some((entry) => entry.code === "WUWAEXPIRED"));
+});
+
+test("detectFreshCodes treats Game8 codes as case-insensitive identities only", () => {
   assert.deepEqual(
     detectFreshCodes("nte", ["NTEFREE"], ["ntefree", "NTEBRANDNEW"]),
     ["NTEBRANDNEW"]
+  );
+  assert.deepEqual(
+    detectFreshCodes(
+      "wuwa",
+      ["WUTHERINGGIFT"],
+      ["wutheringgift", "WUWABRANDNEW"]
+    ),
+    ["WUWABRANDNEW"]
   );
   assert.deepEqual(
     detectFreshCodes("genshin", ["GENSHINCODE"], ["genshincode"]),
@@ -215,4 +290,112 @@ test("fetchNTECodes surfaces errors when Game8 fails without cache", async () =>
   );
 
   assert.equal(cache.nte.lastAttemptAt, NOW);
+});
+
+test("fetchWuWaCodes returns fresh cache without fetching Game8", async () => {
+  let fetchCount = 0;
+  const cache = {
+    wuwa: {
+      lastAttemptAt: NOW - 1_000,
+      lastSuccessAt: NOW - 1_000,
+      codes: [{ code: "WUTHERINGGIFT", rewards: "Astrite x50", source: "Game8" }],
+    },
+  };
+
+  const codes = await fetchWuWaCodes({
+    now: NOW,
+    fetchImpl: async () => {
+      fetchCount += 1;
+      throw new Error("should not fetch");
+    },
+    readCache: (key) => cache[key],
+    writeCache: (key, entry) => {
+      cache[key] = entry;
+    },
+  });
+
+  assert.equal(fetchCount, 0);
+  assert.deepEqual(codes.map((entry) => entry.code), ["WUTHERINGGIFT"]);
+});
+
+test("fetchWuWaCodes refreshes only its own stale cache", async () => {
+  const nteCache = {
+    lastAttemptAt: 123,
+    lastSuccessAt: 123,
+    codes: [{ code: "NTEFREE", rewards: null, source: "Game8" }],
+  };
+  const cache = {
+    nte: nteCache,
+    wuwa: {
+      lastAttemptAt: NOW - ONE_HOUR_MS - 1,
+      lastSuccessAt: NOW - ONE_HOUR_MS - 1,
+      codes: [{ code: "OLDWUWA", rewards: null, source: "Game8" }],
+    },
+  };
+
+  const codes = await fetchWuWaCodes({
+    now: NOW,
+    fetchImpl: async () => ({
+      ok: true,
+      text: async () => game8WuWaFixture,
+    }),
+    readCache: (key) => cache[key],
+    writeCache: (key, entry) => {
+      cache[key] = entry;
+    },
+  });
+
+  assert.deepEqual(codes.map((entry) => entry.code), [
+    "F5F4D3B2A2",
+    "WUTHERINGGIFT",
+  ]);
+  assert.equal(cache.wuwa.lastAttemptAt, NOW);
+  assert.equal(cache.wuwa.lastSuccessAt, NOW);
+  assert.equal(cache.nte, nteCache);
+});
+
+test("fetchWuWaCodes serves stale cache when Game8 refresh fails", async () => {
+  const cache = {
+    wuwa: {
+      lastAttemptAt: NOW - ONE_HOUR_MS - 1,
+      lastSuccessAt: NOW - ONE_HOUR_MS - 1,
+      codes: [{ code: "WUWASTALE", rewards: "Cached reward", source: "Game8" }],
+    },
+  };
+
+  const codes = await fetchWuWaCodes({
+    now: NOW,
+    fetchImpl: async () => ({
+      ok: false,
+      status: 503,
+    }),
+    readCache: (key) => cache[key],
+    writeCache: (key, entry) => {
+      cache[key] = entry;
+    },
+  });
+
+  assert.deepEqual(codes.map((entry) => entry.code), ["WUWASTALE"]);
+  assert.equal(cache.wuwa.lastAttemptAt, NOW);
+});
+
+test("fetchWuWaCodes surfaces errors when Game8 fails without cache", async () => {
+  const cache = {};
+
+  await assert.rejects(
+    fetchWuWaCodes({
+      now: NOW,
+      fetchImpl: async () => ({
+        ok: false,
+        status: 503,
+      }),
+      readCache: (key) => cache[key],
+      writeCache: (key, entry) => {
+        cache[key] = entry;
+      },
+    }),
+    /Game8 returned HTTP 503/
+  );
+
+  assert.equal(cache.wuwa.lastAttemptAt, NOW);
 });
