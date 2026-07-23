@@ -98,10 +98,29 @@ This removes a native timeout, resets the member's automod strike history, and c
 reviews for the containment. It can also release a manually applied timeout. It is the one manual
 action with no confirmation step, because it only restores access.
 
+## Reading a cleanup result
+
+A cleanup never claims more than it did. Alongside the deleted count, it names what happened to
+everything it could not remove:
+
+| Reported as                      | Meaning                                                                                    | What to do                                                                    |
+| -------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| already gone from Stoat          | The message was deleted before the cleanup reached it, usually while Irminsul was offline. | Nothing. Irminsul reconciles its archive so later cleanups stop selecting it. |
+| lack Manage Messages there       | Irminsul cannot delete in that channel.                                                    | Grant Manage Messages in the affected channel, then re-run.                   |
+| still rate limited after a retry | Stoat throttled the run and one slower retry did not clear it.                             | Re-run the cleanup; it resumes where this one stopped.                        |
+| failed for another reason        | An unexpected error.                                                                       | Check the bot log; the status code is recorded there per message.             |
+| left untouched by the safety cap | The run hit the 2,000-message ceiling.                                                     | Re-run to continue through the remainder.                                     |
+
+Deletes are paced to stay inside Stoat's rate limit, so a cleanup covering many older messages takes
+noticeably longer than one covering a recent burst. When a run is large enough to be slow, Irminsul
+estimates the time up front.
+
 :::caution[History cleanup is best-effort]
 Cleanup reaches back 29 days, one day short of the 30-day message archive that feeds it. Stoat's ban
 route has no message-history option and its bulk-delete route accepts only recent messages, so
 Irminsul bulk-deletes archived IDs from the last seven days and removes anything older one message
-at a time. A single cleanup deletes at most 2,000 messages, oldest first; every response and audit
-record states how many were selected, deleted, failed, and left for a follow-up run.
+at a time. A single cleanup deletes at most 2,000 messages, oldest first.
+
+Coverage is limited to messages Irminsul observed while archiving was active. Protected audit
+entries, retained evidence, quotations, reactions, and external copies are never erased.
 :::

@@ -14,6 +14,7 @@ const {
   MODERATION_CONFIRM_EMOJI,
   MODERATION_UNDO_EMOJI,
   parseModerationCommand,
+  rateLimitWaitMs,
 } = await import("../moderation.js");
 
 const SERVER_ID = "SERVER123";
@@ -79,16 +80,23 @@ function memoryStore({ audit = true } = {}) {
 
 function makeHarness({
   audit = true,
-  messages = [],
+  messages: initialMessages = [],
   permissionBits = ALL_MOD_BITS,
   requestOverride,
+  // Real pacing would make every cleanup test wait seconds; the pacing itself
+  // is asserted separately.
+  deletePacingMs = 0,
+  rateLimitCooldownMs = 0,
+  cleanupRateLimitRetries = 1,
 } = {}) {
   let clock = 1_900_000_000_000;
   let messageCounter = 0;
+  let messages = initialMessages;
   const store = memoryStore({ audit });
   const requests = [];
   const sent = [];
   const protectedLogs = [];
+  const reconciled = [];
   const timeouts = new Map();
   const channels = [CHANNEL_ID, SECOND_CHANNEL_ID, AUDIT_CHANNEL_ID];
   const client = {
@@ -183,10 +191,19 @@ function makeHarness({
           latestAt: messages.at(-1)?.createdAt ?? null,
         };
       },
+      markMessagesDeleted(ids) {
+        reconciled.push(...ids);
+        // Mirror the real archive: a deleted entry stops being selectable.
+        messages = messages.filter((entry) => !ids.includes(entry.id));
+        return ids.length;
+      },
     },
     now: () => clock,
     actionIdFactory: () => "MDACTION123",
     attach: false,
+    deletePacingMs,
+    rateLimitCooldownMs,
+    cleanupRateLimitRetries,
     logger: { log() {}, warn() {} },
   });
   const message = {
@@ -202,6 +219,7 @@ function makeHarness({
     requests,
     sent,
     protectedLogs,
+    reconciled,
     store,
     timeouts,
     setNow(value) {
@@ -816,9 +834,104 @@ test("runtime cleanup failures keep the ban and report partial results", async (
   });
   await harness.run("ban", [TARGET_ID, "delete:1h", "reason:", "spam"]);
   assert.ok(harness.requests.some((entry) => entry.path.includes("/bans/")));
+  const summary = harness.protectedLogs[0].payload.embeds[0].description;
   assert.match(
-    harness.protectedLogs[0].payload.embeds[0].description,
-    /0\/1 known message\(s\) deleted across 1 channel\(s\); 1 failed/
+    summary,
+    /0\/1 known message\(s\) deleted across 1 channel\(s\)/
+  );
+  // A permission problem is actionable, so it is named rather than folded into
+  // an undifferentiated failure count.
+  assert.match(
+    summary,
+    /1 could not be deleted because I lack Manage Messages/
+  );
+});
+
+test("messages already gone from Stoat reconcile instead of failing", async () => {
+  const now = 1_900_000_000_000;
+  const harness = makeHarness({
+    messages: [
+      {
+        id: "MESSAGE1",
+        channelId: CHANNEL_ID,
+        serverId: SERVER_ID,
+        authorId: TARGET_ID,
+        createdAt: now - 1_000,
+      },
+      {
+        id: "MESSAGE2",
+        channelId: CHANNEL_ID,
+        serverId: SERVER_ID,
+        authorId: TARGET_ID,
+        createdAt: now - 2_000,
+      },
+    ],
+    requestOverride: ({ method, path }) => {
+      if (method !== "DELETE" || !path.includes("/messages")) return null;
+      // The bulk route refuses the batch, then MESSAGE1 turns out to be gone.
+      if (path.endsWith("/bulk")) return { ok: false, status: 400 };
+      return path.endsWith("MESSAGE1")
+        ? { ok: false, status: 404 }
+        : { ok: true, status: 204 };
+    },
+  });
+  await harness.run("purge-user", [TARGET_ID, "window:1h", "reason:", "spam"]);
+  await harness.moderation.handleRawEvent({
+    type: "MessageReact",
+    id: harness.sent.at(-1).result._id,
+    user_id: MOD_ID,
+    emoji_id: MODERATION_CONFIRM_EMOJI,
+  });
+  const summary = harness.protectedLogs.at(-1).payload.embeds[0].description;
+  assert.match(summary, /1\/2 known message\(s\) deleted/);
+  assert.match(summary, /0 failed/, "an absent message is not a failure");
+  assert.match(
+    summary,
+    /1 were already gone from Stoat and have been reconciled/
+  );
+  // Both the deleted and the absent message are written back, so a later
+  // cleanup stops selecting an ID that can never be deleted.
+  assert.deepEqual(harness.reconciled.sort(), ["MESSAGE1", "MESSAGE2"]);
+});
+
+test("rate-limited messages get one more pass before being reported", async () => {
+  const now = 1_900_000_000_000;
+  const day = 24 * 60 * 60_000;
+  const attempts = new Map();
+  const harness = makeHarness({
+    messages: ["OLD1", "OLD2"].map((id, index) => ({
+      id,
+      channelId: CHANNEL_ID,
+      serverId: SERVER_ID,
+      authorId: TARGET_ID,
+      // Older than the bulk window, so each goes one at a time.
+      createdAt: now - (20 + index) * day,
+    })),
+    requestOverride: ({ method, path }) => {
+      if (method !== "DELETE" || !path.includes("/messages")) return null;
+      const id = path.split("/").pop();
+      const seen = (attempts.get(id) ?? 0) + 1;
+      attempts.set(id, seen);
+      const limited = {
+        ok: false,
+        status: 429,
+        headers: { "x-ratelimit-reset-after": "1" },
+      };
+      // OLD1 clears on the second pass; OLD2 never does.
+      if (id === "OLD2") return limited;
+      return seen === 1 ? limited : { ok: true, status: 204 };
+    },
+  });
+  await harness.run("ban", [TARGET_ID, "delete:29d", "reason:", "raid"]);
+  const summary = harness.protectedLogs[0].payload.embeds[0].description;
+  assert.match(summary, /1\/2 known message\(s\) deleted/);
+  assert.match(
+    summary,
+    /1 were still rate limited after a retry; run the cleanup again to finish them/
+  );
+  assert.ok(
+    attempts.get("OLD1") > 1,
+    "a rate-limited message is retried, not written off"
   );
 });
 
@@ -832,6 +945,70 @@ test("Stoat hierarchy rejection fails closed without a success log", async () =>
   await harness.run("ban", [TARGET_ID, "reason:", "test"]);
   assert.equal(harness.protectedLogs.length, 0);
   assert.match(harness.sent.at(-1).payload.embeds[0].title, /Ban Failed/);
+});
+
+test("individual deletes are paced so a long cleanup stays under the limit", async () => {
+  const now = 1_900_000_000_000;
+  const day = 24 * 60 * 60_000;
+  const stamps = [];
+  const harness = makeHarness({
+    deletePacingMs: 40,
+    messages: ["OLD1", "OLD2", "OLD3"].map((id, index) => ({
+      id,
+      channelId: CHANNEL_ID,
+      serverId: SERVER_ID,
+      authorId: TARGET_ID,
+      createdAt: now - (20 + index) * day,
+    })),
+    requestOverride: ({ method, path }) => {
+      if (method === "DELETE" && /\/messages\/OLD\d$/.test(path)) {
+        stamps.push(process.hrtime.bigint());
+      }
+      return null;
+    },
+  });
+  await harness.run("ban", [TARGET_ID, "delete:29d", "reason:", "raid"]);
+  assert.equal(stamps.length, 3);
+  const gaps = stamps
+    .slice(1)
+    .map((stamp, index) => Number(stamp - stamps[index]) / 1e6);
+  for (const gap of gaps) {
+    assert.ok(gap >= 35, `expected a pacing gap, saw ${gap.toFixed(1)}ms`);
+  }
+});
+
+test("rate-limit backoff reads the wait from headers, not just the body", () => {
+  // Stoat's own reset header is in milliseconds.
+  assert.equal(
+    rateLimitWaitMs({ headers: { "x-ratelimit-reset-after": "4000" } }),
+    4_000
+  );
+  // The HTTP standard header is in seconds, so 2 means two thousand ms — the
+  // original bug was reading only the body and silently waiting one second.
+  assert.equal(rateLimitWaitMs({ headers: { "Retry-After": "2" } }), 2_000);
+  assert.equal(rateLimitWaitMs({ data: { retry_after: 3_000 } }), 3_000);
+  // Header wins over body when both are present.
+  assert.equal(
+    rateLimitWaitMs({
+      headers: { "x-ratelimit-reset-after": "8000" },
+      data: { retry_after: 1_000 },
+    }),
+    8_000
+  );
+  // With no signal at all the wait doubles instead of pinning at one second.
+  assert.equal(rateLimitWaitMs({}, 0), 1_000);
+  assert.equal(rateLimitWaitMs({}, 2), 4_000);
+  // A long reset is honoured rather than truncated to the old 10s ceiling.
+  assert.equal(
+    rateLimitWaitMs({ headers: { "x-ratelimit-reset-after": "45000" } }),
+    45_000
+  );
+  assert.equal(
+    rateLimitWaitMs({ headers: { "x-ratelimit-reset-after": "999999" } }),
+    60_000
+  );
+  // Unparseable values fall through instead of producing NaN.
+  assert.equal(rateLimitWaitMs({ headers: { "retry-after": "" } }, 0), 1_000);
 });
 
 test("purge retries a rate-limited batch", async () => {

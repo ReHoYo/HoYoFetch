@@ -1039,6 +1039,9 @@ async function safeDelete(channelId, messageId) {
  * Raw REST call that surfaces the HTTP status code — client.api never
  * checks response.ok, so a 429/403/404 would otherwise resolve as if it
  * were a success. Needed for the repost path's failure classification.
+ *
+ * Response headers come back too: Stoat reports its rate-limit budget and
+ * reset delay there, and callers that pace bulk work cannot see it otherwise.
  */
 async function apiRequest(method, path, body) {
   try {
@@ -1057,9 +1060,14 @@ async function apiRequest(method, path, body) {
     } catch {
       data = undefined;
     }
-    return { ok: res.ok, status: res.status, data };
+    return {
+      ok: res.ok,
+      status: res.status,
+      data,
+      headers: Object.fromEntries(res.headers),
+    };
   } catch (err) {
-    return { ok: false, status: 0, data: undefined, err };
+    return { ok: false, status: 0, data: undefined, headers: {}, err };
   }
 }
 

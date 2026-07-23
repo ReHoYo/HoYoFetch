@@ -92,6 +92,13 @@ const BULK_DELETE_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
 const MAX_CLEANUP_MESSAGES = 2_000;
 const SLOW_CLEANUP_THRESHOLD = 100;
 const MAX_RATE_LIMIT_RETRIES = 3;
+// Cleanups delete hundreds of messages one at a time, so they get a larger
+// budget than a one-off call before a message is written off as unreachable.
+const MAX_CLEANUP_RATE_LIMIT_RETRIES = 6;
+const DELETE_PACING_MS = 350;
+const RATE_LIMIT_COOLDOWN_MS = 5_000;
+const RATE_LIMIT_MIN_WAIT_MS = 250;
+const RATE_LIMIT_MAX_WAIT_MS = 60_000;
 const MAX_PENDING_INTERACTIONS = 5_000;
 
 const DEFAULT_STORE = Object.freeze({
@@ -116,6 +123,43 @@ function actionId() {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Header lookup is case-insensitive: fetch lowercases them, but a caller
+// supplying its own transport need not.
+function headerNumber(response, name) {
+  const headers = response?.headers;
+  if (!headers) return null;
+  const key = Object.keys(headers).find(
+    (entry) => entry.toLowerCase() === name
+  );
+  if (key === undefined) return null;
+  const value = Number(headers[key]);
+  return headers[key] === "" || !Number.isFinite(value) ? null : value;
+}
+
+/**
+ * How long to wait before retrying a rate-limited request.
+ *
+ * Stoat's exact signalling is not documented publicly, so every plausible
+ * source is read in turn: its own reset header (milliseconds), the standard
+ * `Retry-After` (seconds), then a `retry_after` in the JSON body. Without any
+ * of those the wait doubles per attempt — a fixed one-second fallback is
+ * shorter than most real bucket resets and just burns the retry budget.
+ */
+export function rateLimitWaitMs(response, attempt = 0) {
+  const resetAfter = headerNumber(response, "x-ratelimit-reset-after");
+  const retryAfterSeconds = headerNumber(response, "retry-after");
+  const bodyRetryAfter = Number(response?.data?.retry_after);
+  const wait =
+    resetAfter ??
+    (retryAfterSeconds === null ? null : retryAfterSeconds * 1_000) ??
+    (Number.isFinite(bodyRetryAfter) ? bodyRetryAfter : null) ??
+    1_000 * 2 ** attempt;
+  return Math.max(
+    RATE_LIMIT_MIN_WAIT_MS,
+    Math.min(RATE_LIMIT_MAX_WAIT_MS, wait)
+  );
 }
 
 const WINDOW_PREFIXES = Object.freeze(["delete:", "window:", "purge:"]);
@@ -270,6 +314,33 @@ export function parseModerationCommand(command, args = []) {
   return parsed;
 }
 
+// A cleanup used to report one undifferentiated `failed` count, which left a
+// moderator unable to tell a message that was already gone from one they lack
+// permission to touch from one the rate limiter refused. Each delete is now
+// filed by what actually happened to it.
+function emptyOutcome() {
+  return {
+    removed: [],
+    alreadyGone: [],
+    forbidden: [],
+    rateLimited: [],
+    errored: [],
+  };
+}
+
+function recordOutcome(outcome, id, response) {
+  if (response.ok) outcome.removed.push(id);
+  else if (response.status === 404) outcome.alreadyGone.push(id);
+  else if (response.status === 403) outcome.forbidden.push(id);
+  else if (response.status === 429) outcome.rateLimited.push(id);
+  else outcome.errored.push(id);
+}
+
+function mergeOutcomes(target, source) {
+  for (const key of Object.keys(target)) target[key].push(...source[key]);
+  return target;
+}
+
 function safeReason(value) {
   return String(value)
     .replace(/<@/g, "<@\u200B")
@@ -298,6 +369,10 @@ export function createModeration(
     now = Date.now,
     actionIdFactory = actionId,
     attach = true,
+    // Injectable so tests do not have to wait out real pacing and backoff.
+    deletePacingMs = DELETE_PACING_MS,
+    rateLimitCooldownMs = RATE_LIMIT_COOLDOWN_MS,
+    cleanupRateLimitRetries = MAX_CLEANUP_RATE_LIMIT_RETRIES,
   } = {}
 ) {
   if (typeof send !== "function")
@@ -625,19 +700,18 @@ export function createModeration(
       );
   }
 
-  async function requestWithRetry(method, path, body) {
+  async function requestWithRetry(
+    method,
+    path,
+    body,
+    maxRetries = MAX_RATE_LIMIT_RETRIES
+  ) {
     let attempt = 0;
-    while (attempt <= MAX_RATE_LIMIT_RETRIES) {
+    while (attempt <= maxRetries) {
       const response = await request(method, path, body);
       if (response.ok) return response;
-      if (response.status !== 429 || attempt === MAX_RATE_LIMIT_RETRIES) {
-        return response;
-      }
-      const retryAfter = Math.max(
-        250,
-        Math.min(10_000, Number(response.data?.retry_after) || 1_000)
-      );
-      await delay(retryAfter);
+      if (response.status !== 429 || attempt === maxRetries) return response;
+      await delay(rateLimitWaitMs(response, attempt));
       attempt += 1;
     }
     return { ok: false, status: 0 };
@@ -650,21 +724,43 @@ export function createModeration(
   }
 
   async function deleteSingle(channelId, id) {
-    return requestWithRetry("DELETE", `/channels/${channelId}/messages/${id}`);
+    return requestWithRetry(
+      "DELETE",
+      `/channels/${channelId}/messages/${id}`,
+      undefined,
+      cleanupRateLimitRetries
+    );
   }
 
   // Delete one message at a time. Used for anything Stoat's bulk route will
   // not take (older than BULK_DELETE_MAX_AGE_MS) and as the fallback when a
   // bulk batch is rejected for a reason other than rate limiting.
+  //
+  // Deletes are paced: a long cleanup that empties the bucket would otherwise
+  // burn its retry budget on the first few messages and report the rest as
+  // failures. When Stoat reports its remaining budget we wait for the reset
+  // before spending the last of it; otherwise a small fixed gap keeps the run
+  // under the limit.
   async function deleteIndividually(channelId, ids) {
-    const removed = [];
-    let failed = 0;
-    for (const id of ids) {
+    const outcome = emptyOutcome();
+    for (const [index, id] of ids.entries()) {
       const response = await deleteSingle(channelId, id);
-      if (response.ok) removed.push(id);
-      else failed += 1;
+      recordOutcome(outcome, id, response);
+      if (response.status && response.status !== 429 && !response.ok) {
+        logger.warn?.(
+          `moderation: delete failed channel=${auditAlias(channelId)} ` +
+            `message=${auditAlias(id)} status=${response.status}`
+        );
+      }
+      if (index === ids.length - 1) continue;
+      const remaining = headerNumber(response, "x-ratelimit-remaining");
+      if (remaining !== null && remaining <= 0) {
+        await delay(rateLimitWaitMs(response, 0));
+      } else if (deletePacingMs > 0) {
+        await delay(deletePacingMs);
+      }
     }
-    return { removed, failed };
+    return outcome;
   }
 
   async function purgeSelected(entries) {
@@ -691,29 +787,51 @@ export function createModeration(
       byChannel.set(entry.channelId, buckets);
     }
 
-    let deleted = 0;
-    let failed = 0;
+    const totals = emptyOutcome();
     for (const [channelId, buckets] of byChannel) {
-      const removed = [];
+      const outcome = emptyOutcome();
       for (const batch of chunks(buckets.bulk, BULK_DELETE_SIZE)) {
         const response = await deleteBatch(channelId, batch);
         if (response.ok) {
-          removed.push(...batch);
+          outcome.removed.push(...batch);
           continue;
         }
         // The bulk route may refuse a batch for reasons the age split cannot
         // predict; retry those IDs individually before calling them failures.
-        const retried = await deleteIndividually(channelId, batch);
-        removed.push(...retried.removed);
-        failed += retried.failed;
+        mergeOutcomes(outcome, await deleteIndividually(channelId, batch));
       }
-      const singles = await deleteIndividually(channelId, buckets.single);
-      removed.push(...singles.removed);
-      failed += singles.failed;
-      deleted += removed.length;
-      if (removed.length) archive.markMessagesDeleted?.(removed, now());
+      mergeOutcomes(
+        outcome,
+        await deleteIndividually(channelId, buckets.single)
+      );
+
+      // One slower pass over whatever the rate limiter still refused. Without
+      // it a busy channel reports messages as failures that a moment's wait
+      // would have cleared.
+      if (outcome.rateLimited.length) {
+        const pending = outcome.rateLimited;
+        outcome.rateLimited = [];
+        if (rateLimitCooldownMs > 0) await delay(rateLimitCooldownMs);
+        mergeOutcomes(outcome, await deleteIndividually(channelId, pending));
+      }
+
+      // A message Stoat no longer has is not a failure — it is archive drift,
+      // usually from a delete that happened while the bot was offline. Record
+      // it so future cleanups stop selecting an ID that can never be deleted.
+      const settled = [...outcome.removed, ...outcome.alreadyGone];
+      if (settled.length) archive.markMessagesDeleted?.(settled, now());
+      mergeOutcomes(totals, outcome);
     }
+    const deleted = totals.removed.length;
+    const failed =
+      totals.forbidden.length +
+      totals.rateLimited.length +
+      totals.errored.length;
     return {
+      alreadyGone: totals.alreadyGone.length,
+      forbidden: totals.forbidden.length,
+      rateLimited: totals.rateLimited.length,
+      errored: totals.errored.length,
       selected: targeted.length,
       deleted,
       failed,
@@ -722,13 +840,57 @@ export function createModeration(
     };
   }
 
+  // Pacing makes a long cleanup's runtime predictable, so say roughly how long
+  // rather than "this can take a while".
+  function cleanupNotice(entries, targetId, window) {
+    const count = Math.min(entries.length, MAX_CLEANUP_MESSAGES);
+    const cutoff = now() - BULK_DELETE_MAX_AGE_MS;
+    const oneByOne = entries
+      .slice(0, MAX_CLEANUP_MESSAGES)
+      .filter((entry) => (entry.createdAt ?? 0) < cutoff).length;
+    const seconds = Math.round((oneByOne * deletePacingMs) / 1_000);
+    const estimate =
+      seconds < 10
+        ? ""
+        : ` About ${seconds < 90 ? `${seconds} second(s)` : `${Math.round(seconds / 60)} minute(s)`} of that is ${oneByOne} message(s) older than a week, which Stoat only accepts one at a time.`;
+    return (
+      `Deleting up to ${count} observed message(s) from <@${targetId}> within ` +
+      `**${window}**. Deletes are paced to stay inside Stoat's rate limit.${estimate}`
+    );
+  }
+
+  // Says what happened to the messages that were not deleted, because "12
+  // failed" gives a moderator nothing to act on. Only non-zero buckets are
+  // mentioned, so an ordinary clean run still reads as one short sentence.
   function cleanupSummary(result) {
-    const capped = result.skipped
-      ? ` ${result.skipped} more were left untouched by the ${MAX_CLEANUP_MESSAGES}-message safety cap; run the cleanup again to continue.`
-      : "";
+    const notes = [];
+    if (result.alreadyGone) {
+      notes.push(
+        `${result.alreadyGone} were already gone from Stoat and have been reconciled`
+      );
+    }
+    if (result.forbidden) {
+      notes.push(
+        `${result.forbidden} could not be deleted because I lack Manage Messages there`
+      );
+    }
+    if (result.rateLimited) {
+      notes.push(
+        `${result.rateLimited} were still rate limited after a retry; run the cleanup again to finish them`
+      );
+    }
+    if (result.errored) {
+      notes.push(`${result.errored} failed for another reason`);
+    }
+    if (result.skipped) {
+      notes.push(
+        `${result.skipped} more were left untouched by the ${MAX_CLEANUP_MESSAGES}-message safety cap; run the cleanup again to continue`
+      );
+    }
     return (
       `${result.deleted}/${result.selected} known message(s) deleted across ` +
-      `${result.channels} channel(s); ${result.failed} failed.${capped}`
+      `${result.channels} channel(s); ${result.failed} failed.` +
+      (notes.length ? ` ${notes.join(". ")}.` : "")
     );
   }
 
@@ -820,7 +982,7 @@ export function createModeration(
         await respond(
           message.channelId,
           "🧹 Cleaning Up",
-          `Deleting up to ${Math.min(entries.length, MAX_CLEANUP_MESSAGES)} observed message(s) from <@${targetId}> within **${window}**. Messages older than a week are removed one at a time, so this can take a while.`,
+          cleanupNotice(entries, targetId, window),
           "#3498DB"
         );
       }
@@ -1133,7 +1295,7 @@ export function createModeration(
         await respond(
           message.channelId,
           "🧹 Purge Running",
-          `Deleting up to ${Math.min(entries.length, MAX_CLEANUP_MESSAGES)} observed message(s) from <@${parsed.targetId}> within **${parsed.window}**. Messages older than a week are removed one at a time, so this can take a while.`,
+          cleanupNotice(entries, parsed.targetId, parsed.window),
           "#3498DB"
         );
       }

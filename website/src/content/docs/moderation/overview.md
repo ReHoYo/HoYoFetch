@@ -43,6 +43,8 @@ Reaction handlers re-check the reacting moderator's current permission before ap
 
 ## Coverage is stated honestly
 
-History cleanup covers only messages Irminsul observed while archiving was active — up to 29 days, one day short of the archive's own retention. Stoat's bulk-delete route is limited to recent messages, so older messages are removed individually and a single cleanup stops at 2,000 messages. Results report selected, deleted, failed, and skipped counts instead of claiming complete erasure.
+History cleanup covers only messages Irminsul observed while archiving was active — up to 29 days, one day short of the archive's own retention. Stoat's bulk-delete route is limited to recent messages, so older messages are removed individually, paced to stay inside the rate limit, and a single cleanup stops at 2,000 messages.
+
+Results never claim complete erasure. Every message Irminsul could not delete is reported by cause — already gone from Stoat, blocked by a missing Manage Messages permission, still rate limited, or failed outright — so a partial result says what to do about it rather than only how many were lost. A message that Stoat no longer has is reconciled into the archive rather than counted as a failure, so repeat cleanups stop retrying it.
 
 Continue to [Spam reports](/HoYoFetch/moderation/spam-reports/), [Manual actions](/HoYoFetch/moderation/manual-actions/), [Audit log](/HoYoFetch/moderation/audit-log/), or [Automod](/HoYoFetch/moderation/automod/).

@@ -11,6 +11,9 @@ description: Major public Irminsul capabilities and documentation milestones.
 - `/Ban`, `/Kick`, and `/Mute` offer a reaction picker for message cleanup — 1h, 6h, 1d, 3d, 7d, 14d, or 29d — instead of requiring typed delete syntax. `/Purge-User` picks its window the same way before its ✅/❌ confirmation.
 - Only the moderator who ran the command can answer their own picker or confirmation.
 - Extended cleanup coverage from 7 to 29 days, deleting anything older than the bulk-delete limit one message at a time, capped at 2,000 messages per run with the remainder reported.
+- Cleanup results now say _why_ a message was not deleted — already gone from Stoat, missing Manage Messages, still rate limited, or a genuine error — instead of one undifferentiated "failed" count.
+- A message Stoat no longer has is reconciled into the message archive rather than counted as a failure, so repeat cleanups stop retrying an ID that can never be deleted.
+- Individual deletes are paced to stay inside Stoat's rate limit, the retry wait is read from the rate-limit response headers instead of defaulting to one second, and anything still throttled gets one slower retry before being reported.
 
 ## Unreleased — Wuthering Waves
 
