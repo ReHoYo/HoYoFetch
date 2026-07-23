@@ -17,14 +17,12 @@ const {
   diffFields,
   emitUserIdentityUpdates,
   formatSuspects,
-  handleAuditLogCommand,
   hydrateAuditMemberCache,
   parseChannelArg,
   snapshotMessage,
   truncate,
 } = await import("../auditlog.js");
-const { disableAuditLog, enableAuditLog, getAuditLogChannel } =
-  await import("../store.js");
+const { disableAuditLog, enableAuditLog } = await import("../store.js");
 const {
   buildAuditBulkDeleteEmbed,
   buildAuditMessageDeleteEmbed,
@@ -303,29 +301,6 @@ test("parseChannelArg preserves valid bare and mentioned ULIDs", () => {
   assert.equal(parseChannelArg(`<#${CHANNEL_ID}>`), CHANNEL_ID);
   assert.equal(parseChannelArg("not-a-channel"), null);
   assert.equal(parseChannelArg("<#01HZY3M6Q8V7N2K4J5T9W0XABI>"), null);
-});
-
-test("unified AuditLog command validates and stores a case-preserved target", () => {
-  const channel = {
-    id: CHANNEL_ID,
-    serverId: "SERVER",
-    type: "TextChannel",
-    havePermission: (permission) => permission === "SendMessage",
-  };
-  const client = { channels: new Map([[CHANNEL_ID, channel]]) };
-  const message = {
-    server: { id: "SERVER" },
-    channel,
-    channelId: CHANNEL_ID,
-  };
-
-  const enabled = handleAuditLogCommand(client, message, [CHANNEL_ID]);
-  assert.equal(enabled.title, "✅ Audit Log Enabled");
-  assert.equal(getAuditLogChannel("SERVER"), CHANNEL_ID);
-
-  const disabled = handleAuditLogCommand(client, message, ["off"]);
-  assert.equal(disabled.title, "🔕 Audit Log Disabled");
-  assert.equal(getAuditLogChannel("SERVER"), null);
 });
 
 test("formatSuspects caps labels and degrades honestly", () => {

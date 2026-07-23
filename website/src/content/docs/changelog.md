@@ -27,6 +27,7 @@ description: Major public Irminsul capabilities and documentation milestones.
 ### Audit log, evidence, and privacy
 
 - Added `/AuditLog` configuration and the compatibility `/Enable-AuditLog` commands to provide a protected server activity log where Stoat has no native equivalent.
+- Audit-log enable, move, and disable requests now require a ten-minute one-time code sent exclusively to Enka#4961. Status, diagnostics, and no-op requests remain immediate, while failed or stale approvals leave configuration unchanged.
 - Added raw gateway handling and a bounded 30-day message archive so edits, single deletes, and bulk deletes can retain content the bot previously observed.
 - Added `/Test-AuditLog` to exercise protected delivery and report archive, evidence, settings-baseline, and webhook coverage.
 - Added bounded local attachment capture so qualifying files can be re-uploaded after their original message disappears.

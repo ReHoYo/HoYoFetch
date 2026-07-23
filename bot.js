@@ -39,7 +39,6 @@ import {
   buildCodesEmbed,
   buildNoCodesEmbed,
   buildStatusEmbed,
-  buildAuditLogEnabledEmbed,
 } from "./embeds.js";
 import {
   enableChannel,
@@ -49,9 +48,6 @@ import {
   detectNewCodes,
   seedKnownCodes,
   hasSeenGame,
-  enableAuditLog,
-  disableAuditLog,
-  isAuditLogEnabled,
 } from "./store.js";
 import {
   auditAlias,
@@ -65,11 +61,12 @@ import {
   SingleFlight,
 } from "./security.js";
 import {
-  handleAuditLogCommand,
   initAuditLog,
   startUnbanPolling,
   runAuditLogTest,
 } from "./auditlog.js";
+import { createEnkaApprovalGate } from "./approval-gate.js";
+import { createAuditLogConfiguration } from "./audit-log-configuration.js";
 import { createTamperProtection } from "./tamper-protection.js";
 import { createAutomod } from "./automod.js";
 import { createModeration } from "./moderation.js";
@@ -116,11 +113,15 @@ const helpMenu = createHelpMenu(client, {
   request: apiRequest,
   prefix: CONFIG.prefix,
 });
+const approvalGate = createEnkaApprovalGate(client, {
+  request: apiRequest,
+});
 const channelExclusion = createChannelExclusion(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
   sendProtected: tamperProtection.sendProtected,
   request: apiRequest,
   prefix: CONFIG.prefix,
+  approvalGate,
 });
 
 // ── Audit log ───────────────────────────────────────
@@ -129,6 +130,13 @@ const auditLog = initAuditLog(client, {
   request: apiRequest,
   shouldExcludeMessage: spamReporter.shouldExcludeMessage,
   shouldExcludeMessageDelete: spamReporter.shouldExcludeMessageDelete,
+});
+const auditLogConfiguration = createAuditLogConfiguration(client, {
+  send: (channelId, data) => safeSend({ id: channelId }, data),
+  sendProtected: tamperProtection.sendProtected,
+  approvalGate,
+  prefix: CONFIG.prefix,
+  configurationChanged: (serverId) => auditLog.configurationChanged(serverId),
 });
 
 // ── Error handler ──────────────────────────────────
@@ -157,7 +165,7 @@ client.on("ready", async () => {
   console.log(`   Interval: every ${CONFIG.fetchIntervalMinutes} min`);
   console.log(`   Enabled channels: ${getEnabledChannels().length}`);
 
-  channelExclusion.resolveApprover();
+  approvalGate.resolveApprover();
   channelExclusion.startDigest();
 
   // Seed known codes on first boot so we don't spam existing codes
@@ -189,8 +197,8 @@ client.on("messageCreate", async (message) => {
   // Reject excessively long messages early to avoid unnecessary processing
   if (raw.length > 500) return;
 
-  // Enka privacy approvals are accepted in DMs without a command prefix.
-  if (await channelExclusion.handleDirectMessage(message)) return;
+  // Enka approvals for protected actions are accepted in DMs without a prefix.
+  if (await approvalGate.handleDirectMessage(message)) return;
 
   // Must start with the prefix
   if (!raw.toLowerCase().startsWith(CONFIG.prefix.toLowerCase())) return;
@@ -317,13 +325,13 @@ client.on("messageCreate", async (message) => {
 
     // ── Enable-AuditLog ──────────────────────────
     if (cmd === "enable-auditlog" || cmd === "enableauditlog") {
-      await handleEnableAuditLog(message);
+      await auditLogConfiguration.handleLegacyEnable(message);
       return;
     }
 
     // ── Disable-AuditLog ─────────────────────────
     if (cmd === "disable-auditlog" || cmd === "disableauditlog") {
-      await handleDisableAuditLog(message);
+      await auditLogConfiguration.handleLegacyDisable(message);
       return;
     }
 
@@ -353,17 +361,7 @@ client.on("messageCreate", async (message) => {
 
     // ── AuditLog [status|here|#channel|off] ─────────
     if (cmd === "auditlog") {
-      const embed = handleAuditLogCommand(
-        client,
-        message,
-        cmdArgs,
-        CONFIG.prefix
-      );
-      await safeSend(message.channel, { embeds: [embed] });
-      const auditAction = cmdArgs.join(" ").trim().toLowerCase();
-      if (auditAction && auditAction !== "status") {
-        await auditLog.configurationChanged(message.server.id);
-      }
+      await auditLogConfiguration.handleCommand(message, cmdArgs);
       return;
     }
 
@@ -573,63 +571,6 @@ async function handleDisableFetch(message) {
       ),
     ],
   });
-}
-
-async function handleEnableAuditLog(message) {
-  const result = enableAuditLog(message.server.id, message.channelId);
-
-  if (result.wasEnabled && !result.changed) {
-    await safeSend(message.channel, {
-      embeds: [
-        buildStatusEmbed(
-          "ℹ️ Already Enabled",
-          "Audit logging is already active in this channel.",
-          "#3498DB"
-        ),
-      ],
-    });
-    await auditLog.configurationChanged(message.server.id);
-    return;
-  }
-
-  await safeSend(message.channel, {
-    embeds: [
-      buildAuditLogEnabledEmbed(CONFIG.prefix, {
-        moved: result.wasEnabled,
-        previousChannelId: result.previousChannelId,
-      }),
-    ],
-  });
-  await auditLog.configurationChanged(message.server.id);
-}
-
-async function handleDisableAuditLog(message) {
-  const serverId = message.server.id;
-
-  if (!isAuditLogEnabled(serverId)) {
-    await safeSend(message.channel, {
-      embeds: [
-        buildStatusEmbed(
-          "ℹ️ Already Disabled",
-          "Audit logging is not active in this server.",
-          "#3498DB"
-        ),
-      ],
-    });
-    return;
-  }
-
-  disableAuditLog(serverId);
-  await safeSend(message.channel, {
-    embeds: [
-      buildStatusEmbed(
-        "🔕 Audit Log Disabled",
-        "This server will no longer receive audit log messages.",
-        "#E67E22"
-      ),
-    ],
-  });
-  await auditLog.configurationChanged(serverId);
 }
 
 async function handleTestAuditLog(message) {

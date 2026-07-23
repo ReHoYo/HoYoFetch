@@ -63,6 +63,8 @@ Before using `/Ban`, `/Kick`, `/Mute`, `/Purge-User`, or `/Automod release`, con
 /AuditLog here
 ```
 
+Irminsul sends this enable request's one-time code exclusively to **Enka#4961**. Audit logging starts only after Enka approves in DM or releases the code for `/AuditLog confirm CODE`. If Enka cannot be reached, the request fails closed and logging remains off.
+
 Then verify it through the real delivery path:
 
 ```text

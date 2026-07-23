@@ -2,21 +2,17 @@
 // ────────────────────────────────────────────────────────────────────
 // Listens to every moderation-relevant revolt.js event we can and relays
 // a formatted embed to whichever channel an admin/mod enabled via
-// /enable-auditlog. See buildAuditLogEnabledEmbed() in embeds.js for the
-// list of things the platform simply does not report (actor attribution,
-// kick vs leave, etc.) — those limits are inherent to the gateway, not
-// bugs in this module.
+// /enable-auditlog. Audit-log configuration is gated separately in
+// audit-log-configuration.js. Platform limits around actor attribution,
+// kick vs leave, and similar events are inherent to the gateway.
 import {
   buildAuditEmbed,
   buildAuditBulkDeleteEmbed,
-  buildAuditLogEnabledEmbed,
   buildAuditMemberEmbed,
   buildAuditMessageDeleteEmbed,
   buildAuditMessageEditEmbed,
-  buildStatusEmbed,
 } from "./embeds.js";
 import {
-  enableAuditLog,
   getAuditLogChannel,
   getAuditLogServers,
   getKnownBans,
@@ -328,99 +324,6 @@ export async function computeSuspects(client, channel, authorId) {
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b)),
   };
-}
-
-/**
- * Handle the unified /AuditLog command. The command router is responsible for
- * enforcing Manage Server before this function is called.
- */
-export function handleAuditLogCommand(
-  client,
-  message,
-  args = [],
-  prefix = "/"
-) {
-  const serverId = message.server?.id;
-  const command = `${prefix}AuditLog`;
-  if (!serverId) {
-    return buildStatusEmbed(
-      "🔒 Server Only",
-      "Audit logging can only be configured inside a server.",
-      "#E74C3C"
-    );
-  }
-
-  const value = args.join(" ").trim();
-  const action = value.toLowerCase();
-  if (!value || action === "status") {
-    const channelId = getAuditLogChannel(serverId);
-    return channelId
-      ? buildStatusEmbed(
-          "📋 Audit Log Status",
-          `Audit logging is active in <#${channelId}>.\nUse \`${command} here\`, \`${command} #channel\`, or \`${command} off\` to change it.`,
-          "#3498DB"
-        )
-      : buildStatusEmbed(
-          "📋 Audit Log Status",
-          `Audit logging is off. Use \`${command} here\` or \`${command} #channel\` to enable it.`,
-          "#808080"
-        );
-  }
-
-  if (action === "off") {
-    const wasEnabled = isAuditLogEnabled(serverId);
-    disableAuditLog(serverId);
-    return buildStatusEmbed(
-      wasEnabled ? "🔕 Audit Log Disabled" : "ℹ️ Audit Log Already Off",
-      wasEnabled
-        ? "This server will no longer receive audit log messages."
-        : "Audit logging was already off for this server.",
-      wasEnabled ? "#E67E22" : "#3498DB"
-    );
-  }
-
-  const channelId =
-    action === "here" ? message.channelId : parseChannelArg(value);
-  if (!channelId) {
-    return buildStatusEmbed(
-      "⚠️ Invalid Audit Log Channel",
-      `Use \`${command} here\`, \`${command} #channel\`, \`${command} CHANNEL_ID\`, \`${command} status\`, or \`${command} off\`.`,
-      "#E74C3C"
-    );
-  }
-
-  const channel = client.channels.get(channelId);
-  let canSend = false;
-  try {
-    canSend = Boolean(channel?.havePermission?.("SendMessage"));
-  } catch {
-    canSend = false;
-  }
-  if (
-    !channel ||
-    channel.serverId !== serverId ||
-    channel.type !== "TextChannel" ||
-    !canSend
-  ) {
-    return buildStatusEmbed(
-      "⚠️ Unavailable Audit Log Channel",
-      "Choose a text channel in this server where I have **Send Messages** permission.",
-      "#E74C3C"
-    );
-  }
-
-  const result = enableAuditLog(serverId, channelId);
-  if (result.wasEnabled && !result.changed) {
-    return buildStatusEmbed(
-      "ℹ️ Already Enabled",
-      `Audit logging is already active in <#${channelId}>.`,
-      "#3498DB"
-    );
-  }
-  return buildAuditLogEnabledEmbed(prefix, {
-    moved: result.wasEnabled,
-    previousChannelId: result.previousChannelId,
-  });
 }
 
 function formatUser(client, userId) {

@@ -18,7 +18,7 @@ Irminsul uses Stoat's **effective permissions**, not role names. A role called â
 
 Recognized moderator capabilities for management commands are **Kick Members**, **Ban Members**, **Timeout Members**, or effective **Manage Messages** in the current channel. The server owner and members with **Manage Server** also qualify.
 
-`/Exclude-Channel` uses the recognized-moderator policy shown above. Adding or removing an exclusion still requires the separate one-time code sent exclusively to **Enka#4961**.
+`/AuditLog` configuration and `/Exclude-Channel` use the recognized-moderator policy shown above. Enabling, moving, or disabling the audit log and adding or removing an exclusion still require a separate one-time code sent exclusively to **Enka#4961**. `/AuditLog status` and `/Test-AuditLog` are read-only and remain immediate.
 
 `/Report-Spam` is member-accessible, but Irminsul itself must have freshly verified **Manage Messages** in the source channel. This lets it remove the sensitive invocation before parsing or recording the report.
 

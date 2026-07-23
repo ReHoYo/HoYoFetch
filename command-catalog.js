@@ -207,7 +207,7 @@ export const COMMAND_CATALOG = Object.freeze([
       "disableauditlog",
     ],
     access: "fetch_manager",
-    syntax: "/AuditLog [status|here|#channel|off]",
+    syntax: "/AuditLog [action]",
     summary: "View or configure the protected audit log for this server.",
     help: "Log messages, moderation, username changes, and server settings _(admins/mods only)_",
     permission:
@@ -217,9 +217,13 @@ export const COMMAND_CATALOG = Object.freeze([
       "/AuditLog here",
       "/AuditLog #moderation-log",
       "/AuditLog off",
+      "/AuditLog confirm 123456",
+      "/AuditLog cancel",
     ],
     notes: [
       "The older /Enable-AuditLog and /Disable-AuditLog forms remain accepted for compatibility.",
+      "Enabling, moving, or disabling audit logging requires a one-time code approved by Enka#4961.",
+      "Status and /Test-AuditLog remain read-only and do not require approval.",
     ],
   },
   {

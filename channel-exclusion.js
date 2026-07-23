@@ -1,5 +1,12 @@
-// channel-exclusion.js — Enka-approved 2FA for audit-log message privacy
-import { createHash, randomBytes, randomInt, timingSafeEqual } from "crypto";
+// channel-exclusion.js — Enka-approved privacy exclusions for audit logging
+import { randomBytes } from "crypto";
+import {
+  APPROVAL_CHALLENGE_TTL_MS,
+  APPROVAL_MAX_ATTEMPTS,
+  createEnkaApprovalGate,
+  ENKA_APPROVER_TAG,
+  ENKA_APPROVER_USER_ID,
+} from "./approval-gate.js";
 import { parseChannelArg } from "./auditlog.js";
 import { buildAuditEmbed, buildStatusEmbed } from "./embeds.js";
 import { deleteEvidence } from "./evidence-store.js";
@@ -12,17 +19,13 @@ import {
   isChannelExcluded,
   removeChannelExclusion,
 } from "./store.js";
-import {
-  auditAlias,
-  CommandRateLimiter,
-  isSafeId,
-  safeErrorSummary,
-} from "./security.js";
+import { auditAlias, isSafeId, safeErrorSummary } from "./security.js";
 
-export const EXCLUSION_CHALLENGE_TTL_MS = 10 * 60 * 1_000;
-export const EXCLUSION_MAX_ATTEMPTS = 3;
-export const ENKA_APPROVER_USER_ID = "01H2VRZSN1AY7QASPNKXMP52HZ";
-export const ENKA_APPROVER_TAG = "Enka#4961";
+export { ENKA_APPROVER_TAG, ENKA_APPROVER_USER_ID };
+export const EXCLUSION_CHALLENGE_TTL_MS = APPROVAL_CHALLENGE_TTL_MS;
+export const EXCLUSION_MAX_ATTEMPTS = APPROVAL_MAX_ATTEMPTS;
+
+const CHALLENGE_KIND = "channel_exclusion";
 const DIGEST_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 
 const DEFAULT_STORE = Object.freeze({
@@ -33,14 +36,6 @@ const DEFAULT_STORE = Object.freeze({
   isChannelExcluded,
   removeChannelExclusion,
 });
-
-function hashCode(code, salt) {
-  return createHash("sha256").update(salt).update(String(code)).digest();
-}
-
-function defaultCodeFactory() {
-  return String(randomInt(0, 1_000_000)).padStart(6, "0");
-}
 
 function defaultRequestIdFactory() {
   return `CE${randomBytes(8).toString("hex").toUpperCase()}`;
@@ -60,12 +55,6 @@ function terminalTitle(action) {
     : "🔓 Privacy Exclusion Removed";
 }
 
-/**
- * Create the channel-exclusion coordinator.
- *
- * Pending challenges are deliberately process-local: restarting the bot
- * invalidates every outstanding code.
- */
 export function createChannelExclusion(
   client,
   {
@@ -76,9 +65,10 @@ export function createChannelExclusion(
     store = DEFAULT_STORE,
     logger = console,
     now = Date.now,
-    codeFactory = defaultCodeFactory,
+    codeFactory,
     requestIdFactory = defaultRequestIdFactory,
-    approverUserId = ENKA_APPROVER_USER_ID,
+    approverUserId,
+    approvalGate,
     purgeArchive = purgeChannelFromArchive,
     removeEvidence = deleteEvidence,
     scheduleTimeout = setTimeout,
@@ -91,15 +81,20 @@ export function createChannelExclusion(
   if (typeof sendProtected !== "function") {
     throw new TypeError("Channel exclusions require a protected sender.");
   }
-  if (typeof request !== "function") {
+  if (typeof request !== "function" && !approvalGate) {
     throw new TypeError("Channel exclusions require an HTTP requester.");
   }
 
-  const pendingByServer = new Map();
-  const dmRateLimiter = new CommandRateLimiter();
-  const approverId = isSafeId(approverUserId) ? approverUserId : null;
-  let approverWarningLogged = false;
-  let approverDmId = null;
+  const gate =
+    approvalGate ??
+    createEnkaApprovalGate(client, {
+      request,
+      logger,
+      now,
+      ...(codeFactory ? { codeFactory } : {}),
+      ...(approverUserId ? { approverUserId } : {}),
+      scheduleTimeout,
+    });
   let digestStarted = false;
 
   function commandName() {
@@ -144,104 +139,10 @@ export function createChannelExclusion(
     }
   }
 
-  function resolveApprover() {
-    if (!approverId && !approverWarningLogged) {
-      approverWarningLogged = true;
-      logger.warn?.(
-        "channel-exclusion: Enka approver id is invalid; mutations are disabled"
-      );
-    }
-    return approverId;
-  }
-
-  async function getApproverDmId() {
-    if (isSafeId(approverDmId)) return approverDmId;
-    if (!isSafeId(approverId)) return null;
-    const response = await request("GET", `/users/${approverId}/dm`);
-    const dmId = response?.data?._id;
-    if (!response?.ok || !isSafeId(dmId)) return null;
-    approverDmId = dmId;
-    return approverDmId;
-  }
-
-  async function sendApprover(payload) {
-    try {
-      const dmId = await getApproverDmId();
-      if (!dmId) return false;
-      const response = await request("POST", `/channels/${dmId}/messages`, {
-        ...(payload.embeds?.length && !payload.content ? { content: " " } : {}),
-        ...payload,
-      });
-      return Boolean(response?.ok && isSafeId(response?.data?._id));
-    } catch (error) {
-      logger.warn?.(
-        `channel-exclusion: Enka approval DM failed ${safeErrorSummary(error)}`
-      );
-      return false;
-    }
-  }
-
-  function codeMatches(challenge, code) {
-    if (!/^\d{6}$/.test(String(code ?? ""))) return false;
-    const actual = hashCode(code, challenge.salt);
-    return (
-      actual.length === challenge.codeHash.length &&
-      timingSafeEqual(actual, challenge.codeHash)
-    );
-  }
-
-  function clearPending(challenge) {
-    if (pendingByServer.get(challenge.serverId) !== challenge) return;
-    pendingByServer.delete(challenge.serverId);
-    if (challenge.timeout) clearTimeout(challenge.timeout);
-  }
-
-  async function notifyTerminal(challenge, title, description, colour) {
-    await sendApprover({
+  async function notifyTerminal(title, description, colour) {
+    await gate.sendApprover({
       embeds: [buildStatusEmbed(title, description, colour)],
     });
-  }
-
-  async function expireChallenge(challenge) {
-    if (pendingByServer.get(challenge.serverId) !== challenge) return false;
-    if (challenge.expiresAt > now()) return false;
-    clearPending(challenge);
-    await sendAccountability(
-      challenge,
-      "⌛ Privacy Exclusion Request Expired",
-      [
-        `**Request:** \`${challenge.requestId}\``,
-        `**Action:** ${challenge.action}`,
-        `**Channel:** ${channelLabel(challenge.channelId)}`,
-        `**Requested by:** ${actorLabel(challenge.requestedBy)}`,
-        "No exclusion state was changed.",
-      ],
-      "#E67E22"
-    );
-    await notifyTerminal(
-      challenge,
-      "⌛ Privacy Request Expired",
-      `Request \`${challenge.requestId}\` for ${channelLabel(
-        challenge.channelId
-      )} expired without changing exclusion state.`,
-      "#E67E22"
-    );
-    return true;
-  }
-
-  async function expireDueChallenges() {
-    for (const challenge of [...pendingByServer.values()]) {
-      await expireChallenge(challenge);
-    }
-  }
-
-  function armExpiry(challenge) {
-    const timeout = scheduleTimeout(
-      () => void expireChallenge(challenge),
-      Math.max(0, challenge.expiresAt - now())
-    );
-    timeout?.unref?.();
-    challenge.timeout = timeout;
   }
 
   async function resolveTarget(serverId, token, message) {
@@ -271,7 +172,8 @@ export function createChannelExclusion(
   async function status(message) {
     const serverId = serverIdFrom(message);
     const excluded = store.getExcludedChannels(serverId);
-    const pending = pendingByServer.get(serverId);
+    const pending = gate.getPending(serverId);
+    const privacyPending = pending?.kind === CHALLENGE_KIND ? pending : null;
     const lines = excluded.length
       ? excluded.map(
           (record) =>
@@ -280,13 +182,15 @@ export function createChannelExclusion(
             )}:R>`
         )
       : ["- *(none)*"];
-    if (pending) {
+    if (privacyPending) {
       lines.push(
         "",
-        `**Pending:** ${pending.action} ${channelLabel(
-          pending.channelId
-        )} requested by ${actorLabel(pending.requestedBy)}`
+        `**Pending:** ${privacyPending.data.action} ${channelLabel(
+          privacyPending.data.channelId
+        )} requested by ${actorLabel(privacyPending.requestedBy)}`
       );
+    } else if (pending) {
+      lines.push("", `**Pending protected action:** \`${pending.requestId}\``);
     }
     await respond(
       channelIdFrom(message),
@@ -294,14 +198,216 @@ export function createChannelExclusion(
       lines.join("\n"),
       excluded.length ? "#9B59B6" : "#3498DB"
     );
-    return { outcome: "status", excluded, pending: pending ?? null };
+    return { outcome: "status", excluded, pending: privacyPending };
+  }
+
+  async function onExpired(challenge) {
+    const { action, channelId } = challenge.data;
+    await sendAccountability(
+      challenge,
+      "⌛ Privacy Exclusion Request Expired",
+      [
+        `**Request:** \`${challenge.requestId}\``,
+        `**Action:** ${action}`,
+        `**Channel:** ${channelLabel(channelId)}`,
+        `**Requested by:** ${actorLabel(challenge.requestedBy)}`,
+        "No exclusion state was changed.",
+      ],
+      "#E67E22"
+    );
+    await notifyTerminal(
+      "⌛ Privacy Request Expired",
+      `Request \`${challenge.requestId}\` for ${channelLabel(
+        channelId
+      )} expired without changing exclusion state.`,
+      "#E67E22"
+    );
+  }
+
+  async function onWrongCode(_challenge, attemptsRemaining, responseChannelId) {
+    if (!isSafeId(responseChannelId)) return;
+    await respond(
+      responseChannelId,
+      "⚠️ Incorrect Approval Code",
+      `${attemptsRemaining} attempt(s) remain.`,
+      "#E67E22"
+    );
+  }
+
+  async function onAttemptsExhausted(challenge, responseChannelId) {
+    await sendAccountability(
+      challenge,
+      "🛑 Privacy Request Attempts Exhausted",
+      [
+        `**Request:** \`${challenge.requestId}\``,
+        `**Channel:** ${channelLabel(challenge.data.channelId)}`,
+        `**Requested by:** ${actorLabel(challenge.requestedBy)}`,
+        `**Attempts:** ${EXCLUSION_MAX_ATTEMPTS}`,
+        "No exclusion state was changed.",
+      ],
+      "#E74C3C"
+    );
+    await notifyTerminal(
+      "🛑 Privacy Request Cancelled",
+      `Request \`${challenge.requestId}\` was destroyed after ${EXCLUSION_MAX_ATTEMPTS} incorrect code attempts.`,
+      "#E74C3C"
+    );
+    if (isSafeId(responseChannelId)) {
+      await respond(
+        responseChannelId,
+        "🛑 Too Many Incorrect Codes",
+        "The pending request was destroyed. Start a new request to try again.",
+        "#E74C3C"
+      );
+    }
+  }
+
+  async function onDenied(challenge) {
+    const { action, channelId } = challenge.data;
+    await sendAccountability(
+      challenge,
+      "🚫 Privacy Exclusion Request Denied",
+      [
+        `**Request:** \`${challenge.requestId}\``,
+        `**Action:** ${action}`,
+        `**Channel:** ${channelLabel(channelId)}`,
+        `**Requested by:** ${actorLabel(challenge.requestedBy)}`,
+        `**Denied by:** ${ENKA_APPROVER_TAG}`,
+        "No exclusion state was changed.",
+      ],
+      "#E74C3C"
+    );
+    await notifyTerminal(
+      "🚫 Privacy Request Denied",
+      `Request \`${challenge.requestId}\` was denied. No exclusion state changed.`,
+      "#E74C3C"
+    );
+  }
+
+  async function onCancelled(challenge, actorId) {
+    await sendAccountability(
+      challenge,
+      "🚫 Privacy Exclusion Request Cancelled",
+      [
+        `**Request:** \`${challenge.requestId}\``,
+        `**Channel:** ${channelLabel(challenge.data.channelId)}`,
+        `**Cancelled by:** ${actorLabel(actorId)}`,
+        "No exclusion state was changed.",
+      ],
+      "#E67E22"
+    );
+    await notifyTerminal(
+      "🚫 Privacy Request Cancelled",
+      `Request \`${challenge.requestId}\` was cancelled by ${actorLabel(
+        actorId
+      )}.`,
+      "#E67E22"
+    );
+  }
+
+  async function onApproved(challenge, approvedBy, responseChannelId) {
+    const { action, channelId } = challenge.data;
+    const stateStillValid =
+      action === "exclude"
+        ? !store.isChannelExcluded(channelId)
+        : store.isChannelExcluded(channelId);
+    if (!stateStillValid) {
+      await sendAccountability(
+        challenge,
+        "⚠️ Privacy Request Became Stale",
+        [
+          `**Request:** \`${challenge.requestId}\``,
+          `**Channel:** ${channelLabel(channelId)}`,
+          "The exclusion state changed before approval. No additional change was made.",
+        ],
+        "#E67E22"
+      );
+      await notifyTerminal(
+        "⚠️ Privacy Request Became Stale",
+        `Request \`${challenge.requestId}\` no longer matches current state. Start a fresh request if needed.`,
+        "#E67E22"
+      );
+      if (isSafeId(responseChannelId)) {
+        await respond(
+          responseChannelId,
+          "⚠️ Privacy Request Became Stale",
+          "The exclusion state changed before approval. Start a fresh request.",
+          "#E67E22"
+        );
+      }
+      return { outcome: "stale" };
+    }
+
+    let purgedEvidence = 0;
+    if (action === "exclude") {
+      store.addChannelExclusion({
+        channelId,
+        serverId: challenge.serverId,
+        excludedAt: now(),
+        requestedBy: challenge.requestedBy,
+        approvedBy,
+        requestId: challenge.requestId,
+      });
+      const paths = purgeArchive(channelId);
+      for (const path of paths) {
+        if (removeEvidence(path)) purgedEvidence += 1;
+      }
+    } else {
+      store.removeChannelExclusion(channelId);
+    }
+
+    const title = terminalTitle(action);
+    const description =
+      action === "exclude"
+        ? `${channelLabel(
+            channelId
+          )} will no longer archive or relay message content. Existing archived content and ${purgedEvidence} evidence file(s) were purged.`
+        : `${channelLabel(
+            channelId
+          )} will resume message-content logging for new activity.`;
+    await sendAccountability(
+      challenge,
+      title,
+      [
+        `**Request:** \`${challenge.requestId}\``,
+        `**Channel:** ${channelLabel(channelId)}`,
+        `**Requested by:** ${actorLabel(challenge.requestedBy)}`,
+        `**Approved by:** ${ENKA_APPROVER_TAG} (<@${approvedBy}>)`,
+        description,
+      ],
+      action === "exclude" ? "#9B59B6" : "#2ECC71"
+    );
+    await notifyTerminal(
+      title,
+      `Request \`${challenge.requestId}\` completed. ${description}`,
+      action === "exclude" ? "#9B59B6" : "#2ECC71"
+    );
+    if (isSafeId(responseChannelId)) {
+      await respond(
+        responseChannelId,
+        title,
+        description,
+        action === "exclude" ? "#9B59B6" : "#2ECC71"
+      );
+    }
+    logger.log?.(
+      `🔐  channel-exclusion ${action} request=${auditAlias(
+        challenge.requestId
+      )} server=${auditAlias(challenge.serverId)} channel=${auditAlias(
+        channelId
+      )}`
+    );
+    return {
+      outcome: action === "exclude" ? "excluded" : "removed",
+      purgedEvidence,
+    };
   }
 
   async function requestChange(message, action, targetToken) {
     const serverId = serverIdFrom(message);
     const requesterId = message.authorId;
     const responseChannelId = channelIdFrom(message);
-    if (!isSafeId(resolveApprover())) {
+    if (!isSafeId(gate.resolveApprover())) {
       await respond(
         responseChannelId,
         "🔒 Approver Unavailable",
@@ -320,19 +426,6 @@ export function createChannelExclusion(
         "#E74C3C"
       );
       return { outcome: "audit_log_required" };
-    }
-
-    const existingPending = pendingByServer.get(serverId);
-    if (existingPending) {
-      await respond(
-        responseChannelId,
-        "⏳ Privacy Request Already Pending",
-        `Request \`${existingPending.requestId}\` already targets ${channelLabel(
-          existingPending.channelId
-        )}. Approve, deny, cancel, or wait for it to expire first.`,
-        "#E67E22"
-      );
-      return { outcome: "pending_exists" };
     }
 
     const target = await resolveTarget(serverId, targetToken, message);
@@ -371,60 +464,72 @@ export function createChannelExclusion(
       return { outcome: "no_change" };
     }
 
-    const code = codeFactory();
-    if (!/^\d{6}$/.test(code)) {
-      throw new Error("The exclusion code factory returned an invalid code.");
-    }
-    const salt = randomBytes(16);
-    const challenge = {
+    const result = await gate.requestChallenge({
+      kind: CHALLENGE_KIND,
       requestId: requestIdFactory(),
       serverId,
-      channelId: target.id,
-      action,
       requestedBy: requesterId,
       requestChannelId: responseChannelId,
-      codeHash: hashCode(code, salt),
-      salt,
-      expiresAt: now() + EXCLUSION_CHALLENGE_TTL_MS,
-      attempts: 0,
-      timeout: null,
-    };
-    pendingByServer.set(serverId, challenge);
-
-    const delivered = await sendApprover({
-      embeds: [
-        buildStatusEmbed(
-          action === "exclude"
-            ? "🔐 Approve Channel Privacy Exclusion"
-            : "🔓 Approve Privacy Exclusion Removal",
-          [
-            `**Request:** \`${challenge.requestId}\``,
-            `**Server:** ${serverLabel(serverId)}`,
-            `**Channel:** ${channelLabel(target.id)}`,
-            `**Requested by:** ${actorLabel(requesterId)}`,
-            `**Action:** ${action}`,
-            `**One-time code:** \`${code}\``,
-            "",
-            `Reply \`approve ${code}\`, \`deny ${code}\`, or just \`${code}\` to approve. The requester may also use \`${commandName()} confirm ${code}\` in the server.`,
-            "This code expires in 10 minutes after 3 incorrect attempts.",
-          ].join("\n"),
-          "#9B59B6"
-        ),
-      ],
+      data: { action, channelId: target.id },
+      buildDmPayload: (challenge, code) => ({
+        embeds: [
+          buildStatusEmbed(
+            action === "exclude"
+              ? "🔐 Approve Channel Privacy Exclusion"
+              : "🔓 Approve Privacy Exclusion Removal",
+            [
+              `**Request:** \`${challenge.requestId}\``,
+              `**Server:** ${serverLabel(serverId)}`,
+              `**Channel:** ${channelLabel(target.id)}`,
+              `**Requested by:** ${actorLabel(requesterId)}`,
+              `**Action:** ${action}`,
+              `**One-time code:** \`${code}\``,
+              "",
+              `Reply \`approve ${code}\`, \`deny ${code}\`, or just \`${code}\` to approve. A recognized moderator may also use \`${commandName()} confirm ${code}\` in the server.`,
+              "This code expires in 10 minutes after 3 incorrect attempts.",
+            ].join("\n"),
+            "#9B59B6"
+          ),
+        ],
+      }),
+      onApproved,
+      onDenied,
+      onExpired,
+      onCancelled,
+      onWrongCode,
+      onAttemptsExhausted,
     });
 
-    if (!delivered) {
-      clearPending(challenge);
+    if (result.outcome === "pending_exists") {
+      const pending = result.pending;
+      await respond(
+        responseChannelId,
+        "⏳ Protected Request Already Pending",
+        `Request \`${pending.requestId}\` is already awaiting approval. Approve, deny, cancel, or wait for it to expire first.`,
+        "#E67E22"
+      );
+      return result;
+    }
+    if (result.outcome === "approver_unavailable") {
+      await respond(
+        responseChannelId,
+        "🔒 Approver Unavailable",
+        `${ENKA_APPROVER_TAG} is unavailable, so no privacy state changed.`,
+        "#E74C3C"
+      );
+      return result;
+    }
+    if (result.outcome === "dm_failed") {
       await respond(
         responseChannelId,
         "⚠️ Approval DM Failed",
         `${ENKA_APPROVER_TAG} could not be reached, so no request was retained and no exclusion state changed.`,
         "#E74C3C"
       );
-      return { outcome: "dm_failed" };
+      return result;
     }
 
-    armExpiry(challenge);
+    const challenge = result.challenge;
     await sendAccountability(
       challenge,
       "🔐 Privacy Exclusion Requested",
@@ -446,209 +551,71 @@ export function createChannelExclusion(
     return { outcome: "requested", requestId: challenge.requestId };
   }
 
-  async function attemptsExhausted(challenge, responseChannelId) {
-    clearPending(challenge);
-    await sendAccountability(
-      challenge,
-      "🛑 Privacy Request Attempts Exhausted",
-      [
-        `**Request:** \`${challenge.requestId}\``,
-        `**Channel:** ${channelLabel(challenge.channelId)}`,
-        `**Requested by:** ${actorLabel(challenge.requestedBy)}`,
-        `**Attempts:** ${EXCLUSION_MAX_ATTEMPTS}`,
-        "No exclusion state was changed.",
-      ],
-      "#E74C3C"
-    );
-    await notifyTerminal(
-      challenge,
-      "🛑 Privacy Request Cancelled",
-      `Request \`${challenge.requestId}\` was destroyed after ${EXCLUSION_MAX_ATTEMPTS} incorrect code attempts.`,
-      "#E74C3C"
-    );
-    if (isSafeId(responseChannelId)) {
-      await respond(
-        responseChannelId,
-        "🛑 Too Many Incorrect Codes",
-        "The pending request was destroyed. Start a new request to try again.",
-        "#E74C3C"
-      );
-    }
-    return { outcome: "attempts_exhausted" };
-  }
-
-  async function rejectWrongCode(challenge, responseChannelId) {
-    challenge.attempts += 1;
-    if (challenge.attempts >= EXCLUSION_MAX_ATTEMPTS) {
-      return attemptsExhausted(challenge, responseChannelId);
-    }
-    if (isSafeId(responseChannelId)) {
-      await respond(
-        responseChannelId,
-        "⚠️ Incorrect Approval Code",
-        `${EXCLUSION_MAX_ATTEMPTS - challenge.attempts} attempt(s) remain.`,
-        "#E67E22"
-      );
-    }
-    return {
-      outcome: "wrong_code",
-      attemptsRemaining: EXCLUSION_MAX_ATTEMPTS - challenge.attempts,
-    };
-  }
-
-  async function approve(challenge, approvedBy, responseChannelId) {
-    if (await expireChallenge(challenge)) {
-      if (isSafeId(responseChannelId)) {
-        await respond(
-          responseChannelId,
-          "⌛ Approval Code Expired",
-          "Start a new privacy request to receive a fresh code.",
-          "#E67E22"
-        );
-      }
-      return { outcome: "expired" };
-    }
-    clearPending(challenge);
-
-    let purgedEvidence = 0;
-    if (challenge.action === "exclude") {
-      store.addChannelExclusion({
-        channelId: challenge.channelId,
-        serverId: challenge.serverId,
-        excludedAt: now(),
-        requestedBy: challenge.requestedBy,
-        approvedBy,
-        requestId: challenge.requestId,
-      });
-      const paths = purgeArchive(challenge.channelId);
-      for (const path of paths) {
-        if (removeEvidence(path)) purgedEvidence += 1;
-      }
-    } else {
-      store.removeChannelExclusion(challenge.channelId);
-    }
-
-    const title = terminalTitle(challenge.action);
-    const description =
-      challenge.action === "exclude"
-        ? `${channelLabel(
-            challenge.channelId
-          )} will no longer archive or relay message content. Existing archived content and ${purgedEvidence} evidence file(s) were purged.`
-        : `${channelLabel(
-            challenge.channelId
-          )} will resume message-content logging for new activity.`;
-    await sendAccountability(
-      challenge,
-      title,
-      [
-        `**Request:** \`${challenge.requestId}\``,
-        `**Channel:** ${channelLabel(challenge.channelId)}`,
-        `**Requested by:** ${actorLabel(challenge.requestedBy)}`,
-        `**Approved by:** ${ENKA_APPROVER_TAG} (<@${approvedBy}>)`,
-        description,
-      ],
-      challenge.action === "exclude" ? "#9B59B6" : "#2ECC71"
-    );
-    await notifyTerminal(
-      challenge,
-      title,
-      `Request \`${challenge.requestId}\` completed. ${description}`,
-      challenge.action === "exclude" ? "#9B59B6" : "#2ECC71"
-    );
-    if (isSafeId(responseChannelId)) {
-      await respond(
-        responseChannelId,
-        title,
-        description,
-        challenge.action === "exclude" ? "#9B59B6" : "#2ECC71"
-      );
-    }
-    logger.log?.(
-      `🔐  channel-exclusion ${challenge.action} request=${auditAlias(
-        challenge.requestId
-      )} server=${auditAlias(challenge.serverId)} channel=${auditAlias(
-        challenge.channelId
-      )}`
-    );
-    return {
-      outcome: challenge.action === "exclude" ? "excluded" : "removed",
-      purgedEvidence,
-    };
-  }
-
   async function confirmInServer(message, code) {
-    const serverId = serverIdFrom(message);
-    const challenge = pendingByServer.get(serverId);
-    if (!challenge) {
+    const result = await gate.confirm({
+      serverId: serverIdFrom(message),
+      kind: CHALLENGE_KIND,
+      code,
+      responseChannelId: channelIdFrom(message),
+    });
+    if (result.outcome === "no_pending") {
       await respond(
         channelIdFrom(message),
         "ℹ️ No Pending Privacy Request",
         "Start an exclusion or removal request first.",
         "#3498DB"
       );
-      return { outcome: "no_pending" };
+    } else if (result.outcome === "different_pending") {
+      await respond(
+        channelIdFrom(message),
+        "⏳ Different Protected Request Pending",
+        `Request \`${result.pending.requestId}\` belongs to another protected action.`,
+        "#E67E22"
+      );
     }
-    if (!codeMatches(challenge, code)) {
-      return rejectWrongCode(challenge, channelIdFrom(message));
-    }
-    return approve(challenge, approverId, channelIdFrom(message));
+    return result;
   }
 
   async function cancel(message) {
-    const serverId = serverIdFrom(message);
-    const challenge = pendingByServer.get(serverId);
-    if (!challenge) {
+    const result = await gate.cancel({
+      serverId: serverIdFrom(message),
+      kind: CHALLENGE_KIND,
+      actorId: message.authorId,
+    });
+    if (result.outcome === "no_pending") {
       await respond(
         channelIdFrom(message),
         "ℹ️ No Pending Privacy Request",
         "There is no request to cancel.",
         "#3498DB"
       );
-      return { outcome: "no_pending" };
-    }
-    if (
-      message.authorId !== challenge.requestedBy &&
-      message.authorId !== approverId
-    ) {
+    } else if (result.outcome === "different_pending") {
+      await respond(
+        channelIdFrom(message),
+        "⏳ Different Protected Request Pending",
+        `Request \`${result.pending.requestId}\` belongs to another protected action.`,
+        "#E67E22"
+      );
+    } else if (result.outcome === "not_requester") {
       await respond(
         channelIdFrom(message),
         "🔒 Cannot Cancel This Request",
         `Only the original requester or ${ENKA_APPROVER_TAG} can cancel it.`,
         "#E74C3C"
       );
-      return { outcome: "not_requester" };
+    } else if (result.outcome === "cancelled") {
+      await respond(
+        channelIdFrom(message),
+        "🚫 Privacy Request Cancelled",
+        "The pending request was cancelled.",
+        "#E67E22"
+      );
     }
-    clearPending(challenge);
-    await sendAccountability(
-      challenge,
-      "🚫 Privacy Exclusion Request Cancelled",
-      [
-        `**Request:** \`${challenge.requestId}\``,
-        `**Channel:** ${channelLabel(challenge.channelId)}`,
-        `**Cancelled by:** ${actorLabel(message.authorId)}`,
-        "No exclusion state was changed.",
-      ],
-      "#E67E22"
-    );
-    await notifyTerminal(
-      challenge,
-      "🚫 Privacy Request Cancelled",
-      `Request \`${challenge.requestId}\` was cancelled by ${actorLabel(
-        message.authorId
-      )}.`,
-      "#E67E22"
-    );
-    await respond(
-      channelIdFrom(message),
-      "🚫 Privacy Request Cancelled",
-      `Request \`${challenge.requestId}\` was cancelled.`,
-      "#E67E22"
-    );
-    return { outcome: "cancelled" };
+    return result;
   }
 
   async function handleCommand(message, args = []) {
-    await expireDueChallenges();
+    await gate.expireDueChallenges();
     const serverId = serverIdFrom(message);
     if (!isSafeId(serverId)) {
       await respond(
@@ -674,7 +641,7 @@ export function createChannelExclusion(
         );
         return { outcome: "invalid_confirmation" };
       }
-      if (!isSafeId(resolveApprover())) {
+      if (!isSafeId(gate.resolveApprover())) {
         await respond(
           channelIdFrom(message),
           "🔒 Approver Unavailable",
@@ -707,101 +674,6 @@ export function createChannelExclusion(
       return { outcome: "invalid_command" };
     }
     return requestChange(message, "exclude", first);
-  }
-
-  function findDirectChallenge(code) {
-    const challenges = [...pendingByServer.values()];
-    const matching = challenges.filter((challenge) =>
-      codeMatches(challenge, code)
-    );
-    if (matching.length === 1) return matching[0];
-    if (matching.length === 0 && challenges.length === 1) return challenges[0];
-    return null;
-  }
-
-  async function handleDirectMessage(message) {
-    if (isSafeId(serverIdFrom(message))) return false;
-    if (message.authorId !== approverId) return false;
-
-    const raw = String(message.content ?? "").trim();
-    const match = raw.match(/^(?:(approve|deny)\s+)?(\d{6})$/i);
-    if (!match) return false;
-
-    const rate = dmRateLimiter.check(message.authorId);
-    if (!rate.allowed) {
-      if (rate.notify) {
-        await sendApprover({
-          embeds: [
-            buildStatusEmbed(
-              "⏳ Too Many Approval Attempts",
-              `Try again in ${Math.max(
-                1,
-                Math.ceil(rate.retryAfterMs / 1000)
-              )} seconds.`,
-              "#E67E22"
-            ),
-          ],
-        });
-      }
-      return true;
-    }
-
-    await expireDueChallenges();
-    const action = (match[1] ?? "approve").toLowerCase();
-    const code = match[2];
-    const challenge = findDirectChallenge(code);
-    if (!challenge) {
-      await sendApprover({
-        embeds: [
-          buildStatusEmbed(
-            "⚠️ Approval Code Not Found",
-            "No unique pending request matches that code.",
-            "#E74C3C"
-          ),
-        ],
-      });
-      return true;
-    }
-    if (!codeMatches(challenge, code)) {
-      await rejectWrongCode(challenge, null);
-      if (pendingByServer.get(challenge.serverId) === challenge) {
-        await sendApprover({
-          embeds: [
-            buildStatusEmbed(
-              "⚠️ Incorrect Approval Code",
-              `${EXCLUSION_MAX_ATTEMPTS - challenge.attempts} attempt(s) remain.`,
-              "#E67E22"
-            ),
-          ],
-        });
-      }
-      return true;
-    }
-    if (action === "deny") {
-      clearPending(challenge);
-      await sendAccountability(
-        challenge,
-        "🚫 Privacy Exclusion Request Denied",
-        [
-          `**Request:** \`${challenge.requestId}\``,
-          `**Action:** ${challenge.action}`,
-          `**Channel:** ${channelLabel(challenge.channelId)}`,
-          `**Requested by:** ${actorLabel(challenge.requestedBy)}`,
-          `**Denied by:** ${ENKA_APPROVER_TAG}`,
-          "No exclusion state was changed.",
-        ],
-        "#E74C3C"
-      );
-      await notifyTerminal(
-        challenge,
-        "🚫 Privacy Request Denied",
-        `Request \`${challenge.requestId}\` was denied. No exclusion state changed.`,
-        "#E74C3C"
-      );
-      return true;
-    }
-    await approve(challenge, approverId, null);
-    return true;
   }
 
   async function postDigest() {
@@ -856,12 +728,13 @@ export function createChannelExclusion(
 
   return {
     handleCommand,
-    handleDirectMessage,
-    resolveApprover,
+    handleDirectMessage: gate.handleDirectMessage,
+    resolveApprover: gate.resolveApprover,
     startDigest,
     postDigest,
     getPending(serverId) {
-      return pendingByServer.get(serverId) ?? null;
+      const pending = gate.getPending(serverId);
+      return pending?.kind === CHALLENGE_KIND ? pending : null;
     },
   };
 }

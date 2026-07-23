@@ -12,11 +12,22 @@ Stoat does not provide a native server audit log. Irminsul can relay activity in
 /AuditLog #moderation-log
 /AuditLog status
 /AuditLog off
+/AuditLog confirm 123456
+/AuditLog cancel
 ```
 
 The older `/Enable-AuditLog` and `/Disable-AuditLog` forms remain accepted for compatibility.
 
 Run `/Test-AuditLog` after setup. It sends a test event through the real protected-delivery pipeline and reports message archive, evidence usage, settings baseline, and webhook coverage.
+
+Enabling, moving, or disabling the audit log requires **two steps**:
+
+1. A recognized moderator requests the change.
+2. Irminsul sends a ten-minute, six-digit code exclusively to **Enka#4961**. Enka can reply with `approve CODE`, `deny CODE`, or the bare code, or release it for a recognized moderator to relay with `/AuditLog confirm CODE`.
+
+The requester or Enka can use `/AuditLog cancel`. Three incorrect attempts destroy a request. If Enka cannot be reached by DM, audit logging fails closed in its existing state. Requests to keep the current destination or disable an already-disabled log return immediately without generating a code. `/AuditLog status` and `/Test-AuditLog` are read-only and never require approval.
+
+Only one protected audit/privacy request can be pending per server. Moves and disables are recorded in the previous protected destination before it is replaced or disabled; successful enables and moves record completion in the new destination. The destination and Irminsul's Send Messages permission are checked again when approval arrives, and stale requests make no change.
 
 ## Exclude private channels
 
@@ -33,7 +44,7 @@ Adding or removing an exclusion requires **two steps**:
 1. A recognized moderator requests the change. This includes the server owner, Manage Server, Kick Members, Ban Members, Timeout Members, or effective Manage Messages in the current channel.
 2. Irminsul DMs a ten-minute, six-digit code exclusively to **Enka#4961**, the fixed approver for this in-house deployment. Enka can reply with `approve CODE`, `deny CODE`, or the bare code, or relay it for `/Exclude-Channel confirm CODE` in the server.
 
-Only one request can be pending per server, and three incorrect attempts destroy it. If Enka cannot be reached by DM, the request fails closed and logging continues unchanged. Both exclusion and removal require a fresh code.
+Only one protected request can be pending per server, and three incorrect attempts destroy it. If Enka cannot be reached by DM, the request fails closed and logging continues unchanged. Both exclusion and removal require a fresh code.
 
 An approved exclusion withholds only message content:
 

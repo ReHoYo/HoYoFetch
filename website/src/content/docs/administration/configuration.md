@@ -41,6 +41,6 @@ The bot token grants control of the bot account. Keep it in secret storage on th
 
 `AUDITLOG_DEBUG=1` adds per-event console detail while retaining redacted aliases rather than raw IDs or secrets. Disable it during routine operation unless you are diagnosing a delivery problem.
 
-## Privacy approver
+## Sensitive-action approver
 
-This in-house deployment sends `/Exclude-Channel` approval codes exclusively to **Enka#4961**. The approver is pinned in the application and has no environment-variable override. If Irminsul cannot open or send the DM, the request fails closed while ordinary audit logging continues.
+This in-house deployment sends audit-log configuration and `/Exclude-Channel` approval codes exclusively to **Enka#4961**. The approver is pinned in the application and has no environment-variable override. If Irminsul cannot open or send the DM, the request fails closed: audit configuration and privacy exclusions remain unchanged.
