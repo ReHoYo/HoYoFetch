@@ -1,5 +1,11 @@
 // moderation.js — fail-closed manual moderation and bounded user purges
 import { randomBytes } from "crypto";
+import {
+  BARE_ID_PATTERN,
+  buildReason,
+  findTargetToken,
+  tokenizeArgs,
+} from "./command-args.js";
 import { buildStatusEmbed } from "./embeds.js";
 import {
   findArchivedMessages,
@@ -112,20 +118,31 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const MENTION_PATTERN = /^<@!?([A-Za-z0-9]+)>$/;
-// Stoat IDs are ULIDs. isSafeId() alone accepts any alphanumeric word, so a
-// bare ID is only recognized mid-sentence when it has the full ULID shape.
-const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
-// A bare leading token is only read as a user ID when it is long and carries a
-// digit or capital, so `/Kick for raiding` asks for a member instead of trying
-// to moderate someone called "for".
-const BARE_ID_PATTERN = /^(?=.{8,})(?=.*[0-9A-Z])[A-Za-z0-9]+$/;
 const WINDOW_PREFIXES = Object.freeze(["delete:", "window:", "purge:"]);
 const DURATION_PREFIXES = Object.freeze(["duration:", "mute:", "timeout:"]);
-// Leading filler between the member and the reason, so `/Ban @member for
-// spamming` records "spamming" rather than "for spamming".
-const REASON_PREFIX_PATTERN =
-  /^(?:reason\s*:\s*|(?:because of|because|due to|for|about|over|-|–|—|:)(?:\s+|$))/i;
+
+// Commands that pause for a ✅/❌ confirmation before touching a member.
+// `/Purge-User` keeps its own count-aware confirmation, and `/Automod release`
+// stays instant because it only restores access.
+const CONFIRM_PROMPTS = Object.freeze({
+  ban: {
+    title: "🔨 Confirm Ban",
+    action: () => "ban",
+    caution:
+      "Undo only unbans the account; it cannot restore membership or deleted messages.",
+  },
+  kick: {
+    title: "👢 Confirm Kick",
+    action: () => "kick",
+    caution:
+      "A kick cannot be undone; the member needs a new invite to return.",
+  },
+  mute: {
+    title: "🔇 Confirm Mute",
+    action: (parsed) => `mute for ${parsed.duration}`,
+    caution: "The timeout can be lifted with ↩️ or `/Automod release`.",
+  },
+});
 
 const OPTION_SPECS = Object.freeze({
   ban: { window: "deleteWindow", duration: false },
@@ -180,28 +197,11 @@ export function parseModerationCommand(command, args = []) {
   const spec = OPTION_SPECS[cmd];
   if (!spec) return { ok: false, error: "Unknown moderation command." };
 
-  const tokens = args
-    .map((value) => String(value ?? "").trim())
-    .filter((value) => value.length > 0);
+  const tokens = tokenizeArgs(args);
   const consumed = new Set();
-  let targetId = null;
-
-  for (const [index, token] of tokens.entries()) {
-    const mention = token.match(MENTION_PATTERN);
-    if (mention && isSafeId(mention[1])) {
-      targetId = mention[1];
-      consumed.add(index);
-      break;
-    }
-  }
-  if (!targetId) {
-    for (const [index, token] of tokens.entries()) {
-      if (!ULID_PATTERN.test(token)) continue;
-      targetId = token;
-      consumed.add(index);
-      break;
-    }
-  }
+  const found = findTargetToken(tokens);
+  let targetId = found?.targetId ?? null;
+  if (found) consumed.add(found.index);
 
   const selected = { window: null, duration: null };
   let leading = true;
@@ -249,12 +249,7 @@ export function parseModerationCommand(command, args = []) {
     };
   }
 
-  const reason = tokens
-    .filter((_, index) => !consumed.has(index))
-    .join(" ")
-    .replace(REASON_PREFIX_PATTERN, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const reason = buildReason(tokens, consumed);
   if (!reason) {
     return {
       ok: false,
@@ -737,22 +732,42 @@ export function createModeration(
     );
   }
 
-  async function openPicker(message, { title, description, colour, entry }) {
-    const picker = await send(message.channelId, {
+  // Every reaction prompt — duration picker, cleanup picker, and confirmation —
+  // shares one registration path so all of them expire, prune, and stay
+  // invoker-only in exactly the same way.
+  async function openPrompt(
+    message,
+    { title, description, colour, entry, emojis }
+  ) {
+    const prompt = await send(message.channelId, {
       embeds: [buildStatusEmbed(title, description, colour)],
     });
-    if (!isSafeId(picker?._id)) return null;
-    pending.set(picker._id, {
+    if (!isSafeId(prompt?._id)) return null;
+    pending.set(prompt._id, {
       ...entry,
       message,
       expiresAt: now() + INTERACTION_WINDOW_MS,
     });
     prunePending();
-    for (const { emoji } of entry.choices) {
-      await seedReaction(message.channelId, picker._id, emoji);
+    for (const emoji of emojis) {
+      await seedReaction(message.channelId, prompt._id, emoji);
     }
-    await seedReaction(message.channelId, picker._id, MODERATION_CANCEL_EMOJI);
-    return picker._id;
+    await seedReaction(message.channelId, prompt._id, MODERATION_CANCEL_EMOJI);
+    return prompt._id;
+  }
+
+  async function openPicker(message, options) {
+    return openPrompt(message, {
+      ...options,
+      emojis: options.entry.choices.map(({ emoji }) => emoji),
+    });
+  }
+
+  async function openConfirm(message, options) {
+    return openPrompt(message, {
+      ...options,
+      emojis: [MODERATION_CONFIRM_EMOJI],
+    });
   }
 
   // Offered after a ban, kick, or mute so moderators pick a cleanup window by
@@ -868,6 +883,32 @@ export function createModeration(
     return `**History cleanup (${window}):** ${cleanupSummary(cleanup)} Coverage is limited to messages observed by Irminsul.`;
   }
 
+  // Reasons are plain sentences now, so a mistyped or auto-completed mention
+  // would otherwise land a ban with nothing to catch it. Ban, kick, and a
+  // typed-duration mute pause here first. Permissions and the target are not
+  // re-checked yet: the coarse gate already ran in the command router, and the
+  // fresh checks belong in apply* so they reflect the moment of the action.
+  async function confirmAction(message, command, parsed, auditChannelId) {
+    const prompt = CONFIRM_PROMPTS[command];
+    await openConfirm(message, {
+      title: prompt.title,
+      description: [
+        `**Action:** ${prompt.action(parsed)}`,
+        `**Target:** <@${parsed.targetId}>`,
+        `**Reason:** ${safeReason(parsed.reason)}`,
+        parsed.deleteWindow
+          ? `**History cleanup:** ${parsed.deleteWindow} of observed messages`
+          : null,
+        prompt.caution,
+        "React ✅ to continue or ❌ to cancel within two minutes. Only you can confirm.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      colour: "#E67E22",
+      entry: { type: "action-confirm", command, parsed, auditChannelId },
+    });
+  }
+
   async function applyMute(message, parsed, duration, auditChannelId) {
     const serverId = message.server?.id ?? message.channel?.serverId;
     if (!(await requireAccess(message, COMMAND_ACCESS.TIMEOUT))) return;
@@ -928,8 +969,10 @@ export function createModeration(
   }
 
   async function handleMute(message, parsed, auditChannelId) {
+    // Picking a duration by reaction is already a deliberate second act, so
+    // only a typed duration needs a separate confirmation.
     if (parsed.duration) {
-      await applyMute(message, parsed, parsed.duration, auditChannelId);
+      await confirmAction(message, "mute", parsed, auditChannelId);
       return;
     }
     await openPicker(message, {
@@ -949,7 +992,7 @@ export function createModeration(
     });
   }
 
-  async function handleKick(message, parsed, auditChannelId) {
+  async function applyKick(message, parsed, auditChannelId) {
     const serverId = message.server?.id ?? message.channel?.serverId;
     if (!(await requireAccess(message, COMMAND_ACCESS.KICK))) return;
     if (!(await validateTarget(message, parsed.targetId))) return;
@@ -1010,7 +1053,7 @@ export function createModeration(
     return requireAccess(message, COMMAND_ACCESS.MANAGE_MESSAGES, channelIds);
   }
 
-  async function handleBan(message, parsed, auditChannelId) {
+  async function applyBan(message, parsed, auditChannelId) {
     const serverId = message.server?.id ?? message.channel?.serverId;
     if (!(await requireAccess(message, COMMAND_ACCESS.BAN))) return;
     if (!(await validateTarget(message, parsed.targetId))) return;
@@ -1159,38 +1202,16 @@ export function createModeration(
       PURGE_WINDOWS[parsed.window]
     );
     if (!(await preflightPurge(message, entries))) return;
-    const confirmation = await send(message.channelId, {
-      embeds: [
-        buildStatusEmbed(
-          "⚠️ Confirm User Purge",
-          [
-            `Delete **${entries.length} known message(s)** from <@${parsed.targetId}> within **${parsed.window}**?`,
-            "This cannot be undone. Protected audit records and evidence are retained.",
-            "React ✅ to continue or ❌ to cancel within two minutes.",
-          ].join("\n"),
-          "#E67E22"
-        ),
-      ],
+    await openConfirm(message, {
+      title: "⚠️ Confirm User Purge",
+      description: [
+        `Delete **${entries.length} known message(s)** from <@${parsed.targetId}> within **${parsed.window}**?`,
+        "This cannot be undone. Protected audit records and evidence are retained.",
+        "React ✅ to continue or ❌ to cancel within two minutes. Only you can confirm.",
+      ].join("\n"),
+      colour: "#E67E22",
+      entry: { type: "purge-confirm", parsed, auditChannelId },
     });
-    if (!isSafeId(confirmation?._id)) return;
-    pending.set(confirmation._id, {
-      type: "purge-confirm",
-      message,
-      parsed,
-      auditChannelId,
-      expiresAt: now() + INTERACTION_WINDOW_MS,
-    });
-    prunePending();
-    await seedReaction(
-      message.channelId,
-      confirmation._id,
-      MODERATION_CONFIRM_EMOJI
-    );
-    await seedReaction(
-      message.channelId,
-      confirmation._id,
-      MODERATION_CANCEL_EMOJI
-    );
   }
 
   async function handleRelease(message, parsed, auditChannelId) {
@@ -1346,6 +1367,19 @@ export function createModeration(
       const choice = interaction.choices
         ? pickerChoice(interaction.choices, event.emoji_id)
         : null;
+      if (interaction.type === "action-confirm") {
+        if (event.emoji_id !== MODERATION_CONFIRM_EMOJI) return;
+        pending.delete(event.id);
+        const { message, parsed, auditChannelId } = interaction;
+        if (interaction.command === "ban") {
+          await applyBan(message, parsed, auditChannelId);
+        } else if (interaction.command === "kick") {
+          await applyKick(message, parsed, auditChannelId);
+        } else if (interaction.command === "mute") {
+          await applyMute(message, parsed, parsed.duration, auditChannelId);
+        }
+        return;
+      }
       if (interaction.type === "mute-picker") {
         if (!choice) return;
         pending.delete(event.id);
@@ -1415,10 +1449,9 @@ export function createModeration(
     }
     const auditChannelId = await requireAudit(serverId, message.channelId);
     if (!auditChannelId) return;
-    if (command === "ban") await handleBan(message, parsed, auditChannelId);
-    else if (command === "kick")
-      await handleKick(message, parsed, auditChannelId);
-    else if (command === "mute")
+    if (command === "ban" || command === "kick") {
+      await confirmAction(message, command, parsed, auditChannelId);
+    } else if (command === "mute")
       await handleMute(message, parsed, auditChannelId);
     else if (command === "purge-user")
       await handlePurge(message, parsed, auditChannelId);
