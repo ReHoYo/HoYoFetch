@@ -337,9 +337,15 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ### Unreleased
 
-- Wuthering Waves support via cached, multi-table Game8 parsing
-- New WuWa-only and NTE + WuWa auto-fetch scopes
-- All-games subscriptions now include WuWa
+- Added protected server audit logging with raw edit/delete coverage, a 30-day message archive, attachment evidence, settings reconciliation, `/Test-AuditLog`, and tamper-resistant audit records
+- Added Enka-approved `/Exclude-Channel` privacy controls that purge and withhold message content while preserving accountable lifecycle notices and daily digests
+- Added persistent anti-raid automod monitor/enforce modes, scored detection, progressive timeouts, triggering-message cleanup, staff-approved bans, and `/Automod release`
+- Added natural-language `/Ban`, `/Kick`, `/Mute`, `/Purge-User`, and `/Report-Spam` parsing with moderator-only reaction pickers and destructive-action confirmations
+- Extended cleanup to 29 days with bulk and paced individual deletion, a 2,000-message cap, archive reconciliation, rate-limit-aware retries, and specific outcome reporting
+- Added protected member spam reports with secure invocation deletion, anti-abuse limits, 24-hour unique-reporter correlation, and no automatic punishment
+- Added Wuthering Waves via cached multi-table Game8 parsing, WuWa-only and NTE + WuWa auto-fetch scopes, and WuWa in all-games subscriptions
+- Added the searchable Irminsul documentation site, `/Docs`, FAQ, paginated in-chat help, a shared command catalog, and documentation consistency checks
+- Hardened command authorization with fresh effective-permission checks and deduplicated concurrent code fetches and announcements
 
 ### v1.1.0
 
