@@ -337,7 +337,7 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ## 📝 Changelog
 
-### Unreleased
+### v2.0.0
 
 - Added protected server audit logging with raw edit/delete coverage, a 30-day message archive, attachment evidence, settings reconciliation, `/Test-AuditLog`, and tamper-resistant audit records
 - Added Enka-approved `/Exclude-Channel` privacy controls that purge and withhold message content while preserving accountable lifecycle notices and daily digests
