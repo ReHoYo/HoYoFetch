@@ -1,4 +1,4 @@
-// channel-exclusion.js — bot-owner 2FA for audit-log message privacy
+// channel-exclusion.js — Enka-approved 2FA for audit-log message privacy
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "crypto";
 import { parseChannelArg } from "./auditlog.js";
 import { buildAuditEmbed, buildStatusEmbed } from "./embeds.js";
@@ -21,6 +21,8 @@ import {
 
 export const EXCLUSION_CHALLENGE_TTL_MS = 10 * 60 * 1_000;
 export const EXCLUSION_MAX_ATTEMPTS = 3;
+export const ENKA_APPROVER_USER_ID = "01H2VRZSN1AY7QASPNKXMP52HZ";
+export const ENKA_APPROVER_TAG = "Enka#4961";
 const DIGEST_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 
 const DEFAULT_STORE = Object.freeze({
@@ -76,7 +78,7 @@ export function createChannelExclusion(
     now = Date.now,
     codeFactory = defaultCodeFactory,
     requestIdFactory = defaultRequestIdFactory,
-    configuredCustodianId = process.env.CUSTODIAN_USER_ID || "",
+    approverUserId = ENKA_APPROVER_USER_ID,
     purgeArchive = purgeChannelFromArchive,
     removeEvidence = deleteEvidence,
     scheduleTimeout = setTimeout,
@@ -95,9 +97,9 @@ export function createChannelExclusion(
 
   const pendingByServer = new Map();
   const dmRateLimiter = new CommandRateLimiter();
-  let custodianId = null;
-  let custodianResolved = false;
-  let custodianDmId = null;
+  const approverId = isSafeId(approverUserId) ? approverUserId : null;
+  let approverWarningLogged = false;
+  let approverDmId = null;
   let digestStarted = false;
 
   function commandName() {
@@ -142,46 +144,41 @@ export function createChannelExclusion(
     }
   }
 
-  async function resolveCustodian() {
-    if (custodianResolved) return custodianId;
-    custodianResolved = true;
-
-    if (isSafeId(configuredCustodianId)) {
-      custodianId = configuredCustodianId;
-      return custodianId;
+  function resolveApprover() {
+    if (!approverId && !approverWarningLogged) {
+      approverWarningLogged = true;
+      logger.warn?.(
+        "channel-exclusion: Enka approver id is invalid; mutations are disabled"
+      );
     }
-
-    const response = await request("GET", "/users/@me");
-    const owner = response?.data?.bot?.owner;
-    if (response?.ok && isSafeId(owner)) {
-      custodianId = owner;
-      return custodianId;
-    }
-
-    logger.warn?.(
-      "channel-exclusion: bot custodian could not be resolved; mutations are disabled"
-    );
-    return null;
+    return approverId;
   }
 
-  async function getCustodianDmId() {
-    if (isSafeId(custodianDmId)) return custodianDmId;
-    if (!isSafeId(custodianId)) return null;
-    const response = await request("GET", `/users/${custodianId}/dm`);
+  async function getApproverDmId() {
+    if (isSafeId(approverDmId)) return approverDmId;
+    if (!isSafeId(approverId)) return null;
+    const response = await request("GET", `/users/${approverId}/dm`);
     const dmId = response?.data?._id;
     if (!response?.ok || !isSafeId(dmId)) return null;
-    custodianDmId = dmId;
-    return custodianDmId;
+    approverDmId = dmId;
+    return approverDmId;
   }
 
-  async function sendCustodian(payload) {
-    const dmId = await getCustodianDmId();
-    if (!dmId) return false;
-    const response = await request("POST", `/channels/${dmId}/messages`, {
-      ...(payload.embeds?.length && !payload.content ? { content: " " } : {}),
-      ...payload,
-    });
-    return Boolean(response?.ok && isSafeId(response?.data?._id));
+  async function sendApprover(payload) {
+    try {
+      const dmId = await getApproverDmId();
+      if (!dmId) return false;
+      const response = await request("POST", `/channels/${dmId}/messages`, {
+        ...(payload.embeds?.length && !payload.content ? { content: " " } : {}),
+        ...payload,
+      });
+      return Boolean(response?.ok && isSafeId(response?.data?._id));
+    } catch (error) {
+      logger.warn?.(
+        `channel-exclusion: Enka approval DM failed ${safeErrorSummary(error)}`
+      );
+      return false;
+    }
   }
 
   function codeMatches(challenge, code) {
@@ -200,7 +197,7 @@ export function createChannelExclusion(
   }
 
   async function notifyTerminal(challenge, title, description, colour) {
-    await sendCustodian({
+    await sendApprover({
       embeds: [buildStatusEmbed(title, description, colour)],
     });
   }
@@ -304,14 +301,14 @@ export function createChannelExclusion(
     const serverId = serverIdFrom(message);
     const requesterId = message.authorId;
     const responseChannelId = channelIdFrom(message);
-    if (!isSafeId(await resolveCustodian())) {
+    if (!isSafeId(resolveApprover())) {
       await respond(
         responseChannelId,
-        "🔒 Custodian Unavailable",
-        "The bot owner could not be resolved, so privacy exclusions cannot be changed. Audit logging remains active.",
+        "🔒 Approver Unavailable",
+        `${ENKA_APPROVER_TAG} could not be resolved as the fixed approver, so privacy exclusions cannot be changed. Audit logging remains active.`,
         "#E74C3C"
       );
-      return { outcome: "custodian_unavailable" };
+      return { outcome: "approver_unavailable" };
     }
 
     const auditChannelId = store.getAuditLogChannel(serverId);
@@ -394,7 +391,7 @@ export function createChannelExclusion(
     };
     pendingByServer.set(serverId, challenge);
 
-    const delivered = await sendCustodian({
+    const delivered = await sendApprover({
       embeds: [
         buildStatusEmbed(
           action === "exclude"
@@ -421,7 +418,7 @@ export function createChannelExclusion(
       await respond(
         responseChannelId,
         "⚠️ Approval DM Failed",
-        "The bot owner could not be reached, so no request was retained and no exclusion state changed.",
+        `${ENKA_APPROVER_TAG} could not be reached, so no request was retained and no exclusion state changed.`,
         "#E74C3C"
       );
       return { outcome: "dm_failed" };
@@ -436,14 +433,14 @@ export function createChannelExclusion(
         `**Action:** ${action}`,
         `**Channel:** ${channelLabel(target.id)}`,
         `**Requested by:** ${actorLabel(requesterId)}`,
-        "**Approval:** awaiting the bot owner; expires in 10 minutes.",
+        `**Approval:** awaiting ${ENKA_APPROVER_TAG}; expires in 10 minutes.`,
       ],
       "#9B59B6"
     );
     await respond(
       responseChannelId,
-      "📨 Owner Approval Requested",
-      `Request \`${challenge.requestId}\` was sent to the bot owner. No exclusion state has changed yet.`,
+      "📨 Enka Approval Requested",
+      `Request \`${challenge.requestId}\` was sent to ${ENKA_APPROVER_TAG}. No exclusion state has changed yet.`,
       "#9B59B6"
     );
     return { outcome: "requested", requestId: challenge.requestId };
@@ -547,7 +544,7 @@ export function createChannelExclusion(
         `**Request:** \`${challenge.requestId}\``,
         `**Channel:** ${channelLabel(challenge.channelId)}`,
         `**Requested by:** ${actorLabel(challenge.requestedBy)}`,
-        `**Approved by bot owner:** <@${approvedBy}>`,
+        `**Approved by:** ${ENKA_APPROVER_TAG} (<@${approvedBy}>)`,
         description,
       ],
       challenge.action === "exclude" ? "#9B59B6" : "#2ECC71"
@@ -594,7 +591,7 @@ export function createChannelExclusion(
     if (!codeMatches(challenge, code)) {
       return rejectWrongCode(challenge, channelIdFrom(message));
     }
-    return approve(challenge, custodianId, channelIdFrom(message));
+    return approve(challenge, approverId, channelIdFrom(message));
   }
 
   async function cancel(message) {
@@ -611,12 +608,12 @@ export function createChannelExclusion(
     }
     if (
       message.authorId !== challenge.requestedBy &&
-      message.authorId !== custodianId
+      message.authorId !== approverId
     ) {
       await respond(
         channelIdFrom(message),
         "🔒 Cannot Cancel This Request",
-        "Only the original requester or the bot owner can cancel it.",
+        `Only the original requester or ${ENKA_APPROVER_TAG} can cancel it.`,
         "#E74C3C"
       );
       return { outcome: "not_requester" };
@@ -677,14 +674,14 @@ export function createChannelExclusion(
         );
         return { outcome: "invalid_confirmation" };
       }
-      if (!isSafeId(await resolveCustodian())) {
+      if (!isSafeId(resolveApprover())) {
         await respond(
           channelIdFrom(message),
-          "🔒 Custodian Unavailable",
-          "The bot owner could not be resolved, so the request cannot be approved.",
+          "🔒 Approver Unavailable",
+          `${ENKA_APPROVER_TAG} is not available as the fixed approver, so the request cannot be approved.`,
           "#E74C3C"
         );
-        return { outcome: "custodian_unavailable" };
+        return { outcome: "approver_unavailable" };
       }
       return confirmInServer(message, second);
     }
@@ -724,8 +721,7 @@ export function createChannelExclusion(
 
   async function handleDirectMessage(message) {
     if (isSafeId(serverIdFrom(message))) return false;
-    if (!custodianResolved) await resolveCustodian();
-    if (message.authorId !== custodianId) return false;
+    if (message.authorId !== approverId) return false;
 
     const raw = String(message.content ?? "").trim();
     const match = raw.match(/^(?:(approve|deny)\s+)?(\d{6})$/i);
@@ -734,7 +730,7 @@ export function createChannelExclusion(
     const rate = dmRateLimiter.check(message.authorId);
     if (!rate.allowed) {
       if (rate.notify) {
-        await sendCustodian({
+        await sendApprover({
           embeds: [
             buildStatusEmbed(
               "⏳ Too Many Approval Attempts",
@@ -755,7 +751,7 @@ export function createChannelExclusion(
     const code = match[2];
     const challenge = findDirectChallenge(code);
     if (!challenge) {
-      await sendCustodian({
+      await sendApprover({
         embeds: [
           buildStatusEmbed(
             "⚠️ Approval Code Not Found",
@@ -769,7 +765,7 @@ export function createChannelExclusion(
     if (!codeMatches(challenge, code)) {
       await rejectWrongCode(challenge, null);
       if (pendingByServer.get(challenge.serverId) === challenge) {
-        await sendCustodian({
+        await sendApprover({
           embeds: [
             buildStatusEmbed(
               "⚠️ Incorrect Approval Code",
@@ -791,7 +787,7 @@ export function createChannelExclusion(
           `**Action:** ${challenge.action}`,
           `**Channel:** ${channelLabel(challenge.channelId)}`,
           `**Requested by:** ${actorLabel(challenge.requestedBy)}`,
-          "**Denied by:** bot owner",
+          `**Denied by:** ${ENKA_APPROVER_TAG}`,
           "No exclusion state was changed.",
         ],
         "#E74C3C"
@@ -804,7 +800,7 @@ export function createChannelExclusion(
       );
       return true;
     }
-    await approve(challenge, custodianId, null);
+    await approve(challenge, approverId, null);
     return true;
   }
 
@@ -861,7 +857,7 @@ export function createChannelExclusion(
   return {
     handleCommand,
     handleDirectMessage,
-    resolveCustodian,
+    resolveApprover,
     startDigest,
     postDigest,
     getPending(serverId) {

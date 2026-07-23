@@ -17,7 +17,7 @@ description: Major public Irminsul capabilities and documentation milestones.
 
 ## Unreleased — audit privacy exclusions
 
-- Added `/Exclude-Channel` with bot-owner DM approval for adding and removing message-content exclusions.
+- Added `/Exclude-Channel` for recognized moderators, with approval codes sent exclusively to Enka#4961 for both adding and removing message-content exclusions.
 - Excluded channels no longer archive attachments or relay message create, edit, delete, or bulk-delete content; automod keeps detecting while withholding excerpts.
 - Approval purges existing channel archives and evidence, and protected lifecycle notices plus a daily digest keep exclusions accountable.
 

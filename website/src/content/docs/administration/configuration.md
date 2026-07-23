@@ -15,7 +15,6 @@ Copy `.env.example` to `.env` and provide the bot token. Never commit `.env`.
 | `AUDITLOG_DEBUG`              | Off                 | Set to `1` for verbose, redacted audit pipeline diagnostics      |
 | `AUDITLOG_EVIDENCE_MAX_MB`    | `20`                | Maximum preserved size for one attachment                        |
 | `AUDITLOG_EVIDENCE_BUDGET_MB` | `1024`              | Total evidence budget; `0` disables capture                      |
-| `CUSTODIAN_USER_ID`           | Bot account owner   | Bot owner who receives channel-exclusion approval codes          |
 | `HOYOFETCH_DATA_DIR`          | `./data`            | Runtime persistence directory                                    |
 | `HOYO_API_BASE`               | hoyo-codes endpoint | Override for the GI, HSR, and ZZZ API base                       |
 
@@ -28,7 +27,6 @@ EMOJI_MODE=unicode
 AUDITLOG_DEBUG=
 AUDITLOG_EVIDENCE_MAX_MB=20
 AUDITLOG_EVIDENCE_BUDGET_MB=1024
-CUSTODIAN_USER_ID=replace_with_bot_owner_user_id
 ```
 
 :::danger[Protect the token]
@@ -43,6 +41,6 @@ The bot token grants control of the bot account. Keep it in secret storage on th
 
 `AUDITLOG_DEBUG=1` adds per-event console detail while retaining redacted aliases rather than raw IDs or secrets. Disable it during routine operation unless you are diagnosing a delivery problem.
 
-## Privacy custodian
+## Privacy approver
 
-Set `CUSTODIAN_USER_ID` to the bot owner's Stoat user ID for explicit, host-controlled `/Exclude-Channel` approval routing. If omitted, Irminsul resolves the owner from `/users/@me` once at startup. If neither path produces a valid owner ID, all exclusion mutations fail closed while ordinary audit logging continues.
+This in-house deployment sends `/Exclude-Channel` approval codes exclusively to **Enka#4961**. The approver is pinned in the application and has no environment-variable override. If Irminsul cannot open or send the DM, the request fails closed while ordinary audit logging continues.

@@ -13,7 +13,6 @@ const ALLOWED_ENV_KEYS = new Set([
   "AUDITLOG_DEBUG",
   "AUDITLOG_EVIDENCE_MAX_MB",
   "AUDITLOG_EVIDENCE_BUDGET_MB",
-  "CUSTODIAN_USER_ID",
 ]);
 
 function loadEnv() {
@@ -70,7 +69,6 @@ export const CONFIG = {
   fetchCooldownSeconds,
   hoyoApiBase:
     process.env.HOYO_API_BASE || "https://hoyo-codes.seria.moe/codes",
-  custodianUserId: process.env.CUSTODIAN_USER_ID || "",
 };
 
 // ═══════════════════════════════════════════════════

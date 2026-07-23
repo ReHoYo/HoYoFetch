@@ -12,7 +12,7 @@ The bot persists data needed to avoid duplicate announcements and resume configu
 - subscribed channels and their feed scopes;
 - known redemption codes and source cache entries;
 - audit destinations and server-setting baselines;
-- bot-owner-approved channel exclusions in `channel_exclusions.json`;
+- Enka-approved channel exclusions in `channel_exclusions.json`;
 - automod modes, cases, approvals, strikes, and reversible actions;
 - bounded spam-report correlation metadata without member-supplied reasons; and
 - protected-message records needed to restore deleted audit entries.
@@ -42,7 +42,7 @@ Irminsul does not intentionally persist or print:
 
 ## Protected audit records
 
-Protected audit messages are intentionally difficult to erase silently: when deletion is detected, Irminsul reposts the stored record and tracks its replacement. A member purge never removes protected audit records or locally retained evidence. An owner-approved channel exclusion is the exception: it deliberately deletes archived content and evidence for that channel.
+Protected audit messages are intentionally difficult to erase silently: when deletion is detected, Irminsul reposts the stored record and tracks its replacement. A member purge never removes protected audit records or locally retained evidence. An Enka-approved channel exclusion is the exception: it deliberately deletes archived content and evidence for that channel.
 
 Spam-report reasons exist only inside these protected records. The separate `spam_reports.json` file stores identifiers, timestamps, channel references, and the protected message reference for 30-day correlation; it does not duplicate the supplied reason.
 

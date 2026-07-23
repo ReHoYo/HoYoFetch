@@ -121,7 +121,6 @@ const channelExclusion = createChannelExclusion(client, {
   sendProtected: tamperProtection.sendProtected,
   request: apiRequest,
   prefix: CONFIG.prefix,
-  configuredCustodianId: CONFIG.custodianUserId,
 });
 
 // ── Audit log ───────────────────────────────────────
@@ -158,7 +157,7 @@ client.on("ready", async () => {
   console.log(`   Interval: every ${CONFIG.fetchIntervalMinutes} min`);
   console.log(`   Enabled channels: ${getEnabledChannels().length}`);
 
-  await channelExclusion.resolveCustodian();
+  channelExclusion.resolveApprover();
   channelExclusion.startDigest();
 
   // Seed known codes on first boot so we don't spam existing codes
@@ -190,7 +189,7 @@ client.on("messageCreate", async (message) => {
   // Reject excessively long messages early to avoid unnecessary processing
   if (raw.length > 500) return;
 
-  // Bot-owner privacy approvals are accepted in DMs without a command prefix.
+  // Enka privacy approvals are accepted in DMs without a command prefix.
   if (await channelExclusion.handleDirectMessage(message)) return;
 
   // Must start with the prefix

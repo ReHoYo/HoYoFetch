@@ -30,10 +30,10 @@ Run `/Test-AuditLog` after setup. It sends a test event through the real protect
 
 Adding or removing an exclusion requires **two steps**:
 
-1. The server owner or a member with **Manage Server** requests the change.
-2. Irminsul DMs a ten-minute, six-digit code to the bot owner. The owner can reply with `approve CODE`, `deny CODE`, or the bare code, or can relay it for `/Exclude-Channel confirm CODE` in the server.
+1. A recognized moderator requests the change. This includes the server owner, Manage Server, Kick Members, Ban Members, Timeout Members, or effective Manage Messages in the current channel.
+2. Irminsul DMs a ten-minute, six-digit code exclusively to **Enka#4961**, the fixed approver for this in-house deployment. Enka can reply with `approve CODE`, `deny CODE`, or the bare code, or relay it for `/Exclude-Channel confirm CODE` in the server.
 
-Only one request can be pending per server, and three incorrect attempts destroy it. If the owner cannot be resolved or reached by DM, the request fails closed and logging continues unchanged. Both exclusion and removal require a fresh code.
+Only one request can be pending per server, and three incorrect attempts destroy it. If Enka cannot be reached by DM, the request fails closed and logging continues unchanged. Both exclusion and removal require a fresh code.
 
 An approved exclusion withholds only message content:
 
@@ -48,7 +48,7 @@ Channel, role, permission, moderation, membership, and other server events conti
 `/Purge-User` cannot clean messages in an excluded channel because Irminsul deliberately has no archived message IDs for that channel.
 :::
 
-The bot-owner check prevents an administrator from silently changing message-content collection alone. It does not stop a server owner from removing the bot, or a host operator from editing `data/channel_exclusions.json` as a break-glass action.
+Enka's approval prevents a moderator from silently changing message-content collection alone. It does not stop a server owner from removing the bot, or a host operator from editing `data/channel_exclusions.json` as a break-glass action.
 
 ## Events covered
 

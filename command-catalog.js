@@ -241,11 +241,12 @@ export const COMMAND_CATALOG = Object.freeze([
     section: COMMAND_SECTIONS.SETUP,
     route: "exclude-channel",
     routeAliases: ["excludechannel"],
-    access: "admin",
+    access: "fetch_manager",
     syntax: "/Exclude-Channel [action]",
-    summary: "Withhold message content for a channel after bot-owner approval.",
-    help: "Owner-approved channel privacy _(Manage Server)_",
-    permission: "Server owner or Manage Server; bot owner must approve changes",
+    summary: "Withhold message content after approval from Enka#4961.",
+    help: "Enka-approved channel privacy _(admins/mods only)_",
+    permission:
+      "Server owner, Manage Server, or a recognized moderation capability; Enka#4961 must approve changes",
     examples: [
       "/Exclude-Channel status",
       "/Exclude-Channel #private-channel",
@@ -253,7 +254,7 @@ export const COMMAND_CATALOG = Object.freeze([
       "/Exclude-Channel confirm 123456",
     ],
     notes: [
-      "Both exclusion and removal require a fresh one-time code sent to the bot owner.",
+      "Both exclusion and removal require a fresh one-time code sent to Enka#4961.",
       "Channel, role, permission, moderation, and membership events remain logged.",
     ],
   },

@@ -265,7 +265,7 @@ test("Manage Messages is evaluated against the current channel", () => {
   );
 });
 
-test("every audit-log command remains executable by capability-based moderators", () => {
+test("audit and privacy commands remain executable by capability-based moderators", () => {
   const auditCommands = [
     "auditlog",
     "enable-auditlog",
@@ -274,8 +274,12 @@ test("every audit-log command remains executable by capability-based moderators"
     "disableauditlog",
     "test-auditlog",
     "testauditlog",
+    "exclude-channel",
+    "excludechannel",
   ];
   const moderators = [
+    makeMessage({ owner: true }),
+    makeMessage({ serverPermissions: ["ManageServer"] }),
     makeMessage({ serverPermissions: ["KickMembers"] }),
     makeMessage({ serverPermissions: ["BanMembers"] }),
     makeMessage({ serverPermissions: ["TimeoutMembers"] }),
@@ -288,6 +292,7 @@ test("every audit-log command remains executable by capability-based moderators"
     for (const moderator of moderators) {
       assert.equal(authorizeCommand(moderator, access).allowed, true);
     }
+    assert.equal(authorizeCommand(makeMessage(), access).allowed, false);
   }
 });
 
