@@ -76,7 +76,7 @@ Manual moderation fails closed when Irminsul cannot verify the actor's matching 
 - Commands work only for human members in server channels.
 - Direct messages, webhooks, and other bots are ignored.
 - Command names are case-insensitive.
-- Reasons use the literal `reason:` delimiter and may be up to 300 characters.
+- Moderation reasons are written in plain words and may be up to 300 characters; the older `reason:` delimiter still works.
 - Spam-report reasons must be at least 10 characters, and the command has separate anti-abuse limits.
 - Each member can trigger up to five recognized commands within 30 seconds.
 - Multiple simultaneous requests for the same game's codes share one upstream fetch.

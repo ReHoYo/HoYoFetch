@@ -6,16 +6,16 @@ Automatically fetches and posts redemption codes for **Genshin Impact**, **Honka
 
 ## ✨ Features
 
-| Feature                   | Details                                                                                                                                                                                                 |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **6 games supported**     | GI, HSR, ZZZ, HI3, NTE, and WuWa                                                                                                                                                                                                                                                                                 |
+| Feature                   | Details                                                                                                                                                                                                                                                                 |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **6 games supported**     | GI, HSR, ZZZ, HI3, NTE, and WuWa                                                                                                                                                                                                                                        |
 | **Multiple code sources** | [hoyo-codes.seria.moe](https://hoyo-codes.seria.moe) (GI/HSR/ZZZ), [api.ennead.cc](https://api.ennead.cc/mihoyo) (HI3), and Game8 ([NTE](https://game8.co/games/Neverness-to-Everness/archives/593718), [WuWa](https://game8.co/games/Wuthering-Waves/archives/453149)) |
-| **Rich embeds**           | Game-coloured embeds with icons, reward details, and redemption links                                                                                                                                   |
-| **Auto-fetch**            | Hourly scan — posts only when **new** codes appear (no spam)                                                                                                                                            |
-| **Audit log**             | Stoat has no native audit log — `/AuditLog` relays server actions (deletes, edits, joins/leaves, bans, role/channel changes) to a channel of your choice                                                |
-| **Custom emoji**          | Optional: use your own Revolt emoji hub server for game-themed icons                                                                                                                                    |
-| **Case-insensitive**      | `/fetchgi`, `/FETCHGI`, `/FetchGI` all work                                                                                                                                                             |
-| **Zero external deps**    | Only `revolt.js` + `node-fetch`; no database needed                                                                                                                                                     |
+| **Rich embeds**           | Game-coloured embeds with icons, reward details, and redemption links                                                                                                                                                                                                   |
+| **Auto-fetch**            | Hourly scan — posts only when **new** codes appear (no spam)                                                                                                                                                                                                            |
+| **Audit log**             | Stoat has no native audit log — `/AuditLog` relays server actions (deletes, edits, joins/leaves, bans, role/channel changes) to a channel of your choice                                                                                                                |
+| **Custom emoji**          | Optional: use your own Revolt emoji hub server for game-themed icons                                                                                                                                                                                                    |
+| **Case-insensitive**      | `/fetchgi`, `/FETCHGI`, `/FetchGI` all work                                                                                                                                                                                                                             |
+| **Zero external deps**    | Only `revolt.js` + `node-fetch`; no database needed                                                                                                                                                                                                                     |
 
 ## 🚀 Quick Start
 
@@ -54,38 +54,38 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 
 ## 📋 Commands
 
-| Command                                                     | Description                                                                                                 |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `/FetchGI`                                                  | Fetch active Genshin Impact codes                                                                           |
-| `/FetchHSR`                                                 | Fetch active Honkai: Star Rail codes                                                                        |
-| `/FetchZZZ`                                                 | Fetch active Zenless Zone Zero codes                                                                        |
-| `/FetchHI3`                                                 | Fetch active Honkai Impact 3rd codes                                                                        |
-| `/FetchNTE`                                                 | Fetch active Neverness to Everness codes                                                                    |
-| `/FetchWuWa`                                                | Fetch active Wuthering Waves codes                                                                          |
-| `/Report-Spam @member reason: ...`                          | Privately submit suspected friend-request or DM spam for review                                             |
-| `/EnableFetch`                                              | Enable HoYoverse + NTE + WuWa auto-fetch in the current channel (admins/mods only)                          |
-| `/EnableFetchHoyo`                                          | Enable HoYoverse-only auto-fetch in the current channel (admins/mods only)                                  |
-| `/EnableFetchNTE`                                           | Enable NTE-only auto-fetch in the current channel (admins/mods only)                                        |
-| `/EnableFetchWuWa`                                          | Enable WuWa-only auto-fetch in the current channel (admins/mods only)                                       |
-| `/EnableFetchNTEWuWa`                                       | Enable NTE + WuWa auto-fetch in the current channel (admins/mods only)                                      |
-| `/DisableFetch`                                             | Disable auto-fetch in the current channel (admins/mods only)                                                |
-| `/EmojiMode [unicode\|custom]`                              | Show or switch reward-emoji rendering at runtime (admins/mods only)                                         |
-| `/Restart`                                                  | Restart the bot after deploying updates (admins/mods only)                                                  |
-| `/AuditLog [status\|here\|#channel\|off]`                   | View or configure audit logging for the server (admins/mods only)                                           |
-| `/Test-AuditLog`                                            | Send a test event through the audit pipeline to verify delivery (admins/mods only; legacy diagnostic alias) |
-| `/Automod status`                                           | Show this server's automod mode, logger, and ban quorum (admins/mods only)                                  |
-| `/Automod monitor [here\|#channel]`                         | Detect and log cases without changing messages or members (admins/mods only)                                |
-| `/Automod enforce [here\|#channel]`                         | Enable temporary containment and staff-approved ban cases (admins/mods only)                                |
-| `/Automod off`                                              | Disable anti-raid evaluation for this server (admins/mods only)                                             |
-| `/Automod quorum 1\|2`                                      | Set the approval quorum for new cases; production defaults to two (admins/mods only)                        |
-| `/Automod approve CASE_ID`                                  | Approve a pending ban case (owner, Manage Server, or Ban Members only)                                      |
-| `/Automod release @member reason: ...`                      | Remove a timeout and reset that member's automod escalation history (Timeout Members only)                  |
-| `/Ban @member [delete:1h\|6h\|1d\|3d\|7d] reason: ...`      | Ban with optional best-effort observed-message cleanup (Ban Members; cleanup also needs Manage Messages)    |
-| `/Kick @member reason: ...`                                 | Immediately kick a member; this cannot be undone (Kick Members only)                                        |
-| `/Mute @member [10m\|30m\|1h\|4h\|24h\|3d\|7d] reason: ...` | Apply a native timeout, or omit duration for a reaction picker (Timeout Members only)                       |
-| `/Purge-User @member window:1h\|6h\|1d\|3d\|7d reason: ...` | Confirm and delete the member's observed messages in the selected window (Manage Messages only)             |
-| `/HelpHoyoFetch`                                            | Show the two-page command reference; the opener navigates with ◀️/▶️                                        |
-| `/Docs`                                                     | Open the permanent searchable documentation site                                                            |
+| Command                                                  | Description                                                                                                 |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `/FetchGI`                                               | Fetch active Genshin Impact codes                                                                           |
+| `/FetchHSR`                                              | Fetch active Honkai: Star Rail codes                                                                        |
+| `/FetchZZZ`                                              | Fetch active Zenless Zone Zero codes                                                                        |
+| `/FetchHI3`                                              | Fetch active Honkai Impact 3rd codes                                                                        |
+| `/FetchNTE`                                              | Fetch active Neverness to Everness codes                                                                    |
+| `/FetchWuWa`                                             | Fetch active Wuthering Waves codes                                                                          |
+| `/Report-Spam @member reason: ...`                       | Privately submit suspected friend-request or DM spam for review                                             |
+| `/EnableFetch`                                           | Enable HoYoverse + NTE + WuWa auto-fetch in the current channel (admins/mods only)                          |
+| `/EnableFetchHoyo`                                       | Enable HoYoverse-only auto-fetch in the current channel (admins/mods only)                                  |
+| `/EnableFetchNTE`                                        | Enable NTE-only auto-fetch in the current channel (admins/mods only)                                        |
+| `/EnableFetchWuWa`                                       | Enable WuWa-only auto-fetch in the current channel (admins/mods only)                                       |
+| `/EnableFetchNTEWuWa`                                    | Enable NTE + WuWa auto-fetch in the current channel (admins/mods only)                                      |
+| `/DisableFetch`                                          | Disable auto-fetch in the current channel (admins/mods only)                                                |
+| `/EmojiMode [unicode\|custom]`                           | Show or switch reward-emoji rendering at runtime (admins/mods only)                                         |
+| `/Restart`                                               | Restart the bot after deploying updates (admins/mods only)                                                  |
+| `/AuditLog [status\|here\|#channel\|off]`                | View or configure audit logging for the server (admins/mods only)                                           |
+| `/Test-AuditLog`                                         | Send a test event through the audit pipeline to verify delivery (admins/mods only; legacy diagnostic alias) |
+| `/Automod status`                                        | Show this server's automod mode, logger, and ban quorum (admins/mods only)                                  |
+| `/Automod monitor [here\|#channel]`                      | Detect and log cases without changing messages or members (admins/mods only)                                |
+| `/Automod enforce [here\|#channel]`                      | Enable temporary containment and staff-approved ban cases (admins/mods only)                                |
+| `/Automod off`                                           | Disable anti-raid evaluation for this server (admins/mods only)                                             |
+| `/Automod quorum 1\|2`                                   | Set the approval quorum for new cases; production defaults to two (admins/mods only)                        |
+| `/Automod approve CASE_ID`                               | Approve a pending ban case (owner, Manage Server, or Ban Members only)                                      |
+| `/Automod release @member <reason>`                      | Remove a timeout and reset that member's automod escalation history (Timeout Members only)                  |
+| `/Ban @member <reason>`                                  | Ban, then pick a 1h–29d cleanup window by reaction (Ban Members; cleanup also needs Manage Messages)        |
+| `/Kick @member <reason>`                                 | Kick immediately, then pick a cleanup window by reaction; the kick cannot be undone (Kick Members)          |
+| `/Mute @member [10m\|30m\|1h\|4h\|24h\|3d\|7d] <reason>` | Apply a native timeout, or omit duration for a reaction picker (Timeout Members only)                       |
+| `/Purge-User @member <reason>`                           | Pick a window by reaction, then confirm deletion of the member's observed messages (Manage Messages only)   |
+| `/HelpHoyoFetch`                                         | Show the two-page command reference; the opener navigates with ◀️/▶️                                        |
+| `/Docs`                                                  | Open the permanent searchable documentation site                                                            |
 
 > **Note:** Revolt does not support Discord-style slash commands. These are message-based prefix commands using `/` as the prefix. Command names are case-insensitive; channel IDs are preserved exactly.
 
@@ -112,15 +112,15 @@ Irminsul cannot observe private friend requests or DMs between ordinary members.
 
 ### Manual moderation
 
-Reasons are mandatory, use the literal `reason:` delimiter, and may contain up to 300 characters. Commands accept one member mention or one raw user ID. Stoat has no interaction buttons, so Irminsul uses reactions for duration selection, destructive confirmation, and undo.
+Reasons are mandatory but are written in plain words — `/Ban @member for spamming and stuff` — and may contain up to 300 characters. The member, the reason, and any option may appear in any order, and the older `reason:`, `delete:`, and `window:` delimiters are still accepted. Commands accept one member mention or one raw user ID. Stoat has no interaction buttons, so Irminsul uses reactions for duration selection, cleanup windows, destructive confirmation, and undo. Every picker is answerable only by the moderator who ran the command and expires after two minutes.
 
-- `/Ban @member reason: repeated spam` bans immediately. Add `delete:1h`, `delete:6h`, `delete:1d`, `delete:3d`, or `delete:7d` before `reason:` to request message cleanup. The ↩️ reaction on the protected record is available for 10 minutes to any freshly authorized ban moderator; it unbans but cannot restore membership or deleted messages.
-- `/Kick @member reason: raid account` kicks immediately. Stoat cannot put a kicked member back, so no undo reaction is offered and the reason is retained in Irminsul's protected log.
-- `/Mute @member 1h reason: cooldown` applies that duration immediately. Omitting the duration opens a two-minute invoker-only picker: 10m, 30m, 1h, 4h, 24h, 3d, or 7d. The protected record has a 10-minute ↩️ undo reaction for authorized timeout moderators.
-- `/Purge-User @member window:1d reason: cleanup` shows a two-minute ✅/❌ confirmation. Only one purge runs per server at a time.
-- `/Automod release @member reason: false positive` removes the native timeout, resets the member's automod strike history, and closes pending ban reviews for that containment. It can also remove a manually applied timeout.
+- `/Ban @member for repeated spam` bans immediately, then offers a cleanup picker: 1️⃣ 1h, 2️⃣ 6h, 3️⃣ 1d, 4️⃣ 3d, 5️⃣ 7d, 6️⃣ 14d, 7️⃣ 29d, or ❌ to keep the messages. Cleanup needs Manage Messages in every affected channel. The ↩️ reaction on the protected record is available for 10 minutes to any freshly authorized ban moderator; it unbans but cannot restore membership or deleted messages.
+- `/Kick @member for raiding` kicks immediately and offers the same cleanup picker. Stoat cannot put a kicked member back, so no undo reaction is offered and the reason is retained in Irminsul's protected log.
+- `/Mute @member 1h cooldown` applies that duration immediately; omitting the duration opens the 10m–7d picker. Either way the cleanup picker follows. The protected record has a 10-minute ↩️ undo reaction for authorized timeout moderators.
+- `/Purge-User @member because of spam` asks for a window with the same 1h–29d picker, then shows a ✅/❌ confirmation with the number of matching messages. Only one purge or cleanup runs per server at a time.
+- `/Automod release @member false positive` removes the native timeout, resets the member's automod strike history, and closes pending ban reviews for that containment. It can also remove a manually applied timeout.
 
-**History cleanup limitations:** Stoat's ban API has no message-history option and its bulk-delete endpoint accepts only messages from the last seven days. Irminsul therefore groups message IDs recorded while audit logging was active and deletes them separately in bounded batches. Results always report selected, deleted, and failed counts and must not be read as guaranteed-complete. Protected audit entries, locally retained evidence, quotations, reactions, and external copies are never erased by a purge.
+**History cleanup limitations:** cleanup reaches back 29 days, one day short of the 30-day message archive that feeds it. Stoat's ban API has no message-history option and its bulk-delete endpoint accepts only recent messages, so Irminsul bulk-deletes IDs recorded in the last seven days and removes anything older one message at a time. A single cleanup deletes at most 2,000 messages, oldest first, and reports how many were selected, deleted, failed, and left for a follow-up run — never read the result as guaranteed-complete. Protected audit entries, locally retained evidence, quotations, reactions, and external copies are never erased by a purge.
 
 ### Audit log
 

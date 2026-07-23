@@ -14,7 +14,7 @@ Irminsul uses Stoat's **effective permissions**, not role names. A role called â
 | Ban Members                                                | `/Ban`, automod ban approval                                                            |
 | Kick Members                                               | `/Kick`                                                                                 |
 | Timeout Members                                            | `/Mute`, `/Automod release`                                                             |
-| Manage Messages in the current channel                     | `/Purge-User`; also required for `/Ban ... delete:...` cleanup                          |
+| Manage Messages in the current channel                     | `/Purge-User`; also required for `/Ban`, `/Kick`, and `/Mute` message cleanup           |
 
 Recognized moderator capabilities for management commands are **Kick Members**, **Ban Members**, **Timeout Members**, or effective **Manage Messages** in the current channel. The server owner and members with **Manage Server** also qualify.
 
