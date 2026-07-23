@@ -15,6 +15,12 @@ description: Major public Irminsul capabilities and documentation milestones.
 - A message Stoat no longer has is reconciled into the message archive rather than counted as a failure, so repeat cleanups stop retrying an ID that can never be deleted.
 - Individual deletes are paced to stay inside Stoat's rate limit, the retry wait is read from the rate-limit response headers instead of defaulting to one second, and anything still throttled gets one slower retry before being reported.
 
+## Unreleased — audit privacy exclusions
+
+- Added `/Exclude-Channel` with bot-owner DM approval for adding and removing message-content exclusions.
+- Excluded channels no longer archive attachments or relay message create, edit, delete, or bulk-delete content; automod keeps detecting while withholding excerpts.
+- Approval purges existing channel archives and evidence, and protected lifecycle notices plus a daily digest keep exclusions accountable.
+
 ## Unreleased — Wuthering Waves
 
 - Added Wuthering Waves through cached Game8 parsing of limited-time and permanent active-code tables.

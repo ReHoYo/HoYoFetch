@@ -79,6 +79,23 @@ test("readEvidence returns null for missing/evicted paths", async () => {
   assert.equal(store.readEvidence(join(evidenceDir, "nope.png")), null);
 });
 
+test("deleteEvidence removes an indexed evidence file", async () => {
+  resetEvidenceDir();
+  const store = await freshStore({
+    AUDITLOG_EVIDENCE_MAX_MB: "20",
+    AUDITLOG_EVIDENCE_BUDGET_MB: "1024",
+  });
+  const path = store.saveEvidence(
+    "deleteme",
+    0,
+    Buffer.from("private"),
+    "image/png"
+  );
+  assert.equal(store.deleteEvidence(path), true);
+  assert.equal(store.readEvidence(path), null);
+  assert.equal(store.deleteEvidence(path), false);
+});
+
 test("per-file cap rejects oversized attachments", async () => {
   resetEvidenceDir();
   const store = await freshStore({
@@ -182,7 +199,10 @@ test("rejects unsafe message ids and indices (no path traversal)", async () => {
   });
 
   const bytes = Buffer.from("x");
-  assert.equal(store.saveEvidence("../../etc/passwd", 0, bytes, "image/png"), null);
+  assert.equal(
+    store.saveEvidence("../../etc/passwd", 0, bytes, "image/png"),
+    null
+  );
   assert.equal(store.saveEvidence("valid_id", -1, bytes, "image/png"), null);
   assert.equal(store.saveEvidence("valid_id", 1.5, bytes, "image/png"), null);
   assert.equal(store.saveEvidence("", 0, bytes, "image/png"), null);
@@ -203,6 +223,9 @@ test("budget of 0 disables evidence capture entirely", async () => {
   });
 
   assert.equal(store.isEvidenceEnabled(), false);
-  assert.equal(store.saveEvidence("msg1", 0, Buffer.from("x"), "image/png"), null);
+  assert.equal(
+    store.saveEvidence("msg1", 0, Buffer.from("x"), "image/png"),
+    null
+  );
   assert.equal(store.evidenceStats().files, 0);
 });

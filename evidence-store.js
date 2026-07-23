@@ -68,7 +68,10 @@ function loadExisting() {
   try {
     entries = readdirSync(EVIDENCE_DIR);
   } catch (err) {
-    console.warn("evidence-store: could not list directory:", err?.message || err);
+    console.warn(
+      "evidence-store: could not list directory:",
+      err?.message || err
+    );
     return;
   }
 
@@ -140,7 +143,11 @@ export function saveEvidence(messageId, index, bytes, contentType) {
     return null;
   }
 
-  files.set(filename, { path: filePath, size: bytes.length, createdAt: Date.now() });
+  files.set(filename, {
+    path: filePath,
+    size: bytes.length,
+    createdAt: Date.now(),
+  });
   return filePath;
 }
 
@@ -158,6 +165,24 @@ export function readEvidence(path) {
     console.warn("evidence-store: read failed:", err?.message || err);
     return null;
   }
+}
+
+/**
+ * Delete one captured evidence file and remove it from the in-memory index.
+ * Only paths already indexed by this store are eligible.
+ */
+export function deleteEvidence(path) {
+  if (typeof path !== "string") return false;
+  const entry = [...files.entries()].find(([, meta]) => meta.path === path);
+  if (!entry) return false;
+  const [filename, meta] = entry;
+  files.delete(filename);
+  try {
+    unlinkSync(meta.path);
+  } catch {
+    // already gone — the index has still been corrected
+  }
+  return true;
 }
 
 /**

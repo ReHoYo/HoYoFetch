@@ -33,6 +33,7 @@ const AUTOMOD_CASES_PATH = join(DATA_DIR, "automod_cases.json");
 const AUTOMOD_STRIKES_PATH = join(DATA_DIR, "automod_strikes.json");
 const MODERATION_ACTIONS_PATH = join(DATA_DIR, "moderation_actions.json");
 const SPAM_REPORTS_PATH = join(DATA_DIR, "spam_reports.json");
+const CHANNEL_EXCLUSIONS_PATH = join(DATA_DIR, "channel_exclusions.json");
 
 // ── Helpers ────────────────────────────────────────
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -90,6 +91,53 @@ export const AUTO_FETCH_SCOPES = new Set([
 ]);
 
 let channels = readJSON(CHANNELS_PATH, {});
+
+// ═══════════════════════════════════════════════════
+//  Audit-log channel exclusions
+// ═══════════════════════════════════════════════════
+// Shape: {
+//   "<channelId>": {
+//     serverId, excludedAt, requestedBy, approvedBy, requestId
+//   }
+// }
+
+let channelExclusions = readJSON(CHANNEL_EXCLUSIONS_PATH, {});
+
+export function isChannelExcluded(channelId) {
+  return Boolean(channelExclusions[channelId]);
+}
+
+export function getExcludedChannels(serverId) {
+  return Object.entries(channelExclusions)
+    .filter(([, record]) => record.serverId === serverId)
+    .map(([channelId, record]) => ({
+      channelId,
+      ...structuredClone(record),
+    }));
+}
+
+export function getAllChannelExclusions() {
+  return Object.entries(channelExclusions).map(([channelId, record]) => ({
+    channelId,
+    ...structuredClone(record),
+  }));
+}
+
+export function addChannelExclusion(record) {
+  if (!record?.channelId) return null;
+  const { channelId, ...stored } = structuredClone(record);
+  channelExclusions[channelId] = stored;
+  writeJSON(CHANNEL_EXCLUSIONS_PATH, channelExclusions);
+  return { channelId, ...structuredClone(stored) };
+}
+
+export function removeChannelExclusion(channelId) {
+  const existing = channelExclusions[channelId];
+  if (!existing) return null;
+  delete channelExclusions[channelId];
+  writeJSON(CHANNEL_EXCLUSIONS_PATH, channelExclusions);
+  return { channelId, ...structuredClone(existing) };
+}
 
 function normaliseScope(scope) {
   return AUTO_FETCH_SCOPES.has(scope) ? scope : "all";
@@ -214,9 +262,7 @@ export function detectFreshCodes(gameKey, previousCodes, currentCodes) {
 
 function getCodeIdentity(gameKey, code) {
   const value = String(code ?? "").trim();
-  return gameKey === "nte" || gameKey === "wuwa"
-    ? value.toUpperCase()
-    : value;
+  return gameKey === "nte" || gameKey === "wuwa" ? value.toUpperCase() : value;
 }
 
 /**

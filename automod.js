@@ -10,6 +10,7 @@ import {
   getAutomodCase,
   getAutomodConfig,
   getAutomodStrike,
+  isChannelExcluded,
   pruneAutomodCases,
   setAutomodConfig,
   setAutomodStrike,
@@ -61,11 +62,24 @@ const DEFAULT_STORE = Object.freeze({
   getAutomodCase,
   getAutomodConfig,
   getAutomodStrike,
+  isChannelExcluded,
   pruneAutomodCases,
   setAutomodConfig,
   setAutomodStrike,
   updateAutomodCase,
 });
+
+export const EXCLUDED_CHANNEL_EXCERPT =
+  "*(withheld — privacy-excluded channel)*";
+
+export function redactExcludedEvidence(messages, exclusionCheck) {
+  return messages.map((entry) => ({
+    ...entry,
+    excerpt: exclusionCheck(entry.channelId)
+      ? EXCLUDED_CHANNEL_EXCERPT
+      : entry.excerpt,
+  }));
+}
 
 function asTime(value) {
   const time =
@@ -537,12 +551,19 @@ export function createAutomod(
       }
 
       const openedAt = now();
+      const resultForLog = {
+        ...result,
+        messages: redactExcludedEvidence(
+          result.messages,
+          store.isChannelExcluded ?? (() => false)
+        ),
+      };
       const evidence = await postProtected(
         config.logChannelId,
         formatCaseEmbed({
           caseId,
           userId,
-          result,
+          result: resultForLog,
           mode: effectiveMode,
           now: openedAt,
           accountCreatedAt: message.author?.createdAt,

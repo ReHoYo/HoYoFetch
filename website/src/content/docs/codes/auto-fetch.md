@@ -9,13 +9,13 @@ Irminsul checks its sources on a fixed interval and posts only codes that are ne
 
 Run one of these commands in the destination channel:
 
-| Command                 | Feed                              |
-| ----------------------- | --------------------------------- |
-| `/EnableFetch`          | HoYoverse games, NTE, and WuWa    |
-| `/EnableFetchHoyo`      | Genshin Impact, HSR, ZZZ, and HI3 |
-| `/EnableFetchNTE`       | NTE only                          |
-| `/EnableFetchWuWa`      | WuWa only                         |
-| `/EnableFetchNTEWuWa`   | NTE and WuWa                      |
+| Command               | Feed                              |
+| --------------------- | --------------------------------- |
+| `/EnableFetch`        | HoYoverse games, NTE, and WuWa    |
+| `/EnableFetchHoyo`    | Genshin Impact, HSR, ZZZ, and HI3 |
+| `/EnableFetchNTE`     | NTE only                          |
+| `/EnableFetchWuWa`    | WuWa only                         |
+| `/EnableFetchNTEWuWa` | NTE and WuWa                      |
 
 Running a different enable command updates the channel's existing scope. Run `/DisableFetch` in that channel to remove it.
 

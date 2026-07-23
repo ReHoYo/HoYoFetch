@@ -577,6 +577,69 @@ test("excluded safety reports never enter the message archive or delete log", as
   storeModule.disableAuditLog(serverId);
 });
 
+test("privacy-excluded channels gate create, delete, edit, and bulk-delete content", async () => {
+  const client = makeClient();
+  const serverId = "PRIVACYSERVER";
+  const sourceChannelId = "PRIVACYCHANNEL";
+  const auditChannelId = "PRIVACYAUDIT";
+  client.channels.set(sourceChannelId, {
+    id: sourceChannelId,
+    serverId,
+    type: "TextChannel",
+  });
+
+  let nextId = 0;
+  const protection = createTamperProtection(client, {
+    send: async () => ({ _id: `PRIVACYLOG${++nextId}` }),
+    request: async () => ({ ok: true, status: 200, data: {} }),
+    logger: silentLogger,
+  });
+  storeModule.enableAuditLog(serverId, auditChannelId);
+  storeModule.addChannelExclusion({
+    channelId: sourceChannelId,
+    serverId,
+    excludedAt: Date.now(),
+    requestedBy: "PRIVACYMOD",
+    approvedBy: "PRIVACYOWNER",
+    requestId: "PRIVACYREQUEST",
+  });
+  initAuditLog(client, {
+    sendProtected: protection.sendProtected,
+    request: async () => ({ ok: true, status: 200, data: {} }),
+  });
+
+  client.emit("messageCreate", {
+    id: "PRIVACYMESSAGE",
+    channelId: sourceChannelId,
+    authorId: "PRIVACYUSER",
+    content: "must remain private",
+  });
+  assert.equal(getArchivedMessage("PRIVACYMESSAGE"), null);
+
+  const before = storeModule.getAllProtectedMessages().length;
+  client.emitRaw({
+    type: "MessageDelete",
+    id: "PRIVACYMESSAGE",
+    channel: sourceChannelId,
+  });
+  client.emitRaw({
+    type: "MessageUpdate",
+    id: "PRIVACYMESSAGE",
+    channel: sourceChannelId,
+    data: { content: "still private" },
+  });
+  client.emitRaw({
+    type: "BulkMessageDelete",
+    ids: ["PRIVACYMESSAGE"],
+    channel: sourceChannelId,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(storeModule.getAllProtectedMessages().length, before);
+
+  storeModule.removeChannelExclusion(sourceChannelId);
+  storeModule.disableAuditLog(serverId);
+});
+
 test("live user identity events enter the protected audit pipeline", async () => {
   const client = makeClient();
   const serverId = "IDENTITYSERVER";

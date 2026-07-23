@@ -75,6 +75,7 @@ import { createAutomod } from "./automod.js";
 import { createModeration } from "./moderation.js";
 import { createHelpMenu } from "./help-menu.js";
 import { createSpamReporter } from "./spam-report.js";
+import { createChannelExclusion } from "./channel-exclusion.js";
 import { DOCS_URL } from "./command-catalog.js";
 
 // ── Validate token ─────────────────────────────────
@@ -115,6 +116,13 @@ const helpMenu = createHelpMenu(client, {
   request: apiRequest,
   prefix: CONFIG.prefix,
 });
+const channelExclusion = createChannelExclusion(client, {
+  send: (channelId, data) => safeSend({ id: channelId }, data),
+  sendProtected: tamperProtection.sendProtected,
+  request: apiRequest,
+  prefix: CONFIG.prefix,
+  configuredCustodianId: CONFIG.custodianUserId,
+});
 
 // ── Audit log ───────────────────────────────────────
 const auditLog = initAuditLog(client, {
@@ -150,6 +158,9 @@ client.on("ready", async () => {
   console.log(`   Interval: every ${CONFIG.fetchIntervalMinutes} min`);
   console.log(`   Enabled channels: ${getEnabledChannels().length}`);
 
+  await channelExclusion.resolveCustodian();
+  channelExclusion.startDigest();
+
   // Seed known codes on first boot so we don't spam existing codes
   await seedAllGames();
 
@@ -179,6 +190,9 @@ client.on("messageCreate", async (message) => {
   // Reject excessively long messages early to avoid unnecessary processing
   if (raw.length > 500) return;
 
+  // Bot-owner privacy approvals are accepted in DMs without a command prefix.
+  if (await channelExclusion.handleDirectMessage(message)) return;
+
   // Must start with the prefix
   if (!raw.toLowerCase().startsWith(CONFIG.prefix.toLowerCase())) return;
 
@@ -203,7 +217,12 @@ client.on("messageCreate", async (message) => {
   const cmdArgs = rawBody.slice(cmdWord.length).trim().split(/\s+/);
   if (cmdArgs.length === 1 && cmdArgs[0] === "") cmdArgs.length = 0;
   const accessKey =
-    cmd === "auditlog" || cmd === "emojimode" ? cmd : rawBody.toLowerCase();
+    cmd === "auditlog" ||
+    cmd === "emojimode" ||
+    cmd === "exclude-channel" ||
+    cmd === "excludechannel"
+      ? cmd
+      : rawBody.toLowerCase();
   const access = getCommandAccess(accessKey, COMMAND_GAME_MAP);
   if (!access) return;
 
@@ -346,6 +365,12 @@ client.on("messageCreate", async (message) => {
       if (auditAction && auditAction !== "status") {
         await auditLog.configurationChanged(message.server.id);
       }
+      return;
+    }
+
+    // ── Exclude-Channel [status|here|remove|confirm|cancel] ─
+    if (cmd === "exclude-channel" || cmd === "excludechannel") {
+      await channelExclusion.handleCommand(message, cmdArgs);
       return;
     }
 

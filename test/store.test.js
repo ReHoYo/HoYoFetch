@@ -107,6 +107,34 @@ test("audit log channel configuration round-trips and disables", () => {
   assert.equal(store.getAuditLogChannel("server-audit"), null);
 });
 
+test("channel exclusions persist and filter by server", () => {
+  store.addChannelExclusion({
+    channelId: "privacy-channel",
+    serverId: "privacy-server",
+    excludedAt: 123,
+    requestedBy: "moderator",
+    approvedBy: "owner",
+    requestId: "request",
+  });
+  assert.equal(store.isChannelExcluded("privacy-channel"), true);
+  assert.deepEqual(store.getExcludedChannels("privacy-server"), [
+    {
+      channelId: "privacy-channel",
+      serverId: "privacy-server",
+      excludedAt: 123,
+      requestedBy: "moderator",
+      approvedBy: "owner",
+      requestId: "request",
+    },
+  ]);
+  assert.equal(store.getAllChannelExclusions().length, 1);
+  assert.equal(
+    store.removeChannelExclusion("privacy-channel").requestId,
+    "request"
+  );
+  assert.equal(store.isChannelExcluded("privacy-channel"), false);
+});
+
 test("server-settings snapshots round-trip atomically and can be removed", () => {
   store.setServerSettingsSnapshot("server-settings", {
     version: 1,

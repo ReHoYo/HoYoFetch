@@ -166,6 +166,34 @@ test("applyEdit returns previous content and updates the entry", () => {
   assert.equal(archive.applyEdit("ghost", "x"), undefined);
 });
 
+test("purgeChannelFromArchive removes only one channel and returns evidence paths", async () => {
+  archive.recordMessage({
+    id: "privacyOne",
+    channelId: "privacyChannel",
+    serverId: "srv1",
+    authorId: "userA",
+    content: "private",
+    attachments: [{ evidencePath: "/evidence/private.png" }],
+  });
+  archive.recordMessage({
+    id: "publicOne",
+    channelId: "publicChannel",
+    serverId: "srv1",
+    authorId: "userA",
+    content: "public",
+  });
+
+  assert.deepEqual(archive.purgeChannelFromArchive("privacyChannel"), [
+    "/evidence/private.png",
+  ]);
+  assert.equal(archive.getArchivedMessage("privacyOne"), null);
+  assert.equal(archive.getArchivedMessage("publicOne").content, "public");
+
+  const rebooted = await reimportArchive();
+  assert.equal(rebooted.getArchivedMessage("privacyOne"), null);
+  assert.equal(rebooted.getArchivedMessage("publicOne").content, "public");
+});
+
 test("journal replays across restarts, including edits", async () => {
   archive.recordMessage({
     id: "msg3",

@@ -53,7 +53,7 @@ async function fetchFromSeria(apiParam) {
   }
 
   const data = await res.json();
-  const codes = Array.isArray(data) ? data : data.codes ?? data.data ?? [];
+  const codes = Array.isArray(data) ? data : (data.codes ?? data.data ?? []);
   return codes.map(normalise);
 }
 
@@ -110,11 +110,14 @@ async function fetchJSON(url) {
   // Handle various response shapes:
   //   ennead API:  { active: [...], inactive: [...] }
   //   seria API:   [...] or { codes: [...] }
-  const arr = data.active ?? (Array.isArray(data) ? data : data.codes ?? data.data ?? []);
+  const arr =
+    data.active ??
+    (Array.isArray(data) ? data : (data.codes ?? data.data ?? []));
   return arr.map((item) => {
     // ennead returns rewards as an array of strings — join them
-    const rewards =
-      Array.isArray(item.rewards) ? item.rewards.join(", ") : item.rewards;
+    const rewards = Array.isArray(item.rewards)
+      ? item.rewards.join(", ")
+      : item.rewards;
     return normalise({ ...item, rewards });
   });
 }
@@ -235,12 +238,15 @@ export function fetchWuWaCodes(options = {}) {
   return fetchGame8Codes(WUWA_SOURCE.gameKey, options);
 }
 
-export async function fetchGame8Codes(gameKey, {
-  now = Date.now(),
-  fetchImpl = fetch,
-  readCache = getSourceCache,
-  writeCache = setSourceCache,
-} = {}) {
+export async function fetchGame8Codes(
+  gameKey,
+  {
+    now = Date.now(),
+    fetchImpl = fetch,
+    readCache = getSourceCache,
+    writeCache = setSourceCache,
+  } = {}
+) {
   const source = GAME8_SOURCES[gameKey];
   if (!source) throw new Error(`Unknown Game8 game key: ${gameKey}`);
 
@@ -250,7 +256,9 @@ export async function fetchGame8Codes(gameKey, {
 
   if (lastAttemptAt > 0 && now - lastAttemptAt < source.cacheTtlMs) {
     if (hasCachedCodes) {
-      return cache.codes.map((entry) => normalise(entry, { preserveCodeCase: true }));
+      return cache.codes.map((entry) =>
+        normalise(entry, { preserveCodeCase: true })
+      );
     }
     throw new Error(
       `${source.logLabel} cache is empty and the Game8 retry window has not elapsed`
@@ -275,7 +283,9 @@ export async function fetchGame8Codes(gameKey, {
       console.warn(
         `   [${source.logLabel}] Game8 failed, serving cached codes: ${err.message}`
       );
-      return cache.codes.map((entry) => normalise(entry, { preserveCodeCase: true }));
+      return cache.codes.map((entry) =>
+        normalise(entry, { preserveCodeCase: true })
+      );
     }
     throw err;
   }
@@ -329,11 +339,16 @@ function parseGame8Codes(html, source) {
       const rewards = extractGame8Rewards(row, cells);
 
       seen.add(codeIdentity);
-      codes.push(normalise({
-        code: code.trim(),
-        rewards,
-        source: source.name,
-      }, { preserveCodeCase: true }));
+      codes.push(
+        normalise(
+          {
+            code: code.trim(),
+            rewards,
+            source: source.name,
+          },
+          { preserveCodeCase: true }
+        )
+      );
     }
   }
 
@@ -351,11 +366,15 @@ function getGame8NTEActiveCodesTable(html) {
     throw new Error("Could not find the Game8 active redeem codes section");
   }
 
-  const activeEnd = getFirstPatternIndex(html, [
-    /Neverness\s+to\s+Everness\s+Expired\s+Codes/i,
-    /Expired\s+Neverness\s+to\s+Everness\s+Codes/i,
-    /List\s+of\s+All\s+Expired\s+Redeem\s+Codes/i,
-  ], activeStart + 1);
+  const activeEnd = getFirstPatternIndex(
+    html,
+    [
+      /Neverness\s+to\s+Everness\s+Expired\s+Codes/i,
+      /Expired\s+Neverness\s+to\s+Everness\s+Codes/i,
+      /List\s+of\s+All\s+Expired\s+Redeem\s+Codes/i,
+    ],
+    activeStart + 1
+  );
   const tableStart = html.indexOf("<table", activeStart);
 
   if (tableStart === -1 || (activeEnd !== -1 && tableStart > activeEnd)) {
@@ -364,18 +383,16 @@ function getGame8NTEActiveCodesTable(html) {
 
   const tableEnd = html.indexOf("</table>", tableStart);
   if (tableEnd === -1) {
-    throw new Error("Could not find the end of the Game8 active redeem codes table");
+    throw new Error(
+      "Could not find the end of the Game8 active redeem codes table"
+    );
   }
 
   return html.slice(tableStart, tableEnd + "</table>".length);
 }
 
 function getGame8WuWaActiveCodesTables(html) {
-  const activeStart = getHeadingIndex(
-    html,
-    2,
-    /Wuthering\s+Waves\s+Codes/i
-  );
+  const activeStart = getHeadingIndex(html, 2, /Wuthering\s+Waves\s+Codes/i);
   if (activeStart === -1) {
     throw new Error("Could not find the Game8 Wuthering Waves codes section");
   }
@@ -388,33 +405,37 @@ function getGame8WuWaActiveCodesTables(html) {
         /How\s+to\s+Redeem\s+Wuthering\s+Waves\s+Codes/i,
         activeStart + 1
       ),
-      getHeadingIndex(
-        html,
-        2,
-        /Expired\s+Redeem\s+Codes/i,
-        activeStart + 1
-      ),
+      getHeadingIndex(html, 2, /Expired\s+Redeem\s+Codes/i, activeStart + 1),
       html.length,
     ].filter((index) => index !== -1)
   );
-  const section = html.slice(activeStart, activeEnd === -1 ? html.length : activeEnd);
+  const section = html.slice(
+    activeStart,
+    activeEnd === -1 ? html.length : activeEnd
+  );
   const tables = section.match(/<table\b[^>]*>[\s\S]*?<\/table>/gi) || [];
 
   if (tables.length === 0) {
-    throw new Error("Could not find the Game8 Wuthering Waves active code tables");
+    throw new Error(
+      "Could not find the Game8 Wuthering Waves active code tables"
+    );
   }
 
   return tables;
 }
 
 function extractGame8Code(rowHtml) {
-  const preferred = extractGame8InputCode(rowHtml, { requireClipboardClass: true });
+  const preferred = extractGame8InputCode(rowHtml, {
+    requireClipboardClass: true,
+  });
   if (preferred) return preferred;
 
   const cells = extractTableCells(rowHtml);
   if (cells.length === 0) return null;
   const codeCell = cells[0] ?? rowHtml;
-  const inputFallback = extractGame8InputCode(codeCell, { requireClipboardClass: false });
+  const inputFallback = extractGame8InputCode(codeCell, {
+    requireClipboardClass: false,
+  });
   if (inputFallback) return inputFallback;
 
   return extractGame8TextCode(codeCell);
@@ -489,7 +510,10 @@ function extractTableCells(rowHtml) {
 }
 
 function extractGame8Rewards(rowHtml, cells) {
-  const rewardBlocks = rowHtml.match(/<div\b[^>]*class=['"][^'"]*\balign\b[^'"]*['"][^>]*>[\s\S]*?<\/div>/gi) || [];
+  const rewardBlocks =
+    rowHtml.match(
+      /<div\b[^>]*class=['"][^'"]*\balign\b[^'"]*['"][^>]*>[\s\S]*?<\/div>/gi
+    ) || [];
   const fallback = cells.length >= 2 ? [cells[1]] : [];
   const parts = (rewardBlocks.length ? rewardBlocks : fallback)
     .map(htmlToText)
@@ -527,7 +551,7 @@ function decodeHtml(text) {
     gt: ">",
     lt: "<",
     nbsp: " ",
-    quot: "\"",
+    quot: '"',
   };
 
   return String(text).replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity) => {
@@ -588,7 +612,7 @@ function normalise(raw, { preserveCodeCase = false } = {}) {
 /**
  * Enrich the reward string with emoji from the active emoji map.
  */
-export function formatRewards(rawRewards, gameKey) {
+export function formatRewards(rawRewards, _gameKey) {
   const emojiMap = getEmojiMap();
 
   if (!rawRewards || rawRewards.trim() === "") {
@@ -596,7 +620,8 @@ export function formatRewards(rawRewards, gameKey) {
   }
 
   // Limit input length to prevent ReDoS on maliciously crafted API responses
-  const safeRewards = rawRewards.length > 500 ? rawRewards.slice(0, 500) : rawRewards;
+  const safeRewards =
+    rawRewards.length > 500 ? rawRewards.slice(0, 500) : rawRewards;
 
   // Clean up messy reward strings from APIs
   let cleaned = cleanRewards(safeRewards);
@@ -611,8 +636,13 @@ export function formatRewards(rawRewards, gameKey) {
     const emojiByKeyword = new Map(
       emojiEntries.map(([keyword, emoji]) => [keyword.toLowerCase(), emoji])
     );
-    const keywordPattern = emojiEntries.map(([keyword]) => escapeRegex(keyword)).join("|");
-    const regex = new RegExp(`(^|[^A-Za-z0-9])(${keywordPattern})(?=$|[^A-Za-z0-9])`, "gi");
+    const keywordPattern = emojiEntries
+      .map(([keyword]) => escapeRegex(keyword))
+      .join("|");
+    const regex = new RegExp(
+      `(^|[^A-Za-z0-9])(${keywordPattern})(?=$|[^A-Za-z0-9])`,
+      "gi"
+    );
     cleaned = cleaned.replace(regex, (full, prefix, keyword) => {
       return `${prefix}${emojiByKeyword.get(keyword.toLowerCase())} ${keyword}`;
     });
@@ -630,26 +660,30 @@ export function formatRewards(rawRewards, gameKey) {
  *   "Crystals x60"            → "Crystals ×60"
  */
 function cleanRewards(raw) {
-  return raw
-    // Split on semicolons, clean each part, rejoin with commas
-    .split(";")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => {
-      return part
-        // "ItemName*3" → "ItemName ×3"
-        .replace(/\*(\d+)/g, " ×$1")
-        // "x60" or "X60" or " x 60" → " ×60"
-        .replace(/\bx\s*(\d+)/gi, "×$1")
-        // "ItemName3" (letter/quote followed by digits at end) → "ItemName ×3"
-        .replace(/([a-zA-Z)'])(\d+)$/g, "$1 ×$2")
-        // Normalise "× 3" or "×  3" → "×3"
-        .replace(/×\s+/g, "×")
-        // Ensure space before ×
-        .replace(/(\S)×/g, "$1 ×")
-        .trim();
-    })
-    .join(", ");
+  return (
+    raw
+      // Split on semicolons, clean each part, rejoin with commas
+      .split(";")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        return (
+          part
+            // "ItemName*3" → "ItemName ×3"
+            .replace(/\*(\d+)/g, " ×$1")
+            // "x60" or "X60" or " x 60" → " ×60"
+            .replace(/\bx\s*(\d+)/gi, "×$1")
+            // "ItemName3" (letter/quote followed by digits at end) → "ItemName ×3"
+            .replace(/([a-zA-Z)'])(\d+)$/g, "$1 ×$2")
+            // Normalise "× 3" or "×  3" → "×3"
+            .replace(/×\s+/g, "×")
+            // Ensure space before ×
+            .replace(/(\S)×/g, "$1 ×")
+            .trim()
+        );
+      })
+      .join(", ")
+  );
 }
 
 function escapeRegex(s) {

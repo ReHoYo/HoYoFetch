@@ -12,6 +12,7 @@ The bot persists data needed to avoid duplicate announcements and resume configu
 - subscribed channels and their feed scopes;
 - known redemption codes and source cache entries;
 - audit destinations and server-setting baselines;
+- bot-owner-approved channel exclusions in `channel_exclusions.json`;
 - automod modes, cases, approvals, strikes, and reversible actions;
 - bounded spam-report correlation metadata without member-supplied reasons; and
 - protected-message records needed to restore deleted audit entries.
@@ -21,6 +22,8 @@ The bot persists data needed to avoid duplicate announcements and resume configu
 When audit logging is active, server messages are journaled so later edit and delete events can show what Irminsul previously observed. The default retention is 30 days with a cap of 100,000 messages.
 
 The archive is operational evidence. Restrict host access, include it in your community's retention policy, and avoid copying it into public bug reports.
+
+An approved `/Exclude-Channel` request purges that channel's existing archive entries and prevents new message content from entering the archive. Removing an exclusion affects only future messages; purged content is not restored.
 
 ## Attachments
 
@@ -39,7 +42,7 @@ Irminsul does not intentionally persist or print:
 
 ## Protected audit records
 
-Protected audit messages are intentionally difficult to erase silently: when deletion is detected, Irminsul reposts the stored record and tracks its replacement. A purge never removes protected audit records or locally retained evidence.
+Protected audit messages are intentionally difficult to erase silently: when deletion is detected, Irminsul reposts the stored record and tracks its replacement. A member purge never removes protected audit records or locally retained evidence. An owner-approved channel exclusion is the exception: it deliberately deletes archived content and evidence for that channel.
 
 Spam-report reasons exist only inside these protected records. The separate `spam_reports.json` file stores identifiers, timestamps, channel references, and the protected message reference for 30-day correlation; it does not duplicate the supplied reason.
 

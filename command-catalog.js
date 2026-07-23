@@ -237,6 +237,27 @@ export const COMMAND_CATALOG = Object.freeze([
     examples: ["/Test-AuditLog"],
   },
   {
+    id: "exclude-channel",
+    section: COMMAND_SECTIONS.SETUP,
+    route: "exclude-channel",
+    routeAliases: ["excludechannel"],
+    access: "admin",
+    syntax: "/Exclude-Channel [action]",
+    summary: "Withhold message content for a channel after bot-owner approval.",
+    help: "Owner-approved channel privacy _(Manage Server)_",
+    permission: "Server owner or Manage Server; bot owner must approve changes",
+    examples: [
+      "/Exclude-Channel status",
+      "/Exclude-Channel #private-channel",
+      "/Exclude-Channel remove #private-channel",
+      "/Exclude-Channel confirm 123456",
+    ],
+    notes: [
+      "Both exclusion and removal require a fresh one-time code sent to the bot owner.",
+      "Channel, role, permission, moderation, and membership events remain logged.",
+    ],
+  },
+  {
     id: "restart",
     section: COMMAND_SECTIONS.SETUP,
     route: "restart",

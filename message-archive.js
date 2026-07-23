@@ -89,7 +89,8 @@ function loadArchive() {
       if (entry) entry.content = op.content;
     } else if (op.op === "delete" && typeof op.id === "string") {
       const entry = messages.get(op.id);
-      if (entry) entry.deletedAt = op.deletedAt ?? Date.now();
+      if (op.purge === true) messages.delete(op.id);
+      else if (entry) entry.deletedAt = op.deletedAt ?? Date.now();
     }
   }
 
@@ -219,6 +220,31 @@ export function markMessagesDeleted(ids, deletedAt = Date.now()) {
   }
   appendOps(ops);
   return ops.length;
+}
+
+/**
+ * Permanently remove all archived content for one privacy-excluded channel.
+ * @param {string} channelId
+ * @return {string[]} evidence paths formerly referenced by removed entries
+ */
+export function purgeChannelFromArchive(channelId) {
+  const evidencePaths = [];
+  const ops = [];
+  const deletedAt = Date.now();
+  for (const [id, entry] of messages) {
+    if (entry.channelId !== channelId) continue;
+    if (Array.isArray(entry.attachments)) {
+      for (const attachment of entry.attachments) {
+        if (typeof attachment?.evidencePath === "string") {
+          evidencePaths.push(attachment.evidencePath);
+        }
+      }
+    }
+    messages.delete(id);
+    ops.push({ op: "delete", id, deletedAt, purge: true });
+  }
+  appendOps(ops);
+  return evidencePaths;
 }
 
 /**

@@ -16,6 +16,7 @@ const {
   buildEvidenceExcerpt,
   createAutomod,
   normalizeAutomodContent,
+  redactExcludedEvidence,
 } = await import("../automod.js");
 
 const SERVER_ID = "SERVER123";
@@ -26,6 +27,23 @@ const VOTER_ONE = "VOTER123";
 const VOTER_TWO = "VOTER456";
 const OWNER_ID = "OWNER123";
 const BAN_BIT = 2 ** 7;
+
+test("automod redacts excluded-channel excerpts without dropping signals", () => {
+  const messages = [
+    { channelId: "private", excerpt: "secret scam text" },
+    { channelId: "public", excerpt: "visible text" },
+  ];
+  assert.deepEqual(
+    redactExcludedEvidence(messages, (channelId) => channelId === "private"),
+    [
+      {
+        channelId: "private",
+        excerpt: "*(withheld — privacy-excluded channel)*",
+      },
+      { channelId: "public", excerpt: "visible text" },
+    ]
+  );
+});
 
 function makeMemoryStore({ mode = "off", quorum = 2 } = {}) {
   const configs = new Map([

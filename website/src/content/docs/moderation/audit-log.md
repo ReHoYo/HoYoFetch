@@ -18,6 +18,38 @@ The older `/Enable-AuditLog` and `/Disable-AuditLog` forms remain accepted for c
 
 Run `/Test-AuditLog` after setup. It sends a test event through the real protected-delivery pipeline and reports message archive, evidence usage, settings baseline, and webhook coverage.
 
+## Exclude private channels
+
+```text
+/Exclude-Channel status
+/Exclude-Channel #private-channel
+/Exclude-Channel remove #private-channel
+/Exclude-Channel confirm 123456
+/Exclude-Channel cancel
+```
+
+Adding or removing an exclusion requires **two steps**:
+
+1. The server owner or a member with **Manage Server** requests the change.
+2. Irminsul DMs a ten-minute, six-digit code to the bot owner. The owner can reply with `approve CODE`, `deny CODE`, or the bare code, or can relay it for `/Exclude-Channel confirm CODE` in the server.
+
+Only one request can be pending per server, and three incorrect attempts destroy it. If the owner cannot be resolved or reached by DM, the request fails closed and logging continues unchanged. Both exclusion and removal require a fresh code.
+
+An approved exclusion withholds only message content:
+
+- new messages and attachments are not archived;
+- edits, deletes, and bulk deletes are not relayed;
+- existing archive entries and locally captured evidence for the channel are permanently purged; and
+- automod continues detecting raids, but its protected case log replaces excerpts from the channel with a privacy-withheld notice.
+
+Channel, role, permission, moderation, membership, and other server events continue logging. The audit-log destination itself cannot be excluded. A protected daily digest lists every active exclusion so a privacy change cannot remain quiet.
+
+:::caution[Purge coverage]
+`/Purge-User` cannot clean messages in an excluded channel because Irminsul deliberately has no archived message IDs for that channel.
+:::
+
+The bot-owner check prevents an administrator from silently changing message-content collection alone. It does not stop a server owner from removing the bot, or a host operator from editing `data/channel_exclusions.json` as a break-glass action.
+
 ## Events covered
 
 The live pipeline and periodic reconciliation cover:

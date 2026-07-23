@@ -4,8 +4,16 @@ import { readFileSync, existsSync } from "fs";
 
 // ── Load .env manually (no dotenv dependency) ──────
 const ALLOWED_ENV_KEYS = new Set([
-  "BOT_TOKEN", "PREFIX", "FETCH_INTERVAL", "FETCH_COOLDOWN", "EMOJI_MODE", "HOYO_API_BASE",
-  "AUDITLOG_DEBUG", "AUDITLOG_EVIDENCE_MAX_MB", "AUDITLOG_EVIDENCE_BUDGET_MB",
+  "BOT_TOKEN",
+  "PREFIX",
+  "FETCH_INTERVAL",
+  "FETCH_COOLDOWN",
+  "EMOJI_MODE",
+  "HOYO_API_BASE",
+  "AUDITLOG_DEBUG",
+  "AUDITLOG_EVIDENCE_MAX_MB",
+  "AUDITLOG_EVIDENCE_BUDGET_MB",
+  "CUSTODIAN_USER_ID",
 ]);
 
 function loadEnv() {
@@ -20,8 +28,10 @@ function loadEnv() {
     const key = trimmed.slice(0, eqIdx).trim();
     let val = trimmed.slice(eqIdx + 1).trim();
     // Strip surrounding quotes (single or double), matching dotenv behaviour
-    if ((val.startsWith('"') && val.endsWith('"')) ||
-      (val.startsWith("'") && val.endsWith("'"))) {
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
       val = val.slice(1, -1);
     }
     // Only set recognised keys to prevent overwriting sensitive Node.js env vars
@@ -36,9 +46,10 @@ loadEnv();
 
 // ── Exported config ────────────────────────────────
 const rawInterval = parseInt(process.env.FETCH_INTERVAL || "60", 10);
-const fetchIntervalMinutes = Number.isFinite(rawInterval) && rawInterval >= 1
-  ? Math.min(rawInterval, 1440)
-  : 60;
+const fetchIntervalMinutes =
+  Number.isFinite(rawInterval) && rawInterval >= 1
+    ? Math.min(rawInterval, 1440)
+    : 60;
 
 if (fetchIntervalMinutes !== rawInterval) {
   console.warn(
@@ -47,9 +58,10 @@ if (fetchIntervalMinutes !== rawInterval) {
 }
 
 const rawCooldown = parseInt(process.env.FETCH_COOLDOWN || "10", 10);
-const fetchCooldownSeconds = Number.isFinite(rawCooldown) && rawCooldown >= 0
-  ? Math.min(rawCooldown, 3600)
-  : 10;
+const fetchCooldownSeconds =
+  Number.isFinite(rawCooldown) && rawCooldown >= 0
+    ? Math.min(rawCooldown, 3600)
+    : 10;
 
 export const CONFIG = {
   token: process.env.BOT_TOKEN || "",
@@ -58,6 +70,7 @@ export const CONFIG = {
   fetchCooldownSeconds,
   hoyoApiBase:
     process.env.HOYO_API_BASE || "https://hoyo-codes.seria.moe/codes",
+  custodianUserId: process.env.CUSTODIAN_USER_ID || "",
 };
 
 // ═══════════════════════════════════════════════════
@@ -93,29 +106,57 @@ export function setEmojiMode(mode) {
 
 const UNICODE_EMOJI = {
   // ── Genshin Impact ──────────────────────────────
-  primogem: "💎", mora: "🪙", "hero's wit": "📕",
-  "adventurer's experience": "📗", "mystic enhancement ore": "🔮",
-  "fine enhancement ore": "🔷", resin: "🌙",
+  primogem: "💎",
+  mora: "🪙",
+  "hero's wit": "📕",
+  "adventurer's experience": "📗",
+  "mystic enhancement ore": "🔮",
+  "fine enhancement ore": "🔷",
+  resin: "🌙",
   // ── Honkai: Star Rail ───────────────────────────
-  "stellar jade": "💎", credit: "🪙", "traveler's guide": "📕",
-  "adventure log": "📗", "refined aether": "🔮",
-  "condensed aether": "🔷", "trailblaze power": "⚡",
+  "stellar jade": "💎",
+  credit: "🪙",
+  "traveler's guide": "📕",
+  "adventure log": "📗",
+  "refined aether": "🔮",
+  "condensed aether": "🔷",
+  "trailblaze power": "⚡",
   // ── Zenless Zone Zero ───────────────────────────
-  polychrome: "💎", dennies: "🪙", "senior investigator log": "📕",
-  "w-engine energy module": "🔮", "battery charge": "⚡",
+  polychrome: "💎",
+  dennies: "🪙",
+  "senior investigator log": "📕",
+  "w-engine energy module": "🔮",
+  "battery charge": "⚡",
   // ── Honkai Impact 3rd ───────────────────────────
-  crystal: "💎", asterite: "🪙", "stamina potion": "⚡",
-  coin: "🪙", stamina: "⚡", mithril: "🔷",
+  crystal: "💎",
+  asterite: "🪙",
+  "stamina potion": "⚡",
+  coin: "🪙",
+  stamina: "⚡",
+  mithril: "🔷",
   // ── Neverness to Everness ───────────────────────
-  annulith: "💎", fons: "🪙", "beetle coin": "🪙",
-  "rising hunter guide": "📕", "senior hunter guide": "📕",
-  "elite hunter guide": "📕", "light dye": "🔷",
-  "colorless dye": "🔷", "colourless dye": "🔷", "chaotic dye": "🔮",
-  dynamik: "⚡", "clicky fries": "🍟",
+  annulith: "💎",
+  fons: "🪙",
+  "beetle coin": "🪙",
+  "rising hunter guide": "📕",
+  "senior hunter guide": "📕",
+  "elite hunter guide": "📕",
+  "light dye": "🔷",
+  "colorless dye": "🔷",
+  "colourless dye": "🔷",
+  "chaotic dye": "🔮",
+  dynamik: "⚡",
+  "clicky fries": "🍟",
   // ── Wuthering Waves ─────────────────────────────
-  astrite: "💎", "shell credit": "🪙", "resonance potion": "🧪",
-  "revival inhaler": "❤️", "energy bag": "⚡", "energy core": "🔮",
-  "sealed tube": "🔮", tuner: "🔧", "nutrient block": "🍱",
+  astrite: "💎",
+  "shell credit": "🪙",
+  "resonance potion": "🧪",
+  "revival inhaler": "❤️",
+  "energy bag": "⚡",
+  "energy core": "🔮",
+  "sealed tube": "🔮",
+  tuner: "🔧",
+  "nutrient block": "🍱",
 };
 
 // Fill in your server emoji IDs after uploading icons.

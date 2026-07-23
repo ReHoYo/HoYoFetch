@@ -22,6 +22,7 @@ import {
   getKnownBans,
   setKnownBans,
   disableAuditLog,
+  isChannelExcluded,
   isAuditLogEnabled,
 } from "./store.js";
 import {
@@ -753,6 +754,7 @@ export function initAuditLog(
     const serverId = client.channels.get(message.channelId)?.serverId;
     if (!serverId || !isAuditLogEnabled(serverId)) return;
     if (message.channelId === getAuditLogChannel(serverId)) return;
+    if (isChannelExcluded(message.channelId)) return;
     if (message.systemMessage) {
       ignoredSystemMessages.set(message.id, true);
       return;
@@ -810,6 +812,7 @@ export function initAuditLog(
     }
     if (!isAuditLogEnabled(serverId)) return;
     if (event.channel === getAuditLogChannel(serverId)) return;
+    if (isChannelExcluded(event.channel)) return;
     if (ignoredSystemMessages.delete(event.id)) return;
     if (await shouldExcludeMessageDelete(event.id)) return;
 
@@ -845,6 +848,7 @@ export function initAuditLog(
     if (!serverId) return;
     if (!isAuditLogEnabled(serverId)) return;
     if (event.channel === getAuditLogChannel(serverId)) return;
+    if (isChannelExcluded(event.channel)) return;
 
     const entry = getArchivedMessage(event.id);
     if (entry && isSelf(entry.authorId)) {
@@ -878,6 +882,7 @@ export function initAuditLog(
     if (!serverId) return;
     if (!isAuditLogEnabled(serverId)) return;
     if (event.channel === getAuditLogChannel(serverId)) return;
+    if (isChannelExcluded(event.channel)) return;
 
     const entries = (event.ids ?? [])
       .filter((id) => !ignoredSystemMessages.delete(id))

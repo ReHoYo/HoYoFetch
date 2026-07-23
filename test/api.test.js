@@ -137,10 +137,10 @@ const game8WuWaFixture = `
 test("parseGame8NTECodes extracts active codes, dedupes casing, and ignores expired codes", () => {
   const codes = parseGame8NTECodes(game8Fixture);
 
-  assert.deepEqual(codes.map((entry) => entry.code), [
-    "NTEvtuber200",
-    "NTEFREE",
-  ]);
+  assert.deepEqual(
+    codes.map((entry) => entry.code),
+    ["NTEvtuber200", "NTEFREE"]
+  );
   assert.equal(codes[0].rewards, "Fons x10,000, Beetle Coin x10,000");
   assert.equal(codes[1].rewards, "Fons x30,000");
   assert.equal(codes[0].source, "Game8");
@@ -150,17 +150,20 @@ test("parseGame8NTECodes extracts active codes, dedupes casing, and ignores expi
 test("parseGame8NTECodes falls back to code-cell text when input markup changes", () => {
   const codes = parseGame8NTECodes(textFallbackFixture);
 
-  assert.deepEqual(codes.map((entry) => entry.code), ["RaceNoLimit"]);
+  assert.deepEqual(
+    codes.map((entry) => entry.code),
+    ["RaceNoLimit"]
+  );
   assert.equal(codes[0].rewards, "Elite Hunter Guide x2");
 });
 
 test("parseGame8WuWaCodes aggregates active tables and ignores expired codes", () => {
   const codes = parseGame8WuWaCodes(game8WuWaFixture);
 
-  assert.deepEqual(codes.map((entry) => entry.code), [
-    "F5F4D3B2A2",
-    "WUTHERINGGIFT",
-  ]);
+  assert.deepEqual(
+    codes.map((entry) => entry.code),
+    ["F5F4D3B2A2", "WUTHERINGGIFT"]
+  );
   assert.equal(codes[0].rewards, "Escape from Duckov Collab Livery x1");
   assert.equal(
     codes[1].rewards,
@@ -194,7 +197,9 @@ test("fetchNTECodes returns fresh cache without fetching Game8", async () => {
     nte: {
       lastAttemptAt: NOW - 1_000,
       lastSuccessAt: NOW - 1_000,
-      codes: [{ code: "NTEvtuber200", rewards: "Fons x10,000", source: "Game8" }],
+      codes: [
+        { code: "NTEvtuber200", rewards: "Fons x10,000", source: "Game8" },
+      ],
     },
   };
 
@@ -211,7 +216,10 @@ test("fetchNTECodes returns fresh cache without fetching Game8", async () => {
   });
 
   assert.equal(fetchCount, 0);
-  assert.deepEqual(codes.map((entry) => entry.code), ["NTEvtuber200"]);
+  assert.deepEqual(
+    codes.map((entry) => entry.code),
+    ["NTEvtuber200"]
+  );
 });
 
 test("fetchNTECodes refreshes stale cache and stores successful results", async () => {
@@ -240,10 +248,16 @@ test("fetchNTECodes refreshes stale cache and stores successful results", async 
   });
 
   assert.equal(fetchCount, 1);
-  assert.deepEqual(codes.map((entry) => entry.code), ["NTEvtuber200", "NTEFREE"]);
+  assert.deepEqual(
+    codes.map((entry) => entry.code),
+    ["NTEvtuber200", "NTEFREE"]
+  );
   assert.equal(cache.nte.lastAttemptAt, NOW);
   assert.equal(cache.nte.lastSuccessAt, NOW);
-  assert.deepEqual(cache.nte.codes.map((entry) => entry.code), ["NTEvtuber200", "NTEFREE"]);
+  assert.deepEqual(
+    cache.nte.codes.map((entry) => entry.code),
+    ["NTEvtuber200", "NTEFREE"]
+  );
 });
 
 test("fetchNTECodes serves stale cache when Game8 refresh fails", async () => {
@@ -267,7 +281,10 @@ test("fetchNTECodes serves stale cache when Game8 refresh fails", async () => {
     },
   });
 
-  assert.deepEqual(codes.map((entry) => entry.code), ["NTESTALE"]);
+  assert.deepEqual(
+    codes.map((entry) => entry.code),
+    ["NTESTALE"]
+  );
   assert.equal(cache.nte.lastAttemptAt, NOW);
 });
 
@@ -298,7 +315,9 @@ test("fetchWuWaCodes returns fresh cache without fetching Game8", async () => {
     wuwa: {
       lastAttemptAt: NOW - 1_000,
       lastSuccessAt: NOW - 1_000,
-      codes: [{ code: "WUTHERINGGIFT", rewards: "Astrite x50", source: "Game8" }],
+      codes: [
+        { code: "WUTHERINGGIFT", rewards: "Astrite x50", source: "Game8" },
+      ],
     },
   };
 
@@ -315,7 +334,10 @@ test("fetchWuWaCodes returns fresh cache without fetching Game8", async () => {
   });
 
   assert.equal(fetchCount, 0);
-  assert.deepEqual(codes.map((entry) => entry.code), ["WUTHERINGGIFT"]);
+  assert.deepEqual(
+    codes.map((entry) => entry.code),
+    ["WUTHERINGGIFT"]
+  );
 });
 
 test("fetchWuWaCodes refreshes only its own stale cache", async () => {
@@ -345,10 +367,10 @@ test("fetchWuWaCodes refreshes only its own stale cache", async () => {
     },
   });
 
-  assert.deepEqual(codes.map((entry) => entry.code), [
-    "F5F4D3B2A2",
-    "WUTHERINGGIFT",
-  ]);
+  assert.deepEqual(
+    codes.map((entry) => entry.code),
+    ["F5F4D3B2A2", "WUTHERINGGIFT"]
+  );
   assert.equal(cache.wuwa.lastAttemptAt, NOW);
   assert.equal(cache.wuwa.lastSuccessAt, NOW);
   assert.equal(cache.nte, nteCache);
@@ -375,7 +397,10 @@ test("fetchWuWaCodes serves stale cache when Game8 refresh fails", async () => {
     },
   });
 
-  assert.deepEqual(codes.map((entry) => entry.code), ["WUWASTALE"]);
+  assert.deepEqual(
+    codes.map((entry) => entry.code),
+    ["WUWASTALE"]
+  );
   assert.equal(cache.wuwa.lastAttemptAt, NOW);
 });
 

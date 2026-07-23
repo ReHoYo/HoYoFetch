@@ -55,7 +55,10 @@ export async function uploadEasterEggAttachment({
     });
   } catch (err) {
     throw new Error(
-      (err?.message || "Easter egg upload failed.").replace(/^Attachment /, "Easter egg ")
+      (err?.message || "Easter egg upload failed.").replace(
+        /^Attachment /,
+        "Easter egg "
+      )
     );
   }
 }

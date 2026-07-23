@@ -3,13 +3,13 @@ title: Code sources
 description: The external sources Irminsul checks for each supported game.
 ---
 
-| Game                  | Primary source                                                        | Behavior                                                         |
-| --------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Genshin Impact        | [hoyo-codes](https://hoyo-codes.seria.moe)                            | JSON API                                                         |
-| Honkai: Star Rail     | [hoyo-codes](https://hoyo-codes.seria.moe)                            | JSON API                                                         |
-| Zenless Zone Zero     | [hoyo-codes](https://hoyo-codes.seria.moe)                            | JSON API                                                         |
-| Honkai Impact 3rd     | [ennead API](https://api.ennead.cc/mihoyo/honkai/codes)               | JSON API with a wiki fallback                                    |
-| Neverness to Everness | [Game8](https://game8.co/games/Neverness-to-Everness/archives/593718) | Active-code table parsed and independently cached for one hour   |
+| Game                  | Primary source                                                        | Behavior                                                           |
+| --------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Genshin Impact        | [hoyo-codes](https://hoyo-codes.seria.moe)                            | JSON API                                                           |
+| Honkai: Star Rail     | [hoyo-codes](https://hoyo-codes.seria.moe)                            | JSON API                                                           |
+| Zenless Zone Zero     | [hoyo-codes](https://hoyo-codes.seria.moe)                            | JSON API                                                           |
+| Honkai Impact 3rd     | [ennead API](https://api.ennead.cc/mihoyo/honkai/codes)               | JSON API with a wiki fallback                                      |
+| Neverness to Everness | [Game8](https://game8.co/games/Neverness-to-Everness/archives/593718) | Active-code table parsed and independently cached for one hour     |
 | Wuthering Waves       | [Game8](https://game8.co/games/Wuthering-Waves/archives/453149)       | All active promotional and permanent tables parsed; one-hour cache |
 
 Irminsul normalizes the different source formats into a shared code model before building embeds. Source attribution remains visible in every result.

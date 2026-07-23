@@ -111,7 +111,7 @@ export function buildHelpEmbeds(prefix) {
       title: "📖 Irminsul Help — Codes, Safety & Setup (1/2)",
       description:
         commandList(utilityCommands) +
-        "\n\n_Use `/Report-Spam` only where Irminsul can delete it. Use ▶️ for moderation. Commands ignore case._\n" +
+        "\n\n_Use ▶️. Commands ignore case._\n" +
         `_Full reference: [Irminsul Docs](${DOCS_URL})_\n` +
         "_Sources: [HoYo](https://hoyo-codes.seria.moe), [HI3](https://api.ennead.cc), [Game8: NTE + WuWa](https://game8.co)_",
       colour: "#5865F2",
