@@ -197,7 +197,7 @@ function makeHarness({
   };
 }
 
-test("moderation parser accepts fixed contracts and rejects missing reasons", () => {
+test("moderation parser still accepts the legacy delimiter contracts", () => {
   assert.deepEqual(
     parseModerationCommand("ban", [
       `<@${TARGET_ID}>`,
@@ -207,10 +207,9 @@ test("moderation parser accepts fixed contracts and rejects missing reasons", ()
     ]),
     {
       ok: true,
+      command: "ban",
       targetId: TARGET_ID,
       reason: "spam",
-      optionTokens: ["delete:1d"],
-      command: "ban",
       deleteWindow: "1d",
     }
   );
@@ -228,11 +227,70 @@ test("moderation parser accepts fixed contracts and rejects missing reasons", ()
     ]).window,
     "7d"
   );
+});
+
+test("moderation parser reads plain sentences in any order", () => {
+  assert.deepEqual(
+    parseModerationCommand(
+      "ban",
+      `<@${TARGET_ID}> for spamming and stuff`.split(" ")
+    ),
+    {
+      ok: true,
+      command: "ban",
+      targetId: TARGET_ID,
+      reason: "spamming and stuff",
+      deleteWindow: null,
+    }
+  );
+
+  // Options may lead, and free text after the reason starts is never eaten.
+  const mute = parseModerationCommand(
+    "mute",
+    `1h <@${TARGET_ID}> because they argued for 3d straight`.split(" ")
+  );
+  assert.equal(mute.duration, "1h");
+  assert.equal(mute.reason, "they argued for 3d straight");
+  assert.equal(mute.deleteWindow, null);
+
+  const purge = parseModerationCommand(
+    "purge-user",
+    `<@${TARGET_ID}> because of spam`.split(" ")
+  );
+  assert.equal(purge.window, null);
+  assert.equal(purge.reason, "spam");
+
+  assert.equal(
+    parseModerationCommand("mute", [`<@${TARGET_ID}>`, "29d", "noisy"])
+      .deleteWindow,
+    "29d"
+  );
+  assert.equal(
+    parseModerationCommand("automod-release", [
+      `<@${TARGET_ID}>`,
+      "false",
+      "positive",
+    ]).reason,
+    "false positive"
+  );
+});
+
+test("moderation parser rejects missing reasons, targets, and unknown options", () => {
   assert.equal(parseModerationCommand("kick", [TARGET_ID]).ok, false);
   assert.equal(
-    parseModerationCommand("mute", [TARGET_ID, "2h", "reason:x"]).ok,
+    parseModerationCommand("ban", [`<@${TARGET_ID}>`, "for"]).ok,
     false
   );
+  assert.equal(parseModerationCommand("kick", ["for", "raiding"]).ok, false);
+  assert.equal(
+    parseModerationCommand("mute", [TARGET_ID, "duration:2h", "x"]).ok,
+    false
+  );
+  assert.equal(
+    parseModerationCommand("ban", [TARGET_ID, "delete:99d", "x"]).ok,
+    false
+  );
+  assert.equal(parseModerationCommand("unknown", [TARGET_ID, "x"]).ok, false);
 });
 
 test("ban records a protected reversible action and authorized reaction unbans", async () => {
@@ -337,7 +395,284 @@ test("confirmed purge batches known messages by channel", async () => {
   );
   assert.match(
     harness.protectedLogs.at(-1).payload.embeds[0].description,
-    /205\/205 deleted/
+    /205\/205 known message\(s\) deleted across 2 channel\(s\)/
+  );
+});
+
+test("purge-user picks its window by reaction and then confirms", async () => {
+  const now = 1_900_000_000_000;
+  const harness = makeHarness({
+    messages: [
+      {
+        id: "MESSAGE1",
+        channelId: CHANNEL_ID,
+        serverId: SERVER_ID,
+        authorId: TARGET_ID,
+        createdAt: now - 30 * 60_000,
+      },
+    ],
+  });
+  await harness.moderation.handleCommand(harness.message, "purge-user", [
+    TARGET_ID,
+    "because",
+    "of",
+    "spam",
+  ]);
+  assert.match(harness.sent[0].payload.embeds[0].title, /Choose Purge Window/);
+
+  // A different moderator's reaction is ignored.
+  await harness.moderation.handleRawEvent({
+    type: "MessageReact",
+    id: harness.sent[0].result._id,
+    user_id: OTHER_MOD_ID,
+    emoji_id: "1️⃣",
+  });
+  assert.equal(harness.sent.length, 1);
+
+  await harness.moderation.handleRawEvent({
+    type: "MessageReact",
+    id: harness.sent[0].result._id,
+    user_id: MOD_ID,
+    emoji_id: "1️⃣",
+  });
+  assert.match(harness.sent[1].payload.embeds[0].title, /Confirm User Purge/);
+  await harness.moderation.handleRawEvent({
+    type: "MessageReact",
+    id: harness.sent[1].result._id,
+    user_id: MOD_ID,
+    emoji_id: MODERATION_CONFIRM_EMOJI,
+  });
+  assert.ok(
+    harness.requests.some((entry) => entry.path.endsWith("/messages/bulk"))
+  );
+});
+
+test("ban offers a cleanup picker that only the invoker can use", async () => {
+  const now = 1_900_000_000_000;
+  const harness = makeHarness({
+    messages: [
+      {
+        id: "MESSAGE1",
+        channelId: CHANNEL_ID,
+        serverId: SERVER_ID,
+        authorId: TARGET_ID,
+        createdAt: now - 60_000,
+      },
+    ],
+  });
+  await harness.moderation.handleCommand(harness.message, "ban", [
+    `<@${TARGET_ID}>`,
+    "for",
+    "spamming",
+    "and",
+    "stuff",
+  ]);
+  assert.equal(
+    harness.store.actions.get("MDACTION123").reason,
+    "spamming and stuff"
+  );
+  const picker = harness.sent.at(-1);
+  assert.match(picker.payload.embeds[0].title, /Delete Recent Messages/);
+
+  await harness.moderation.handleRawEvent({
+    type: "MessageReact",
+    id: picker.result._id,
+    user_id: OTHER_MOD_ID,
+    emoji_id: "1️⃣",
+  });
+  assert.equal(
+    harness.requests.some(
+      (entry) => entry.method === "DELETE" && entry.path.includes("/messages")
+    ),
+    false
+  );
+
+  await harness.moderation.handleRawEvent({
+    type: "MessageReact",
+    id: picker.result._id,
+    user_id: MOD_ID,
+    emoji_id: "1️⃣",
+  });
+  assert.deepEqual(
+    harness.requests
+      .filter((entry) => entry.path.endsWith("/messages/bulk"))
+      .map((entry) => entry.body.ids),
+    [["MESSAGE1"]]
+  );
+  const cleanupLog = harness.protectedLogs.at(-1).payload.embeds[0];
+  assert.match(cleanupLog.title, /History Cleanup/);
+  assert.match(cleanupLog.description, /MDACTION123/);
+  assert.equal(harness.store.actions.get("MDACTION123").cleanup.window, "1h");
+});
+
+test("declining the cleanup picker keeps the kick and deletes nothing", async () => {
+  const harness = makeHarness();
+  await harness.moderation.handleCommand(harness.message, "kick", [
+    `<@${TARGET_ID}>`,
+    "for",
+    "raiding",
+  ]);
+  const picker = harness.sent.at(-1);
+  assert.match(picker.payload.embeds[0].title, /Delete Recent Messages/);
+  await harness.moderation.handleRawEvent({
+    type: "MessageReact",
+    id: picker.result._id,
+    user_id: MOD_ID,
+    emoji_id: "❌",
+  });
+  assert.equal(
+    harness.requests.some(
+      (entry) => entry.method === "DELETE" && entry.path.includes("/messages")
+    ),
+    false
+  );
+  assert.match(harness.sent.at(-1).payload.embeds[0].description, /kick/);
+});
+
+test("a cleanup picker click without Manage Messages deletes nothing", async () => {
+  const now = 1_900_000_000_000;
+  const harness = makeHarness({
+    permissionBits: 2 ** 8, // TimeoutMembers only
+    messages: [
+      {
+        id: "MESSAGE1",
+        channelId: CHANNEL_ID,
+        serverId: SERVER_ID,
+        authorId: TARGET_ID,
+        createdAt: now - 60_000,
+      },
+    ],
+  });
+  await harness.moderation.handleCommand(harness.message, "mute", [
+    `<@${TARGET_ID}>`,
+    "1h",
+    "cooldown",
+  ]);
+  const picker = harness.sent.at(-1);
+  await harness.moderation.handleRawEvent({
+    type: "MessageReact",
+    id: picker.result._id,
+    user_id: MOD_ID,
+    emoji_id: "3️⃣",
+  });
+  assert.equal(
+    harness.requests.some(
+      (entry) => entry.method === "DELETE" && entry.path.includes("/messages")
+    ),
+    false
+  );
+  assert.match(
+    harness.sent.at(-1).payload.embeds[0].title,
+    /Permission Denied/
+  );
+});
+
+test("cleanups older than the bulk window delete one message at a time", async () => {
+  const now = 1_900_000_000_000;
+  const day = 24 * 60 * 60_000;
+  const harness = makeHarness({
+    messages: [
+      {
+        id: "RECENT1",
+        channelId: CHANNEL_ID,
+        serverId: SERVER_ID,
+        authorId: TARGET_ID,
+        createdAt: now - 60_000,
+      },
+      {
+        id: "OLD1",
+        channelId: CHANNEL_ID,
+        serverId: SERVER_ID,
+        authorId: TARGET_ID,
+        createdAt: now - 20 * day,
+      },
+      {
+        id: "OLD2",
+        channelId: CHANNEL_ID,
+        serverId: SERVER_ID,
+        authorId: TARGET_ID,
+        createdAt: now - 28 * day,
+      },
+    ],
+  });
+  await harness.moderation.handleCommand(harness.message, "ban", [
+    TARGET_ID,
+    "delete:29d",
+    "raid",
+  ]);
+  assert.deepEqual(
+    harness.requests
+      .filter(
+        (entry) => entry.method === "DELETE" && entry.path.includes("/messages")
+      )
+      .map((entry) => entry.path),
+    [
+      `/channels/${CHANNEL_ID}/messages/bulk`,
+      `/channels/${CHANNEL_ID}/messages/OLD2`,
+      `/channels/${CHANNEL_ID}/messages/OLD1`,
+    ]
+  );
+  assert.match(
+    harness.protectedLogs[0].payload.embeds[0].description,
+    /3\/3 known message\(s\) deleted/
+  );
+});
+
+test("a rejected bulk batch falls back to per-message deletes", async () => {
+  const now = 1_900_000_000_000;
+  const harness = makeHarness({
+    messages: [
+      {
+        id: "MESSAGE1",
+        channelId: CHANNEL_ID,
+        serverId: SERVER_ID,
+        authorId: TARGET_ID,
+        createdAt: now - 1_000,
+      },
+    ],
+    requestOverride: ({ method, path }) =>
+      method === "DELETE" && path.endsWith("/messages/bulk")
+        ? { ok: false, status: 400 }
+        : null,
+  });
+  await harness.moderation.handleCommand(harness.message, "ban", [
+    TARGET_ID,
+    "delete:1h",
+    "spam",
+  ]);
+  assert.ok(
+    harness.requests.some(
+      (entry) => entry.path === `/channels/${CHANNEL_ID}/messages/MESSAGE1`
+    )
+  );
+  assert.match(
+    harness.protectedLogs[0].payload.embeds[0].description,
+    /1\/1 known message\(s\) deleted/
+  );
+});
+
+test("oversized cleanups stop at the safety cap and report the remainder", async () => {
+  const now = 1_900_000_000_000;
+  const messages = Array.from({ length: 2_050 }, (_, index) => ({
+    id: `MESSAGE${index}`,
+    channelId: CHANNEL_ID,
+    serverId: SERVER_ID,
+    authorId: TARGET_ID,
+    createdAt: now - (2_050 - index) * 1_000,
+  }));
+  const harness = makeHarness({ messages });
+  await harness.moderation.handleCommand(harness.message, "ban", [
+    TARGET_ID,
+    "delete:1h",
+    "flood",
+  ]);
+  const deleted = harness.requests
+    .filter((entry) => entry.path.endsWith("/messages/bulk"))
+    .reduce((total, entry) => total + entry.body.ids.length, 0);
+  assert.equal(deleted, 2_000);
+  assert.match(
+    harness.protectedLogs[0].payload.embeds[0].description,
+    /50 more were left untouched by the 2000-message safety cap/
   );
 });
 
@@ -410,7 +745,7 @@ test("runtime cleanup failures keep the ban and report partial results", async (
       },
     ],
     requestOverride: ({ method, path }) =>
-      method === "DELETE" && path.endsWith("/messages/bulk")
+      method === "DELETE" && path.includes("/messages")
         ? { ok: false, status: 403 }
         : null,
   });
@@ -423,7 +758,7 @@ test("runtime cleanup failures keep the ban and report partial results", async (
   assert.ok(harness.requests.some((entry) => entry.path.includes("/bans/")));
   assert.match(
     harness.protectedLogs[0].payload.embeds[0].description,
-    /0\/1 deleted; 1 failed/
+    /0\/1 known message\(s\) deleted across 1 channel\(s\); 1 failed/
   );
 });
 

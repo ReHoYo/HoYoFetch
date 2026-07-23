@@ -3,6 +3,13 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Unreleased — Natural-language moderation
+
+- Manual moderation commands now accept plain sentences: `/Ban @member for spamming and stuff`. The member, the reason, and any option may appear in any order, and the older `reason:`, `delete:`, and `window:` delimiters still work.
+- `/Ban`, `/Kick`, and `/Mute` offer a reaction picker for message cleanup — 1h, 6h, 1d, 3d, 7d, 14d, or 29d — instead of requiring typed delete syntax. `/Purge-User` picks its window the same way before its ✅/❌ confirmation.
+- Only the moderator who ran the command can answer their own picker.
+- Extended cleanup coverage from 7 to 29 days, deleting anything older than the bulk-delete limit one message at a time, capped at 2,000 messages per run with the remainder reported.
+
 ## Unreleased — Wuthering Waves
 
 - Added Wuthering Waves through cached Game8 parsing of limited-time and permanent active-code tables.

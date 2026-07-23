@@ -5,52 +5,83 @@ description: Ban, kick, mute, purge, release, confirmation, cleanup, and undo be
 
 All manual actions require an active Irminsul audit channel.
 
-## Ban
+## Writing a command
+
+Every manual action takes one member and a reason written in plain words. The member, the reason,
+and any option may appear in any order:
 
 ```text
-/Ban @member reason: repeated spam
+/Ban @member for spamming and stuff
+/Mute 1h @member because they argued with staff
 /Ban @member delete:1d reason: raid cleanup
 ```
 
-`/Ban` acts immediately after verifying Ban Members. Optional `delete:` cleanup accepts `1h`, `6h`, `1d`, `3d`, or `7d` and also requires Manage Messages.
+The last form is the older delimiter syntax; it is still accepted. A reason is always required.
+Bare option words such as `1h` or `29d` are only read as options while they come before the reason —
+once the reason starts, everything that follows is part of it, so `/Mute @member for arguing for 3d
+straight` opens the duration picker and keeps the sentence intact.
 
-The protected record accepts a ↩️ reaction for ten minutes from a freshly authorized ban moderator. Undo unbans the account but cannot restore membership or deleted messages.
+## Ban
+
+```text
+/Ban @member for repeated spam
+```
+
+`/Ban` acts immediately after verifying Ban Members. Once the ban lands, Irminsul offers a cleanup
+picker: 1️⃣ 1h · 2️⃣ 6h · 3️⃣ 1d · 4️⃣ 3d · 5️⃣ 7d · 6️⃣ 14d · 7️⃣ 29d, or ❌ to keep the messages.
+Only the moderator who ran the command can choose, and the picker expires after two minutes.
+Cleanup requires Manage Messages in every affected channel.
+
+The protected record accepts a ↩️ reaction for ten minutes from a freshly authorized ban moderator.
+Undo unbans the account but cannot restore membership or deleted messages.
 
 ## Kick
 
 ```text
-/Kick @member reason: raid account
+/Kick @member for raiding
 ```
 
-`/Kick` verifies Kick Members and acts immediately. A kick cannot be undone by the bot; the member needs a new invite to return.
+`/Kick` verifies Kick Members and acts immediately, then offers the same cleanup picker. A kick
+cannot be undone by the bot; the member needs a new invite to return.
 
 ## Mute
 
 ```text
-/Mute @member 1h reason: cooldown
-/Mute @member reason: choose a duration
+/Mute @member 1h cooldown
+/Mute @member for arguing with staff
 ```
 
-Supported durations are `10m`, `30m`, `1h`, `4h`, `24h`, `3d`, and `7d`. Omitting the duration opens a two-minute picker for the command invoker. The protected record offers a ten-minute ↩️ release window to freshly authorized timeout moderators.
+Supported durations are `10m`, `30m`, `1h`, `4h`, `24h`, `3d`, and `7d`. Omitting the duration opens
+a two-minute picker for the command invoker. After the timeout is applied, the cleanup picker is
+offered as it is for bans and kicks. The protected record offers a ten-minute ↩️ release window to
+freshly authorized timeout moderators.
 
 ## Purge observed messages
 
 ```text
-/Purge-User @member window:1d reason: cleanup
+/Purge-User @member because of spam
 ```
 
-Supported windows are `1h`, `6h`, `1d`, `3d`, and `7d`. The command opens a two-minute ✅/❌ confirmation and allows one purge per server at a time.
+`/Purge-User` asks for a window with the same 1h–29d picker, then reports how many observed messages
+match and waits for a ✅/❌ confirmation. Both steps are invoker-only and expire after two minutes.
+Only one purge or cleanup runs per server at a time.
 
-Only messages recorded by Irminsul can be selected. Protected audit entries, retained evidence, quotations, reactions, and external copies are not erased.
+Only messages recorded by Irminsul can be selected. Protected audit entries, retained evidence,
+quotations, reactions, and external copies are not erased.
 
 ## Release and reset automod history
 
 ```text
-/Automod release @member reason: false positive
+/Automod release @member false positive
 ```
 
-This removes a native timeout, resets the member's automod strike history, and closes pending ban reviews for the containment. It can also release a manually applied timeout.
+This removes a native timeout, resets the member's automod strike history, and closes pending ban
+reviews for the containment. It can also release a manually applied timeout.
 
 :::caution[History cleanup is best-effort]
-Stoat's ban route has no message-history option, and its bulk-delete route accepts only recent messages. Irminsul deletes archived message IDs separately in bounded batches and reports partial failures.
+Cleanup reaches back 29 days, one day short of the 30-day message archive that feeds it. Stoat's ban
+route has no message-history option and its bulk-delete route accepts only recent messages, so
+Irminsul bulk-deletes archived IDs from the last seven days and removes anything older one message
+at a time. A single cleanup deletes at most 2,000 messages, oldest first; every response and audit
+record states how many were selected, deleted, failed, and left for a follow-up run.
 :::

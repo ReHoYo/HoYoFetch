@@ -957,7 +957,7 @@ export function createAutomod(
 
     return buildStatusEmbed(
       "🛡️ Automod Commands",
-      `Use \`${command} status\`, \`${command} monitor [here|#channel]\`, \`${command} enforce [here|#channel]\`, \`${command} off\`, \`${command} quorum 1|2\`, \`${command} approve CASE_ID\`, or \`${command} release @member reason: ...\`.`,
+      `Use \`${command} status\`, \`${command} monitor [here|#channel]\`, \`${command} enforce [here|#channel]\`, \`${command} off\`, \`${command} quorum 1|2\`, \`${command} approve CASE_ID\`, or \`${command} release @member <reason>\`.`,
       "#3498DB"
     );
   }

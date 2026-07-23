@@ -38,29 +38,53 @@ export const MUTE_DURATIONS = Object.freeze({
   "7d": 7 * 24 * 60 * 60_000,
 });
 
+// Cleanup windows. The longest window stays below message-archive's 30-day
+// retention (RETENTION_MS) so a selection can never outrun the archive that
+// feeds it.
 export const PURGE_WINDOWS = Object.freeze({
   "1h": 60 * 60_000,
   "6h": 6 * 60 * 60_000,
   "1d": 24 * 60 * 60_000,
   "3d": 3 * 24 * 60 * 60_000,
   "7d": 7 * 24 * 60 * 60_000,
+  "14d": 14 * 24 * 60 * 60_000,
+  "29d": 29 * 24 * 60 * 60_000,
 });
 
-const PICKER_EMOJIS = Object.freeze([
-  ["1️⃣", "10m"],
-  ["2️⃣", "30m"],
-  ["3️⃣", "1h"],
-  ["4️⃣", "4h"],
-  ["5️⃣", "24h"],
-  ["6️⃣", "3d"],
-  ["7️⃣", "7d"],
-]);
-const PICKER_BY_EMOJI = new Map(PICKER_EMOJIS);
+// 1️⃣–7️⃣ mean different things on different picker messages, so each pending
+// interaction carries its own emoji → value map instead of a shared global.
+const DIGIT_EMOJIS = Object.freeze(["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣"]);
+
+function buildPicker(values) {
+  return Object.freeze(
+    values.slice(0, DIGIT_EMOJIS.length).map((value, index) => ({
+      emoji: DIGIT_EMOJIS[index],
+      value,
+    }))
+  );
+}
+
+const MUTE_PICKER = buildPicker(Object.keys(MUTE_DURATIONS));
+const CLEANUP_PICKER = buildPicker(Object.keys(PURGE_WINDOWS));
+
+function pickerLegend(picker) {
+  return picker.map(({ emoji, value }) => `${emoji} ${value}`).join(" · ");
+}
+
+function pickerChoice(picker, emoji) {
+  return picker.find((entry) => entry.emoji === emoji)?.value ?? null;
+}
+
 const INTERACTION_WINDOW_MS = 2 * 60_000;
 const UNDO_WINDOW_MS = 10 * 60_000;
 const ACTION_RETENTION_MS = 24 * 60 * 60_000;
 const MAX_REASON_LENGTH = 300;
 const BULK_DELETE_SIZE = 100;
+// Stoat's bulk-delete route only accepts recent messages; anything older is
+// removed one message at a time.
+const BULK_DELETE_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
+const MAX_CLEANUP_MESSAGES = 2_000;
+const SLOW_CLEANUP_THRESHOLD = 100;
 const MAX_RATE_LIMIT_RETRIES = 3;
 const MAX_PENDING_INTERACTIONS = 5_000;
 
@@ -88,108 +112,167 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function parseTarget(value) {
-  const token = String(value ?? "").trim();
-  const mention = token.match(/^<@!?([A-Za-z0-9]+)>$/);
-  const id = mention?.[1] ?? token;
-  return isSafeId(id) ? id : null;
+const MENTION_PATTERN = /^<@!?([A-Za-z0-9]+)>$/;
+// Stoat IDs are ULIDs. isSafeId() alone accepts any alphanumeric word, so a
+// bare ID is only recognized mid-sentence when it has the full ULID shape.
+const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+// A bare leading token is only read as a user ID when it is long and carries a
+// digit or capital, so `/Kick for raiding` asks for a member instead of trying
+// to moderate someone called "for".
+const BARE_ID_PATTERN = /^(?=.{8,})(?=.*[0-9A-Z])[A-Za-z0-9]+$/;
+const WINDOW_PREFIXES = Object.freeze(["delete:", "window:", "purge:"]);
+const DURATION_PREFIXES = Object.freeze(["duration:", "mute:", "timeout:"]);
+// Leading filler between the member and the reason, so `/Ban @member for
+// spamming` records "spamming" rather than "for spamming".
+const REASON_PREFIX_PATTERN =
+  /^(?:reason\s*:\s*|(?:because of|because|due to|for|about|over|-|–|—|:)(?:\s+|$))/i;
+
+const OPTION_SPECS = Object.freeze({
+  ban: { window: "deleteWindow", duration: false },
+  kick: { window: "deleteWindow", duration: false },
+  mute: { window: "deleteWindow", duration: true },
+  "purge-user": { window: "window", duration: false },
+  "automod-release": { window: null, duration: false },
+});
+
+const WINDOW_HELP = `Use ${Object.keys(PURGE_WINDOWS)
+  .map((key) => `\`${key}\``)
+  .join(", ")}.`;
+const DURATION_HELP = `Use ${Object.keys(MUTE_DURATIONS)
+  .map((key) => `\`${key}\``)
+  .join(", ")}.`;
+
+function prefixedOption(token, spec) {
+  const lower = token.toLowerCase();
+  if (spec.window) {
+    const prefix = WINDOW_PREFIXES.find((entry) => lower.startsWith(entry));
+    if (prefix) return { kind: "window", value: lower.slice(prefix.length) };
+  }
+  if (spec.duration) {
+    const prefix = DURATION_PREFIXES.find((entry) => lower.startsWith(entry));
+    if (prefix) return { kind: "duration", value: lower.slice(prefix.length) };
+  }
+  return null;
 }
 
-function parseReason(args) {
-  const reasonIndex = args.findIndex((token) =>
-    String(token).toLowerCase().startsWith("reason:")
-  );
-  if (reasonIndex < 0) {
-    return { ok: false, error: "A `reason:` is required." };
+function bareOption(token, spec) {
+  const lower = token.toLowerCase();
+  if (spec.duration && Object.hasOwn(MUTE_DURATIONS, lower)) {
+    return { kind: "duration", value: lower };
   }
-  const first = String(args[reasonIndex]);
-  const reason = [
-    first.slice(first.indexOf(":") + 1),
-    ...args.slice(reasonIndex + 1),
-  ]
-    .join(" ")
-    .trim();
-  if (!reason) return { ok: false, error: "The moderation reason is empty." };
-  if (reason.length > MAX_REASON_LENGTH) {
-    return {
-      ok: false,
-      error: `The reason must be ${MAX_REASON_LENGTH} characters or fewer.`,
-    };
+  if (spec.window && Object.hasOwn(PURGE_WINDOWS, lower)) {
+    return { kind: "window", value: lower };
   }
-  return { ok: true, reason, optionTokens: args.slice(1, reasonIndex) };
+  return null;
 }
 
-function baseParse(args) {
-  const targetId = parseTarget(args[0]);
+/**
+ * Parse a manual moderation command written in any order.
+ *
+ * The member, the options, and the reason may appear in any arrangement:
+ * `/Ban @member for spamming`, `/Mute 1h @member being rude`, and the legacy
+ * `/Ban @member delete:1d reason: spam` all parse. Bare option words such as
+ * `1h` are only read as options while they precede the reason; once free text
+ * starts, everything that follows belongs to the reason.
+ */
+export function parseModerationCommand(command, args = []) {
+  const cmd = String(command).toLowerCase();
+  const spec = OPTION_SPECS[cmd];
+  if (!spec) return { ok: false, error: "Unknown moderation command." };
+
+  const tokens = args
+    .map((value) => String(value ?? "").trim())
+    .filter((value) => value.length > 0);
+  const consumed = new Set();
+  let targetId = null;
+
+  for (const [index, token] of tokens.entries()) {
+    const mention = token.match(MENTION_PATTERN);
+    if (mention && isSafeId(mention[1])) {
+      targetId = mention[1];
+      consumed.add(index);
+      break;
+    }
+  }
+  if (!targetId) {
+    for (const [index, token] of tokens.entries()) {
+      if (!ULID_PATTERN.test(token)) continue;
+      targetId = token;
+      consumed.add(index);
+      break;
+    }
+  }
+
+  const selected = { window: null, duration: null };
+  let leading = true;
+  for (const [index, token] of tokens.entries()) {
+    if (consumed.has(index)) continue;
+    const option =
+      prefixedOption(token, spec) ?? (leading ? bareOption(token, spec) : null);
+    if (option) {
+      const table = option.kind === "window" ? PURGE_WINDOWS : MUTE_DURATIONS;
+      if (!Object.hasOwn(table, option.value)) {
+        return {
+          ok: false,
+          error:
+            option.kind === "window"
+              ? `\`${token}\` is not a cleanup window. ${WINDOW_HELP}`
+              : `\`${token}\` is not a mute duration. ${DURATION_HELP}`,
+        };
+      }
+      if (selected[option.kind] && selected[option.kind] !== option.value) {
+        return {
+          ok: false,
+          error:
+            option.kind === "window"
+              ? "Choose one cleanup window."
+              : "Choose one mute duration.",
+        };
+      }
+      selected[option.kind] = option.value;
+      consumed.add(index);
+      continue;
+    }
+    if (!leading) continue;
+    if (!targetId && BARE_ID_PATTERN.test(token) && isSafeId(token)) {
+      targetId = token;
+      consumed.add(index);
+      continue;
+    }
+    leading = false;
+  }
+
   if (!targetId) {
     return {
       ok: false,
       error: "Mention one member or provide one valid user ID.",
     };
   }
-  const parsed = parseReason(args);
-  return parsed.ok ? { ...parsed, targetId } : parsed;
-}
 
-export function parseModerationCommand(command, args = []) {
-  const cmd = String(command).toLowerCase();
-  const parsed = baseParse(args);
-  if (!parsed.ok) return parsed;
-  const options = parsed.optionTokens.map((value) =>
-    String(value).toLowerCase()
-  );
-
-  if (cmd === "ban") {
-    if (options.length > 1)
-      return { ok: false, error: "Too many ban options." };
-    const deleteWindow = options[0]?.startsWith("delete:")
-      ? options[0].slice("delete:".length)
-      : null;
-    if (options.length && (!deleteWindow || !PURGE_WINDOWS[deleteWindow])) {
-      return {
-        ok: false,
-        error:
-          "Use `delete:1h`, `delete:6h`, `delete:1d`, `delete:3d`, or `delete:7d`.",
-      };
-    }
-    return { ...parsed, command: cmd, deleteWindow };
+  const reason = tokens
+    .filter((_, index) => !consumed.has(index))
+    .join(" ")
+    .replace(REASON_PREFIX_PATTERN, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!reason) {
+    return {
+      ok: false,
+      error:
+        "Add a short reason in your own words, for example `@member for repeated spam`.",
+    };
+  }
+  if (reason.length > MAX_REASON_LENGTH) {
+    return {
+      ok: false,
+      error: `The reason must be ${MAX_REASON_LENGTH} characters or fewer.`,
+    };
   }
 
-  if (cmd === "kick" || cmd === "automod-release") {
-    if (options.length)
-      return { ok: false, error: "This command has no options." };
-    return { ...parsed, command: cmd };
-  }
-
-  if (cmd === "mute") {
-    if (options.length > 1)
-      return { ok: false, error: "Choose one mute duration." };
-    const duration = options[0] ?? null;
-    if (duration && !MUTE_DURATIONS[duration]) {
-      return {
-        ok: false,
-        error: "Use `10m`, `30m`, `1h`, `4h`, `24h`, `3d`, or `7d`.",
-      };
-    }
-    return { ...parsed, command: cmd, duration };
-  }
-
-  if (cmd === "purge-user") {
-    if (options.length !== 1 || !options[0].startsWith("window:")) {
-      return { ok: false, error: "A single `window:` option is required." };
-    }
-    const window = options[0].slice("window:".length);
-    if (!PURGE_WINDOWS[window]) {
-      return {
-        ok: false,
-        error:
-          "Use `window:1h`, `window:6h`, `window:1d`, `window:3d`, or `window:7d`.",
-      };
-    }
-    return { ...parsed, command: cmd, window };
-  }
-
-  return { ok: false, error: "Unknown moderation command." };
+  const parsed = { ok: true, command: cmd, targetId, reason };
+  if (spec.window) parsed[spec.window] = selected.window;
+  if (spec.duration) parsed.duration = selected.duration;
+  return parsed;
 }
 
 function safeReason(value) {
@@ -547,14 +630,10 @@ export function createModeration(
       );
   }
 
-  async function deleteBatch(channelId, ids) {
+  async function requestWithRetry(method, path, body) {
     let attempt = 0;
     while (attempt <= MAX_RATE_LIMIT_RETRIES) {
-      const response = await request(
-        "DELETE",
-        `/channels/${channelId}/messages/bulk`,
-        { ids }
-      );
+      const response = await request(method, path, body);
       if (response.ok) return response;
       if (response.status !== 429 || attempt === MAX_RATE_LIMIT_RETRIES) {
         return response;
@@ -569,37 +648,236 @@ export function createModeration(
     return { ok: false, status: 0 };
   }
 
-  async function purgeSelected(entries) {
-    const byChannel = new Map();
-    for (const entry of entries) {
-      if (!isSafeId(entry.channelId) || !isSafeId(entry.id)) continue;
-      const ids = byChannel.get(entry.channelId) ?? [];
-      ids.push(entry.id);
-      byChannel.set(entry.channelId, ids);
+  async function deleteBatch(channelId, ids) {
+    return requestWithRetry("DELETE", `/channels/${channelId}/messages/bulk`, {
+      ids,
+    });
+  }
+
+  async function deleteSingle(channelId, id) {
+    return requestWithRetry("DELETE", `/channels/${channelId}/messages/${id}`);
+  }
+
+  // Delete one message at a time. Used for anything Stoat's bulk route will
+  // not take (older than BULK_DELETE_MAX_AGE_MS) and as the fallback when a
+  // bulk batch is rejected for a reason other than rate limiting.
+  async function deleteIndividually(channelId, ids) {
+    const removed = [];
+    let failed = 0;
+    for (const id of ids) {
+      const response = await deleteSingle(channelId, id);
+      if (response.ok) removed.push(id);
+      else failed += 1;
     }
+    return { removed, failed };
+  }
+
+  async function purgeSelected(entries) {
+    const cutoff = now() - BULK_DELETE_MAX_AGE_MS;
+    const usable = entries.filter(
+      (entry) => isSafeId(entry.channelId) && isSafeId(entry.id)
+    );
+    // Oldest first, so a capped run clears the earliest history and the
+    // remainder stays reachable through a second, narrower cleanup.
+    const ordered = [...usable].sort(
+      (a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)
+    );
+    const targeted = ordered.slice(0, MAX_CLEANUP_MESSAGES);
+    const skipped = ordered.length - targeted.length;
+
+    const byChannel = new Map();
+    for (const entry of targeted) {
+      const buckets = byChannel.get(entry.channelId) ?? {
+        bulk: [],
+        single: [],
+      };
+      if ((entry.createdAt ?? 0) >= cutoff) buckets.bulk.push(entry.id);
+      else buckets.single.push(entry.id);
+      byChannel.set(entry.channelId, buckets);
+    }
+
     let deleted = 0;
     let failed = 0;
-    for (const [channelId, ids] of byChannel) {
-      for (const batch of chunks(ids, BULK_DELETE_SIZE)) {
+    for (const [channelId, buckets] of byChannel) {
+      const removed = [];
+      for (const batch of chunks(buckets.bulk, BULK_DELETE_SIZE)) {
         const response = await deleteBatch(channelId, batch);
         if (response.ok) {
-          deleted += batch.length;
-          archive.markMessagesDeleted?.(batch, now());
-        } else failed += batch.length;
+          removed.push(...batch);
+          continue;
+        }
+        // The bulk route may refuse a batch for reasons the age split cannot
+        // predict; retry those IDs individually before calling them failures.
+        const retried = await deleteIndividually(channelId, batch);
+        removed.push(...retried.removed);
+        failed += retried.failed;
       }
+      const singles = await deleteIndividually(channelId, buckets.single);
+      removed.push(...singles.removed);
+      failed += singles.failed;
+      deleted += removed.length;
+      if (removed.length) archive.markMessagesDeleted?.(removed, now());
     }
     return {
-      selected: entries.length,
+      selected: targeted.length,
       deleted,
       failed,
+      skipped,
       channels: byChannel.size,
     };
+  }
+
+  function cleanupSummary(result) {
+    const capped = result.skipped
+      ? ` ${result.skipped} more were left untouched by the ${MAX_CLEANUP_MESSAGES}-message safety cap; run the cleanup again to continue.`
+      : "";
+    return (
+      `${result.deleted}/${result.selected} known message(s) deleted across ` +
+      `${result.channels} channel(s); ${result.failed} failed.${capped}`
+    );
+  }
+
+  async function openPicker(message, { title, description, colour, entry }) {
+    const picker = await send(message.channelId, {
+      embeds: [buildStatusEmbed(title, description, colour)],
+    });
+    if (!isSafeId(picker?._id)) return null;
+    pending.set(picker._id, {
+      ...entry,
+      message,
+      expiresAt: now() + INTERACTION_WINDOW_MS,
+    });
+    prunePending();
+    for (const { emoji } of entry.choices) {
+      await seedReaction(message.channelId, picker._id, emoji);
+    }
+    await seedReaction(message.channelId, picker._id, MODERATION_CANCEL_EMOJI);
+    return picker._id;
+  }
+
+  // Offered after a ban, kick, or mute so moderators pick a cleanup window by
+  // reaction instead of remembering `delete:` syntax.
+  async function offerCleanup(
+    message,
+    { targetId, actionId, actionLabel, auditChannelId }
+  ) {
+    await openPicker(message, {
+      title: "🧹 Delete Recent Messages?",
+      description: [
+        `**Target:** <@${targetId}>`,
+        `The ${actionLabel} has already been applied. Choose how much of their observed history to delete:`,
+        pickerLegend(CLEANUP_PICKER),
+        "React within two minutes, or ❌ to keep their messages. Only the invoking moderator can choose.",
+      ].join("\n"),
+      colour: "#E67E22",
+      entry: {
+        type: "cleanup-picker",
+        choices: CLEANUP_PICKER,
+        targetId,
+        actionId,
+        actionLabel,
+        auditChannelId,
+      },
+    });
+  }
+
+  // Fresh Manage Messages checks happen here, so a cleanup requested by
+  // reaction is authorized exactly like a typed one.
+  async function runCleanup(
+    message,
+    { targetId, window, actionId, actionLabel, auditChannelId }
+  ) {
+    const serverId = message.server?.id ?? message.channel?.serverId;
+    if (purgeLocks.has(serverId)) {
+      await respond(
+        message.channelId,
+        "⏳ Cleanup Already Running",
+        "Wait for the current server cleanup to finish before starting another.",
+        "#E67E22"
+      );
+      return;
+    }
+    purgeLocks.add(serverId);
+    try {
+      const entries = selectMessages(serverId, targetId, PURGE_WINDOWS[window]);
+      if (!(await preflightPurge(message, entries))) return;
+      if (entries.length >= SLOW_CLEANUP_THRESHOLD) {
+        await respond(
+          message.channelId,
+          "🧹 Cleaning Up",
+          `Deleting up to ${Math.min(entries.length, MAX_CLEANUP_MESSAGES)} observed message(s) from <@${targetId}> within **${window}**. Messages older than a week are removed one at a time, so this can take a while.`,
+          "#3498DB"
+        );
+      }
+      const result = await purgeSelected(entries);
+      const coverage = archive.getArchiveCoverage(serverId);
+      try {
+        await sendProtected(auditChannelId, {
+          embeds: [
+            buildStatusEmbed(
+              "🧹 History Cleanup",
+              [
+                actionId ? `**Action ID:** \`${actionId}\`` : null,
+                `**Follows:** ${actionLabel}`,
+                `**Moderator:** <@${message.authorId}>`,
+                `**Target:** <@${targetId}>`,
+                `**Window:** ${window}`,
+                `**Result:** ${cleanupSummary(result)}`,
+                `**Archive coverage:** ${coverage.count} current record(s); earliest observed ${coverage.earliestAt ? new Date(coverage.earliestAt).toISOString() : "unavailable"}.`,
+                "Protected audit records and evidence were preserved.",
+              ]
+                .filter(Boolean)
+                .join("\n"),
+              result.failed ? "#E67E22" : "#2ECC71"
+            ),
+          ],
+        });
+      } catch (error) {
+        logFailure("protected cleanup log failed", error);
+      }
+      if (actionId) {
+        store.updateModerationAction?.(actionId, {
+          cleanup: { window, ...result },
+        });
+      }
+      await respond(
+        message.channelId,
+        "🧹 History Cleanup Completed",
+        `${cleanupSummary(result)} Coverage is limited to messages observed by Irminsul.`,
+        result.failed ? "#E67E22" : "#2ECC71"
+      );
+    } finally {
+      purgeLocks.delete(serverId);
+    }
+  }
+
+  // A typed window is authorized before the action so a moderator without
+  // Manage Messages is told up front instead of after the member is gone.
+  async function prepareTypedCleanup(message, targetId, window) {
+    if (!window) return { ok: true, entries: null };
+    const serverId = message.server?.id ?? message.channel?.serverId;
+    const entries = selectMessages(serverId, targetId, PURGE_WINDOWS[window]);
+    if (!(await preflightPurge(message, entries))) return { ok: false };
+    return { ok: true, entries };
+  }
+
+  function cleanupDetail(window, cleanup) {
+    if (!cleanup) {
+      return "**History cleanup:** offered as a reaction picker; any result is logged separately.";
+    }
+    return `**History cleanup (${window}):** ${cleanupSummary(cleanup)} Coverage is limited to messages observed by Irminsul.`;
   }
 
   async function applyMute(message, parsed, duration, auditChannelId) {
     const serverId = message.server?.id ?? message.channel?.serverId;
     if (!(await requireAccess(message, COMMAND_ACCESS.TIMEOUT))) return;
     if (!(await validateTarget(message, parsed.targetId))) return;
+    const prepared = await prepareTypedCleanup(
+      message,
+      parsed.targetId,
+      parsed.deleteWindow
+    );
+    if (!prepared.ok) return;
     const timeoutUntil = now() + MUTE_DURATIONS[duration];
     const response = await request(
       "PATCH",
@@ -615,6 +893,9 @@ export function createModeration(
       );
       return;
     }
+    const cleanup = prepared.entries
+      ? await purgeSelected(prepared.entries)
+      : null;
     const recorded = await recordAction({
       type: "mute",
       serverId,
@@ -625,16 +906,25 @@ export function createModeration(
       details: [
         `**Duration:** ${duration}`,
         `**Until:** ${new Date(timeoutUntil).toISOString()}`,
+        cleanupDetail(parsed.deleteWindow, cleanup),
       ],
       reversible: true,
-      metadata: { timeoutUntil },
+      metadata: { timeoutUntil, cleanup },
     });
     await respond(
       message.channelId,
       "🔇 Member Muted",
-      `<@${parsed.targetId}> was timed out for **${duration}**.${recorded ? ` Action \`${recorded.actionId}\` was logged.` : " The action succeeded, but protected logging failed."}`,
-      "#2ECC71"
+      `<@${parsed.targetId}> was timed out for **${duration}**.${cleanup ? ` ${cleanupSummary(cleanup)}` : ""}${recorded ? ` Action \`${recorded.actionId}\` was logged.` : " The action succeeded, but protected logging failed."}`,
+      cleanup?.failed ? "#E67E22" : "#2ECC71"
     );
+    if (!cleanup) {
+      await offerCleanup(message, {
+        targetId: parsed.targetId,
+        actionId: recorded?.actionId ?? null,
+        actionLabel: `mute (${duration})`,
+        auditChannelId,
+      });
+    }
   }
 
   async function handleMute(message, parsed, auditChannelId) {
@@ -642,38 +932,33 @@ export function createModeration(
       await applyMute(message, parsed, parsed.duration, auditChannelId);
       return;
     }
-    const picker = await send(message.channelId, {
-      embeds: [
-        buildStatusEmbed(
-          "⏱️ Choose Mute Duration",
-          [
-            `**Target:** <@${parsed.targetId}>`,
-            "1️⃣ 10m · 2️⃣ 30m · 3️⃣ 1h · 4️⃣ 4h · 5️⃣ 24h · 6️⃣ 3d · 7️⃣ 7d",
-            "React within two minutes. Only the invoking moderator can choose.",
-          ].join("\n"),
-          "#3498DB"
-        ),
-      ],
+    await openPicker(message, {
+      title: "⏱️ Choose Mute Duration",
+      description: [
+        `**Target:** <@${parsed.targetId}>`,
+        pickerLegend(MUTE_PICKER),
+        "React within two minutes. Only the invoking moderator can choose.",
+      ].join("\n"),
+      colour: "#3498DB",
+      entry: {
+        type: "mute-picker",
+        choices: MUTE_PICKER,
+        parsed,
+        auditChannelId,
+      },
     });
-    if (!isSafeId(picker?._id)) return;
-    pending.set(picker._id, {
-      type: "mute-picker",
-      message,
-      parsed,
-      auditChannelId,
-      expiresAt: now() + INTERACTION_WINDOW_MS,
-    });
-    prunePending();
-    for (const [emoji] of PICKER_EMOJIS) {
-      await seedReaction(message.channelId, picker._id, emoji);
-    }
-    await seedReaction(message.channelId, picker._id, MODERATION_CANCEL_EMOJI);
   }
 
   async function handleKick(message, parsed, auditChannelId) {
     const serverId = message.server?.id ?? message.channel?.serverId;
     if (!(await requireAccess(message, COMMAND_ACCESS.KICK))) return;
     if (!(await validateTarget(message, parsed.targetId))) return;
+    const prepared = await prepareTypedCleanup(
+      message,
+      parsed.targetId,
+      parsed.deleteWindow
+    );
+    if (!prepared.ok) return;
     const response = await request(
       "DELETE",
       `/servers/${serverId}/members/${parsed.targetId}`
@@ -687,6 +972,9 @@ export function createModeration(
       );
       return;
     }
+    const cleanup = prepared.entries
+      ? await purgeSelected(prepared.entries)
+      : null;
     const recorded = await recordAction({
       type: "kick",
       serverId,
@@ -696,15 +984,24 @@ export function createModeration(
       reason: parsed.reason,
       details: [
         "**Undo:** unavailable; the member must rejoin through an invite.",
+        cleanupDetail(parsed.deleteWindow, cleanup),
       ],
       reversible: false,
     });
     await respond(
       message.channelId,
       "👢 Member Kicked",
-      `<@${parsed.targetId}> was removed. This cannot be undone; they must rejoin.${recorded ? ` Action \`${recorded.actionId}\` was logged.` : " Protected logging failed after the kick."}`,
-      "#2ECC71"
+      `<@${parsed.targetId}> was removed. This cannot be undone; they must rejoin.${cleanup ? ` ${cleanupSummary(cleanup)}` : ""}${recorded ? ` Action \`${recorded.actionId}\` was logged.` : " Protected logging failed after the kick."}`,
+      cleanup?.failed ? "#E67E22" : "#2ECC71"
     );
+    if (!cleanup) {
+      await offerCleanup(message, {
+        targetId: parsed.targetId,
+        actionId: recorded?.actionId ?? null,
+        actionLabel: "kick",
+        auditChannelId,
+      });
+    }
   }
 
   async function preflightPurge(message, entries) {
@@ -717,15 +1014,12 @@ export function createModeration(
     const serverId = message.server?.id ?? message.channel?.serverId;
     if (!(await requireAccess(message, COMMAND_ACCESS.BAN))) return;
     if (!(await validateTarget(message, parsed.targetId))) return;
-    const entries = parsed.deleteWindow
-      ? selectMessages(
-          serverId,
-          parsed.targetId,
-          PURGE_WINDOWS[parsed.deleteWindow]
-        )
-      : [];
-    if (parsed.deleteWindow && !(await preflightPurge(message, entries)))
-      return;
+    const prepared = await prepareTypedCleanup(
+      message,
+      parsed.targetId,
+      parsed.deleteWindow
+    );
+    if (!prepared.ok) return;
     const response = await request(
       "PUT",
       `/servers/${serverId}/bans/${parsed.targetId}`,
@@ -740,11 +1034,9 @@ export function createModeration(
       );
       return;
     }
-    let cleanup = null;
-    if (parsed.deleteWindow) cleanup = await purgeSelected(entries);
-    const cleanupLine = cleanup
-      ? `**History cleanup (${parsed.deleteWindow}):** ${cleanup.deleted}/${cleanup.selected} deleted; ${cleanup.failed} failed across ${cleanup.channels} channel(s). Coverage is limited to messages observed by Irminsul.`
-      : "**History cleanup:** not requested.";
+    const cleanup = prepared.entries
+      ? await purgeSelected(prepared.entries)
+      : null;
     const recorded = await recordAction({
       type: "ban",
       serverId,
@@ -753,7 +1045,7 @@ export function createModeration(
       targetId: parsed.targetId,
       reason: parsed.reason,
       details: [
-        cleanupLine,
+        cleanupDetail(parsed.deleteWindow, cleanup),
         "Undo removes the ban only; it cannot restore membership or deleted messages.",
       ],
       reversible: true,
@@ -762,9 +1054,17 @@ export function createModeration(
     await respond(
       message.channelId,
       "🔨 Member Banned",
-      `<@${parsed.targetId}> was banned. ${cleanupLine}${recorded ? ` Action \`${recorded.actionId}\` was logged.` : " Protected logging failed after the ban."}`,
+      `<@${parsed.targetId}> was banned.${cleanup ? ` ${cleanupSummary(cleanup)}` : ""}${recorded ? ` Action \`${recorded.actionId}\` was logged.` : " Protected logging failed after the ban."}`,
       cleanup?.failed ? "#E67E22" : "#2ECC71"
     );
+    if (!cleanup) {
+      await offerCleanup(message, {
+        targetId: parsed.targetId,
+        actionId: recorded?.actionId ?? null,
+        actionLabel: "ban",
+        auditChannelId,
+      });
+    }
   }
 
   async function executePurge(message, parsed, auditChannelId) {
@@ -786,6 +1086,14 @@ export function createModeration(
         PURGE_WINDOWS[parsed.window]
       );
       if (!(await preflightPurge(message, entries))) return;
+      if (entries.length >= SLOW_CLEANUP_THRESHOLD) {
+        await respond(
+          message.channelId,
+          "🧹 Purge Running",
+          `Deleting up to ${Math.min(entries.length, MAX_CLEANUP_MESSAGES)} observed message(s) from <@${parsed.targetId}> within **${parsed.window}**. Messages older than a week are removed one at a time, so this can take a while.`,
+          "#3498DB"
+        );
+      }
       const result = await purgeSelected(entries);
       const coverage = archive.getArchiveCoverage(serverId);
       await recordAction({
@@ -797,7 +1105,7 @@ export function createModeration(
         reason: parsed.reason,
         details: [
           `**Window:** ${parsed.window}`,
-          `**Result:** ${result.deleted}/${result.selected} deleted; ${result.failed} failed across ${result.channels} channel(s).`,
+          `**Result:** ${cleanupSummary(result)}`,
           `**Archive coverage:** ${coverage.count} current record(s); earliest observed ${coverage.earliestAt ? new Date(coverage.earliestAt).toISOString() : "unavailable"}.`,
           "Protected audit records and evidence were preserved.",
         ],
@@ -806,7 +1114,7 @@ export function createModeration(
       await respond(
         message.channelId,
         "🧹 User Purge Completed",
-        `${result.deleted}/${result.selected} known message(s) were deleted; ${result.failed} failed. Coverage is limited to messages observed while audit logging was active.`,
+        `${cleanupSummary(result)} Coverage is limited to messages observed while audit logging was active.`,
         result.failed ? "#E67E22" : "#2ECC71"
       );
     } finally {
@@ -821,6 +1129,29 @@ export function createModeration(
       }))
     )
       return;
+    if (!parsed.window) {
+      await openPicker(message, {
+        title: "🧹 Choose Purge Window",
+        description: [
+          `**Target:** <@${parsed.targetId}>`,
+          "How far back should Irminsul delete this member's observed messages?",
+          pickerLegend(CLEANUP_PICKER),
+          "React within two minutes and then confirm. Only the invoking moderator can choose.",
+        ].join("\n"),
+        colour: "#E67E22",
+        entry: {
+          type: "purge-window-picker",
+          choices: CLEANUP_PICKER,
+          parsed,
+          auditChannelId,
+        },
+      });
+      return;
+    }
+    await confirmPurge(message, parsed, auditChannelId);
+  }
+
+  async function confirmPurge(message, parsed, auditChannelId) {
     const serverId = message.server?.id ?? message.channel?.serverId;
     const entries = selectMessages(
       serverId,
@@ -1005,19 +1336,45 @@ export function createModeration(
         await respond(
           interaction.message.channelId,
           "❌ Moderation Action Cancelled",
-          "No member or message state was changed.",
+          interaction.type === "cleanup-picker"
+            ? `No messages were deleted. The ${interaction.actionLabel} still stands.`
+            : "No member or message state was changed.",
           "#808080"
         );
         return;
       }
+      const choice = interaction.choices
+        ? pickerChoice(interaction.choices, event.emoji_id)
+        : null;
       if (interaction.type === "mute-picker") {
-        const duration = PICKER_BY_EMOJI.get(event.emoji_id);
-        if (!duration) return;
+        if (!choice) return;
         pending.delete(event.id);
         await applyMute(
           interaction.message,
           interaction.parsed,
-          duration,
+          choice,
+          interaction.auditChannelId
+        );
+        return;
+      }
+      if (interaction.type === "cleanup-picker") {
+        if (!choice) return;
+        pending.delete(event.id);
+        await runCleanup(interaction.message, {
+          targetId: interaction.targetId,
+          window: choice,
+          actionId: interaction.actionId,
+          actionLabel: interaction.actionLabel,
+          auditChannelId: interaction.auditChannelId,
+        });
+        return;
+      }
+      if (interaction.type === "purge-window-picker") {
+        if (!choice) return;
+        pending.delete(event.id);
+        await confirmPurge(
+          interaction.message,
+          { ...interaction.parsed, window: choice },
           interaction.auditChannelId
         );
         return;
