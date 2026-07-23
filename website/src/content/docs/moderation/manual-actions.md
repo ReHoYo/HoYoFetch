@@ -21,13 +21,31 @@ Bare option words such as `1h` or `29d` are only read as options while they come
 once the reason starts, everything that follows is part of it, so `/Mute @member for arguing for 3d
 straight` opens the duration picker and keeps the sentence intact.
 
+## Confirm before acting
+
+Because the reason is free text, a mistyped or auto-completed mention would otherwise be
+indistinguishable from the intended member. `/Ban`, `/Kick`, and `/Mute` therefore post a
+confirmation that names the action, the target, the reason, and any typed cleanup window:
+
+```text
+🔨 Confirm Ban
+Action: ban
+Target: @member
+Reason: spamming and stuff
+```
+
+Nothing is sent to Stoat until the moderator who ran the command reacts ✅. Another moderator's
+reaction is ignored, ❌ cancels without touching the member, and the prompt expires after two
+minutes. Permissions and the target are verified at that point, not when the command was typed, so
+the checks reflect the moment of the action.
+
 ## Ban
 
 ```text
 /Ban @member for repeated spam
 ```
 
-`/Ban` acts immediately after verifying Ban Members. Once the ban lands, Irminsul offers a cleanup
+After ✅, `/Ban` verifies Ban Members and acts. Once the ban lands, Irminsul offers a cleanup
 picker: 1️⃣ 1h · 2️⃣ 6h · 3️⃣ 1d · 4️⃣ 3d · 5️⃣ 7d · 6️⃣ 14d · 7️⃣ 29d, or ❌ to keep the messages.
 Only the moderator who ran the command can choose, and the picker expires after two minutes.
 Cleanup requires Manage Messages in every affected channel.
@@ -41,7 +59,7 @@ Undo unbans the account but cannot restore membership or deleted messages.
 /Kick @member for raiding
 ```
 
-`/Kick` verifies Kick Members and acts immediately, then offers the same cleanup picker. A kick
+After ✅, `/Kick` verifies Kick Members and acts, then offers the same cleanup picker. A kick
 cannot be undone by the bot; the member needs a new invite to return.
 
 ## Mute
@@ -51,10 +69,11 @@ cannot be undone by the bot; the member needs a new invite to return.
 /Mute @member for arguing with staff
 ```
 
-Supported durations are `10m`, `30m`, `1h`, `4h`, `24h`, `3d`, and `7d`. Omitting the duration opens
-a two-minute picker for the command invoker. After the timeout is applied, the cleanup picker is
-offered as it is for bans and kicks. The protected record offers a ten-minute ↩️ release window to
-freshly authorized timeout moderators.
+Supported durations are `10m`, `30m`, `1h`, `4h`, `24h`, `3d`, and `7d`. A typed duration goes
+through the ✅/❌ confirmation. Omitting the duration opens a two-minute picker for the command
+invoker instead — choosing from it is already a deliberate second act, so no separate confirmation
+follows. Either way the cleanup picker comes after the timeout is applied. The protected record
+offers a ten-minute ↩️ release window to freshly authorized timeout moderators.
 
 ## Purge observed messages
 
@@ -76,7 +95,8 @@ quotations, reactions, and external copies are not erased.
 ```
 
 This removes a native timeout, resets the member's automod strike history, and closes pending ban
-reviews for the containment. It can also release a manually applied timeout.
+reviews for the containment. It can also release a manually applied timeout. It is the one manual
+action with no confirmation step, because it only restores access.
 
 :::caution[History cleanup is best-effort]
 Cleanup reaches back 29 days, one day short of the 30-day message archive that feeds it. Stoat's ban

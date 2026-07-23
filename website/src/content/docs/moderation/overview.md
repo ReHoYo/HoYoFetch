@@ -32,7 +32,8 @@ Irminsul refreshes the moderator, target, bot, server, and channel context befor
 
 Stoat does not provide command interaction buttons, so Irminsul uses reactions for:
 
-- a duration picker when `/Mute` omits its duration;
+- a ✅/❌ confirmation before every ban, kick, and typed-duration mute;
+- a duration picker when `/Mute` omits its duration, which doubles as that command's confirmation;
 - a 1h–29d message-cleanup picker after every ban, kick, and mute;
 - a window picker and then a ✅/❌ confirmation for `/Purge-User`;
 - ten-minute undo windows for bans and mutes; and

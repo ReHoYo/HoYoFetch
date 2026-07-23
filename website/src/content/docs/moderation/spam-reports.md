@@ -6,10 +6,17 @@ description: Privately report suspected friend-request, DM, commission, or scam 
 `/Report-Spam` lets a current server member privately submit an allegation for review:
 
 ```text
+/Report-Spam @member sent an unsolicited commission scam DM
+/Report-Spam @member for repeated friend-request spam
 /Report-Spam @member reason: sent an unsolicited commission scam DM
 ```
 
-The reason must contain 10–300 characters. The target must be a current member of the same server.
+Describe what happened in your own words, the way the moderation commands read. The reported account
+may be mentioned anywhere in the sentence, a leading `for` or `because` is treated as filler, and the
+older `reason:` delimiter still works.
+
+The description must contain 10–300 characters. The target must be a current member of the same
+server.
 
 ## Secure intake
 

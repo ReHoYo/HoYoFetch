@@ -1,5 +1,11 @@
 // spam-report.js — abuse-resistant member reports for private spam/scam activity
 import { randomBytes } from "crypto";
+import {
+  BARE_ID_PATTERN,
+  buildReason,
+  findTargetToken,
+  tokenizeArgs,
+} from "./command-args.js";
 import { buildStatusEmbed } from "./embeds.js";
 import {
   createSpamReport,
@@ -37,13 +43,6 @@ export function createSpamReportId() {
   return `SR${randomBytes(8).toString("hex").toUpperCase()}`;
 }
 
-function parseTarget(value) {
-  const token = String(value ?? "").trim();
-  const mention = token.match(/^<@!?([A-Za-z0-9]+)>$/);
-  const id = mention?.[1] ?? token;
-  return isSafeId(id) ? id : null;
-}
-
 export function isSpamReportInvocation(content, prefix = "/") {
   const raw = String(content ?? "").trim();
   const commandPrefix = String(prefix ?? "");
@@ -58,12 +57,25 @@ export function isSpamReportInvocation(content, prefix = "/") {
   return command.toLowerCase() === "report-spam";
 }
 
+/**
+ * Parse a report written in plain words, the way the moderation commands are.
+ *
+ * `/Report-Spam @member sent me an unsolicited commission DM` and the older
+ * `/Report-Spam @member reason: ...` both parse. The reported account may be
+ * mentioned anywhere in the sentence, or given as a bare ID in the leading
+ * position the command has always accepted.
+ */
 export function parseSpamReportCommand(rawArgs) {
-  const input = String(rawArgs ?? "").trim();
-  const separator = input.search(/\s/);
-  const targetToken = separator < 0 ? input : input.slice(0, separator);
-  const remainder = separator < 0 ? "" : input.slice(separator).trim();
-  const targetId = parseTarget(targetToken);
+  const tokens = tokenizeArgs(rawArgs);
+  const consumed = new Set();
+  const found = findTargetToken(tokens);
+  let targetId = found?.targetId ?? null;
+  if (found) {
+    consumed.add(found.index);
+  } else if (BARE_ID_PATTERN.test(tokens[0] ?? "") && isSafeId(tokens[0])) {
+    targetId = tokens[0];
+    consumed.add(0);
+  }
   if (!targetId) {
     return {
       ok: false,
@@ -71,15 +83,14 @@ export function parseSpamReportCommand(rawArgs) {
     };
   }
 
-  const reasonMatch = remainder.match(/^reason:\s*([\s\S]*)$/i);
-  if (!reasonMatch) {
+  const reason = buildReason(tokens, consumed);
+  if (!reason) {
     return {
       ok: false,
       error:
-        "Use `/Report-Spam @member reason: what happened` with no extra options.",
+        "Describe what happened in your own words, for example `@member sent me a scam DM`.",
     };
   }
-  const reason = reasonMatch[1].replace(/\s+/g, " ").trim();
   if (reason.length < SPAM_REPORT_MIN_REASON_LENGTH) {
     return {
       ok: false,

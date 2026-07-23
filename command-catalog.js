@@ -98,14 +98,16 @@ export const COMMAND_CATALOG = Object.freeze([
     section: COMMAND_SECTIONS.MEMBER,
     route: "report-spam",
     access: "member",
-    syntax: "/Report-Spam @member reason: ...",
+    syntax: "/Report-Spam @member <what happened>",
     summary:
       "Privately submit suspected friend-request, DM, commission, or scam spam for review.",
     help: "Privately submit suspected friend-request or DM spam for review",
     examples: [
-      "/Report-Spam @member reason: sent an unsolicited commission scam DM",
+      "/Report-Spam @member sent an unsolicited commission scam DM",
+      "/Report-Spam @member for repeated friend-request spam",
     ],
     notes: [
+      "Describe what happened in plain words, between 10 and 300 characters. The older `reason:` delimiter still works.",
       "The command works only where Irminsul can remove the invocation. Reports never punish an account automatically.",
     ],
   },
@@ -255,8 +257,9 @@ export const COMMAND_CATALOG = Object.freeze([
     route: "ban",
     access: "ban",
     syntax: "/Ban @member <reason>",
-    summary: "Ban a member, then choose a message-cleanup window by reaction.",
-    help: "Ban immediately, then pick a cleanup window (1h–29d) by reaction. The 10-minute ↩️ undo only unbans _(Ban Members; cleanup also needs Manage Messages)_",
+    summary:
+      "Confirm and ban a member, then choose a message-cleanup window by reaction.",
+    help: "Confirm with ✅, then pick a cleanup window (1h–29d) by reaction. The 10-minute ↩️ undo only unbans _(Ban Members; cleanup also needs Manage Messages)_",
     permission: "Ban Members; Manage Messages is also required for cleanup",
     examples: [
       "/Ban @member for spamming and stuff",
@@ -264,6 +267,7 @@ export const COMMAND_CATALOG = Object.freeze([
     ],
     notes: [
       "Write the reason in plain words; the member, an optional window, and the reason may appear in any order.",
+      "Nothing happens until the moderator who ran the command reacts ✅ to the confirmation naming the target and reason.",
       "Undo unbans the account but cannot restore server membership or deleted messages.",
     ],
   },
@@ -274,12 +278,15 @@ export const COMMAND_CATALOG = Object.freeze([
     access: "kick",
     syntax: "/Kick @member <reason>",
     summary:
-      "Remove a member immediately, then choose a message-cleanup window by reaction.",
-    help: "Kick immediately, then pick a cleanup window (1h–29d) by reaction. There is no undo; the member must rejoin with an invite _(Kick Members)_",
+      "Confirm and remove a member, then choose a message-cleanup window by reaction.",
+    help: "Confirm with ✅, then pick a cleanup window (1h–29d) by reaction. There is no undo; the member must rejoin with an invite _(Kick Members)_",
     permission: "Kick Members; Manage Messages is also required for cleanup",
     examples: [
       "/Kick @member for raiding",
       "/Kick @member 1d throwaway account",
+    ],
+    notes: [
+      "Because a kick cannot be undone, nothing happens until the moderator who ran the command reacts ✅.",
     ],
   },
   {
@@ -290,11 +297,14 @@ export const COMMAND_CATALOG = Object.freeze([
     syntax: "/Mute @member [10m|30m|1h|4h|24h|3d|7d] <reason>",
     summary:
       "Apply a native timeout, then choose a message-cleanup window by reaction.",
-    help: "Apply a timeout, or omit the duration for the 1️⃣–7️⃣ picker, then pick a cleanup window by reaction. The 10-minute ↩️ undo releases it _(Timeout Members)_",
+    help: "Type a duration and confirm with ✅, or omit it for the 1️⃣–7️⃣ picker, then pick a cleanup window by reaction. The 10-minute ↩️ undo releases it _(Timeout Members)_",
     permission: "Timeout Members; Manage Messages is also required for cleanup",
     examples: [
       "/Mute @member 1h cooldown",
       "/Mute @member for arguing with staff",
+    ],
+    notes: [
+      "Choosing a duration from the picker is itself the confirmation, so only a typed duration shows a separate ✅/❌ prompt.",
     ],
   },
   {

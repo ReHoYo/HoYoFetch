@@ -54,38 +54,38 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 
 ## 📋 Commands
 
-| Command                                                  | Description                                                                                                 |
-| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `/FetchGI`                                               | Fetch active Genshin Impact codes                                                                           |
-| `/FetchHSR`                                              | Fetch active Honkai: Star Rail codes                                                                        |
-| `/FetchZZZ`                                              | Fetch active Zenless Zone Zero codes                                                                        |
-| `/FetchHI3`                                              | Fetch active Honkai Impact 3rd codes                                                                        |
-| `/FetchNTE`                                              | Fetch active Neverness to Everness codes                                                                    |
-| `/FetchWuWa`                                             | Fetch active Wuthering Waves codes                                                                          |
-| `/Report-Spam @member reason: ...`                       | Privately submit suspected friend-request or DM spam for review                                             |
-| `/EnableFetch`                                           | Enable HoYoverse + NTE + WuWa auto-fetch in the current channel (admins/mods only)                          |
-| `/EnableFetchHoyo`                                       | Enable HoYoverse-only auto-fetch in the current channel (admins/mods only)                                  |
-| `/EnableFetchNTE`                                        | Enable NTE-only auto-fetch in the current channel (admins/mods only)                                        |
-| `/EnableFetchWuWa`                                       | Enable WuWa-only auto-fetch in the current channel (admins/mods only)                                       |
-| `/EnableFetchNTEWuWa`                                    | Enable NTE + WuWa auto-fetch in the current channel (admins/mods only)                                      |
-| `/DisableFetch`                                          | Disable auto-fetch in the current channel (admins/mods only)                                                |
-| `/EmojiMode [unicode\|custom]`                           | Show or switch reward-emoji rendering at runtime (admins/mods only)                                         |
-| `/Restart`                                               | Restart the bot after deploying updates (admins/mods only)                                                  |
-| `/AuditLog [status\|here\|#channel\|off]`                | View or configure audit logging for the server (admins/mods only)                                           |
-| `/Test-AuditLog`                                         | Send a test event through the audit pipeline to verify delivery (admins/mods only; legacy diagnostic alias) |
-| `/Automod status`                                        | Show this server's automod mode, logger, and ban quorum (admins/mods only)                                  |
-| `/Automod monitor [here\|#channel]`                      | Detect and log cases without changing messages or members (admins/mods only)                                |
-| `/Automod enforce [here\|#channel]`                      | Enable temporary containment and staff-approved ban cases (admins/mods only)                                |
-| `/Automod off`                                           | Disable anti-raid evaluation for this server (admins/mods only)                                             |
-| `/Automod quorum 1\|2`                                   | Set the approval quorum for new cases; production defaults to two (admins/mods only)                        |
-| `/Automod approve CASE_ID`                               | Approve a pending ban case (owner, Manage Server, or Ban Members only)                                      |
-| `/Automod release @member <reason>`                      | Remove a timeout and reset that member's automod escalation history (Timeout Members only)                  |
-| `/Ban @member <reason>`                                  | Ban, then pick a 1h–29d cleanup window by reaction (Ban Members; cleanup also needs Manage Messages)        |
-| `/Kick @member <reason>`                                 | Kick immediately, then pick a cleanup window by reaction; the kick cannot be undone (Kick Members)          |
-| `/Mute @member [10m\|30m\|1h\|4h\|24h\|3d\|7d] <reason>` | Apply a native timeout, or omit duration for a reaction picker (Timeout Members only)                       |
-| `/Purge-User @member <reason>`                           | Pick a window by reaction, then confirm deletion of the member's observed messages (Manage Messages only)   |
-| `/HelpHoyoFetch`                                         | Show the two-page command reference; the opener navigates with ◀️/▶️                                        |
-| `/Docs`                                                  | Open the permanent searchable documentation site                                                            |
+| Command                                                  | Description                                                                                                      |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `/FetchGI`                                               | Fetch active Genshin Impact codes                                                                                |
+| `/FetchHSR`                                              | Fetch active Honkai: Star Rail codes                                                                             |
+| `/FetchZZZ`                                              | Fetch active Zenless Zone Zero codes                                                                             |
+| `/FetchHI3`                                              | Fetch active Honkai Impact 3rd codes                                                                             |
+| `/FetchNTE`                                              | Fetch active Neverness to Everness codes                                                                         |
+| `/FetchWuWa`                                             | Fetch active Wuthering Waves codes                                                                               |
+| `/Report-Spam @member <what happened>`                   | Privately submit suspected friend-request or DM spam for review                                                  |
+| `/EnableFetch`                                           | Enable HoYoverse + NTE + WuWa auto-fetch in the current channel (admins/mods only)                               |
+| `/EnableFetchHoyo`                                       | Enable HoYoverse-only auto-fetch in the current channel (admins/mods only)                                       |
+| `/EnableFetchNTE`                                        | Enable NTE-only auto-fetch in the current channel (admins/mods only)                                             |
+| `/EnableFetchWuWa`                                       | Enable WuWa-only auto-fetch in the current channel (admins/mods only)                                            |
+| `/EnableFetchNTEWuWa`                                    | Enable NTE + WuWa auto-fetch in the current channel (admins/mods only)                                           |
+| `/DisableFetch`                                          | Disable auto-fetch in the current channel (admins/mods only)                                                     |
+| `/EmojiMode [unicode\|custom]`                           | Show or switch reward-emoji rendering at runtime (admins/mods only)                                              |
+| `/Restart`                                               | Restart the bot after deploying updates (admins/mods only)                                                       |
+| `/AuditLog [status\|here\|#channel\|off]`                | View or configure audit logging for the server (admins/mods only)                                                |
+| `/Test-AuditLog`                                         | Send a test event through the audit pipeline to verify delivery (admins/mods only; legacy diagnostic alias)      |
+| `/Automod status`                                        | Show this server's automod mode, logger, and ban quorum (admins/mods only)                                       |
+| `/Automod monitor [here\|#channel]`                      | Detect and log cases without changing messages or members (admins/mods only)                                     |
+| `/Automod enforce [here\|#channel]`                      | Enable temporary containment and staff-approved ban cases (admins/mods only)                                     |
+| `/Automod off`                                           | Disable anti-raid evaluation for this server (admins/mods only)                                                  |
+| `/Automod quorum 1\|2`                                   | Set the approval quorum for new cases; production defaults to two (admins/mods only)                             |
+| `/Automod approve CASE_ID`                               | Approve a pending ban case (owner, Manage Server, or Ban Members only)                                           |
+| `/Automod release @member <reason>`                      | Remove a timeout and reset that member's automod escalation history (Timeout Members only)                       |
+| `/Ban @member <reason>`                                  | Confirm with ✅, then pick a 1h–29d cleanup window by reaction (Ban Members; cleanup also needs Manage Messages) |
+| `/Kick @member <reason>`                                 | Confirm with ✅, then pick a cleanup window by reaction; the kick cannot be undone (Kick Members)                |
+| `/Mute @member [10m\|30m\|1h\|4h\|24h\|3d\|7d] <reason>` | Type a duration and confirm with ✅, or omit it for a reaction picker (Timeout Members only)                     |
+| `/Purge-User @member <reason>`                           | Pick a window by reaction, then confirm deletion of the member's observed messages (Manage Messages only)        |
+| `/HelpHoyoFetch`                                         | Show the two-page command reference; the opener navigates with ◀️/▶️                                             |
+| `/Docs`                                                  | Open the permanent searchable documentation site                                                                 |
 
 > **Note:** Revolt does not support Discord-style slash commands. These are message-based prefix commands using `/` as the prefix. Command names are case-insensitive; channel IDs are preserved exactly.
 
@@ -94,7 +94,7 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 ### Command security
 
 - Commands are accepted only from human members in server channels. Direct messages, webhooks, and messages from other bots are ignored.
-- `/Report-Spam` is available to human members, but only in a channel where Irminsul can freshly verify its Manage Messages permission and remove the invocation before reading the target and reason.
+- `/Report-Spam` is available to human members, but only in a channel where Irminsul can freshly verify its Manage Messages permission and remove the invocation before reading the target and description.
 - Server owners and members with **Manage Server** permission are treated as administrators.
 - Fetch, emoji, restart, and audit-log management commands are available to administrators and capability-based moderators with **Kick Members**, **Ban Members**, **Timeout Members**, or **Manage Messages** in the current channel.
 - Automod configuration uses the same capability-based moderator policy as other management commands: owner, **Manage Server**, **Kick Members**, **Ban Members**, **Timeout Members**, or **Manage Messages** in the current channel. Ban approvals remain stricter and require the owner, **Manage Server**, or **Ban Members**; **Manage Messages** alone cannot approve a ban.
@@ -104,7 +104,7 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 
 ### Member spam reports
 
-`/Report-Spam @member reason: ...` privately submits suspected friend-request, DM, commission, or scam spam for review. The reason must be 10–300 characters. Irminsul removes the command message before parsing it, verifies that the reporter and target are current members, strips active links and formatting from the reason, and posts only a generic report ID acknowledgement publicly.
+`/Report-Spam @member sent me a scam DM` privately submits suspected friend-request, DM, commission, or scam spam for review. Describe what happened in plain words the way the moderation commands read; the reported account may be mentioned anywhere in the sentence, and the older `reason:` delimiter still works. The description must be 10–300 characters. Irminsul removes the command message before parsing it, verifies that the reporter and target are current members, strips active links and formatting from the reason, and posts only a generic report ID acknowledgement publicly.
 
 The command has its own abuse controls: one attempt per reporter per minute, at most three accepted reports per reporter per server within 24 hours, and one accepted report against the same target per reporter within 24 hours. Three unique reporters against one target within 24 hours raise the review priority. Reports are allegations, not proof, and never create an automatic timeout, deletion, kick, ban, or automod strike.
 
@@ -112,11 +112,13 @@ Irminsul cannot observe private friend requests or DMs between ordinary members.
 
 ### Manual moderation
 
-Reasons are mandatory but are written in plain words — `/Ban @member for spamming and stuff` — and may contain up to 300 characters. The member, the reason, and any option may appear in any order, and the older `reason:`, `delete:`, and `window:` delimiters are still accepted. Commands accept one member mention or one raw user ID. Stoat has no interaction buttons, so Irminsul uses reactions for duration selection, cleanup windows, destructive confirmation, and undo. Every picker is answerable only by the moderator who ran the command and expires after two minutes.
+Reasons are mandatory but are written in plain words — `/Ban @member for spamming and stuff` — and may contain up to 300 characters. The member, the reason, and any option may appear in any order, and the older `reason:`, `delete:`, and `window:` delimiters are still accepted. Commands accept one member mention or one raw user ID. Stoat has no interaction buttons, so Irminsul uses reactions for duration selection, cleanup windows, destructive confirmation, and undo. Every picker and confirmation is answerable only by the moderator who ran the command and expires after two minutes.
 
-- `/Ban @member for repeated spam` bans immediately, then offers a cleanup picker: 1️⃣ 1h, 2️⃣ 6h, 3️⃣ 1d, 4️⃣ 3d, 5️⃣ 7d, 6️⃣ 14d, 7️⃣ 29d, or ❌ to keep the messages. Cleanup needs Manage Messages in every affected channel. The ↩️ reaction on the protected record is available for 10 minutes to any freshly authorized ban moderator; it unbans but cannot restore membership or deleted messages.
-- `/Kick @member for raiding` kicks immediately and offers the same cleanup picker. Stoat cannot put a kicked member back, so no undo reaction is offered and the reason is retained in Irminsul's protected log.
-- `/Mute @member 1h cooldown` applies that duration immediately; omitting the duration opens the 10m–7d picker. Either way the cleanup picker follows. The protected record has a 10-minute ↩️ undo reaction for authorized timeout moderators.
+Because the reason is free text, a mistyped or auto-completed mention would otherwise be indistinguishable from the intended member. `/Ban`, `/Kick`, and `/Mute` therefore post a ✅/❌ confirmation naming the action, target, reason, and any typed cleanup window; nothing reaches Stoat until the invoking moderator reacts ✅. Permissions and the target are verified at that point rather than when the command was typed. `/Automod release` has no confirmation because it only restores access.
+
+- `/Ban @member for repeated spam` bans once confirmed, then offers a cleanup picker: 1️⃣ 1h, 2️⃣ 6h, 3️⃣ 1d, 4️⃣ 3d, 5️⃣ 7d, 6️⃣ 14d, 7️⃣ 29d, or ❌ to keep the messages. Cleanup needs Manage Messages in every affected channel. The ↩️ reaction on the protected record is available for 10 minutes to any freshly authorized ban moderator; it unbans but cannot restore membership or deleted messages.
+- `/Kick @member for raiding` kicks once confirmed and offers the same cleanup picker. Stoat cannot put a kicked member back, so no undo reaction is offered and the reason is retained in Irminsul's protected log.
+- `/Mute @member 1h cooldown` confirms first, then applies that duration; omitting the duration opens the 10m–7d picker instead, and choosing from it is itself the confirmation. Either way the cleanup picker follows. The protected record has a 10-minute ↩️ undo reaction for authorized timeout moderators.
 - `/Purge-User @member because of spam` asks for a window with the same 1h–29d picker, then shows a ✅/❌ confirmation with the number of matching messages. Only one purge or cleanup runs per server at a time.
 - `/Automod release @member false positive` removes the native timeout, resets the member's automod strike history, and closes pending ban reviews for that containment. It can also remove a manually applied timeout.
 

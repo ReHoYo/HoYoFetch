@@ -25,11 +25,24 @@ const MOD_ID = "MOD123";
 const OTHER_MOD_ID = "MOD456";
 const BOT_ID = "BOT123";
 const OWNER_ID = "OWNER123";
+const CONFIRM_TITLES = new Set([
+  "🔨 Confirm Ban",
+  "👢 Confirm Kick",
+  "🔇 Confirm Mute",
+]);
 const ALL_MOD_BITS =
   2 ** 6 + // KickMembers
   2 ** 7 + // BanMembers
   2 ** 8 + // TimeoutMembers
   2 ** 23; // ManageMessages
+
+// Seeding a prompt's reactions is a request too, so state assertions look at
+// the calls that actually change a member or a message.
+function mutations(harness) {
+  return harness.requests.filter(
+    (entry) => !entry.path.includes("/reactions/")
+  );
+}
 
 function memoryStore({ audit = true } = {}) {
   const actions = new Map();
@@ -183,7 +196,7 @@ function makeHarness({
     channel: { serverId: SERVER_ID },
     server: { id: SERVER_ID, ownerId: OWNER_ID },
   };
-  return {
+  const harness = {
     moderation,
     message,
     requests,
@@ -194,7 +207,23 @@ function makeHarness({
     setNow(value) {
       clock = value;
     },
+    // Ban, kick, and typed-duration mutes pause for an invoker-only ✅ before
+    // acting. Tests that assert on the action itself answer that prompt here so
+    // they stay about the action rather than the gate.
+    async run(command, args) {
+      await moderation.handleCommand(message, command, args);
+      const prompt = sent.at(-1);
+      if (!CONFIRM_TITLES.has(prompt?.payload?.embeds?.[0]?.title)) return null;
+      await moderation.handleRawEvent({
+        type: "MessageReact",
+        id: prompt.result._id,
+        user_id: message.authorId,
+        emoji_id: MODERATION_CONFIRM_EMOJI,
+      });
+      return prompt.result._id;
+    },
   };
+  return harness;
 }
 
 test("moderation parser still accepts the legacy delimiter contracts", () => {
@@ -293,13 +322,88 @@ test("moderation parser rejects missing reasons, targets, and unknown options", 
   assert.equal(parseModerationCommand("unknown", [TARGET_ID, "x"]).ok, false);
 });
 
-test("ban records a protected reversible action and authorized reaction unbans", async () => {
+test("ban waits for the invoker's own confirmation before acting", async () => {
   const harness = makeHarness();
   await harness.moderation.handleCommand(harness.message, "ban", [
-    TARGET_ID,
-    "reason:",
-    "raid",
+    `<@${TARGET_ID}>`,
+    "for",
+    "spamming",
+    "and",
+    "stuff",
   ]);
+  const confirmation = harness.sent.at(-1);
+  assert.match(confirmation.payload.embeds[0].title, /Confirm Ban/);
+  // The prompt is the typo guard, so it has to name who and why.
+  assert.match(
+    confirmation.payload.embeds[0].description,
+    new RegExp(`<@${TARGET_ID}>[\\s\\S]*spamming and stuff`)
+  );
+  // Seeding the ✅/❌ reactions is the only traffic so far.
+  assert.equal(mutations(harness).length, 0);
+
+  // Another moderator cannot answer someone else's prompt.
+  await harness.moderation.handleRawEvent({
+    type: "MessageReact",
+    id: confirmation.result._id,
+    user_id: OTHER_MOD_ID,
+    emoji_id: MODERATION_CONFIRM_EMOJI,
+  });
+  assert.equal(
+    harness.requests.some((entry) => entry.path.includes("/bans/")),
+    false
+  );
+
+  await harness.moderation.handleRawEvent({
+    type: "MessageReact",
+    id: confirmation.result._id,
+    user_id: MOD_ID,
+    emoji_id: MODERATION_CONFIRM_EMOJI,
+  });
+  assert.ok(
+    harness.requests.some(
+      (entry) => entry.method === "PUT" && entry.path.includes("/bans/")
+    )
+  );
+});
+
+test("declining or ignoring the confirmation leaves the member untouched", async () => {
+  const harness = makeHarness();
+  await harness.moderation.handleCommand(harness.message, "kick", [
+    `<@${TARGET_ID}>`,
+    "for",
+    "raiding",
+  ]);
+  await harness.moderation.handleRawEvent({
+    type: "MessageReact",
+    id: harness.sent.at(-1).result._id,
+    user_id: MOD_ID,
+    emoji_id: "❌",
+  });
+  assert.equal(mutations(harness).length, 0);
+  assert.equal(harness.store.actions.size, 0);
+  assert.match(harness.sent.at(-1).payload.embeds[0].title, /Cancelled/);
+
+  // An expired prompt is dead even for the invoker.
+  await harness.moderation.handleCommand(harness.message, "mute", [
+    `<@${TARGET_ID}>`,
+    "1h",
+    "cooldown",
+  ]);
+  const stale = harness.sent.at(-1);
+  assert.match(stale.payload.embeds[0].title, /Confirm Mute/);
+  harness.setNow(1_900_000_000_000 + 3 * 60_000);
+  await harness.moderation.handleRawEvent({
+    type: "MessageReact",
+    id: stale.result._id,
+    user_id: MOD_ID,
+    emoji_id: MODERATION_CONFIRM_EMOJI,
+  });
+  assert.equal(harness.timeouts.has(TARGET_ID), false);
+});
+
+test("ban records a protected reversible action and authorized reaction unbans", async () => {
+  const harness = makeHarness();
+  await harness.run("ban", [TARGET_ID, "reason:", "raid"]);
   assert.ok(
     harness.requests.some(
       (entry) => entry.method === "PUT" && entry.path.includes("/bans/")
@@ -324,11 +428,7 @@ test("ban records a protected reversible action and authorized reaction unbans",
 
 test("mute duration picker is invoker-only and applies the chosen timeout", async () => {
   const harness = makeHarness();
-  await harness.moderation.handleCommand(harness.message, "mute", [
-    TARGET_ID,
-    "reason:",
-    "cooldown",
-  ]);
+  await harness.run("mute", [TARGET_ID, "reason:", "cooldown"]);
   const pickerId = harness.sent[0].result._id;
   await harness.moderation.handleRawEvent({
     type: "MessageReact",
@@ -345,15 +445,19 @@ test("mute duration picker is invoker-only and applies the chosen timeout", asyn
   });
   assert.equal(harness.timeouts.has(TARGET_ID), true);
   assert.equal(harness.store.actions.get("MDACTION123").type, "mute");
+  // Picking a duration is already a deliberate second act, so there is no
+  // separate confirmation on this path.
+  assert.equal(
+    harness.sent.some((entry) =>
+      CONFIRM_TITLES.has(entry.payload.embeds[0].title)
+    ),
+    false
+  );
 });
 
 test("kick is immediate, logged, and intentionally has no undo record", async () => {
   const harness = makeHarness();
-  await harness.moderation.handleCommand(harness.message, "kick", [
-    TARGET_ID,
-    "reason:",
-    "rules",
-  ]);
+  await harness.run("kick", [TARGET_ID, "reason:", "rules"]);
   assert.ok(
     harness.requests.some(
       (entry) => entry.method === "DELETE" && entry.path.includes("/members/")
@@ -373,12 +477,7 @@ test("confirmed purge batches known messages by channel", async () => {
     createdAt: now - 30 * 60_000,
   }));
   const harness = makeHarness({ messages });
-  await harness.moderation.handleCommand(harness.message, "purge-user", [
-    TARGET_ID,
-    "window:1h",
-    "reason:",
-    "spam",
-  ]);
+  await harness.run("purge-user", [TARGET_ID, "window:1h", "reason:", "spam"]);
   const confirmationId = harness.sent[0].result._id;
   await harness.moderation.handleRawEvent({
     type: "MessageReact",
@@ -412,12 +511,7 @@ test("purge-user picks its window by reaction and then confirms", async () => {
       },
     ],
   });
-  await harness.moderation.handleCommand(harness.message, "purge-user", [
-    TARGET_ID,
-    "because",
-    "of",
-    "spam",
-  ]);
+  await harness.run("purge-user", [TARGET_ID, "because", "of", "spam"]);
   assert.match(harness.sent[0].payload.embeds[0].title, /Choose Purge Window/);
 
   // A different moderator's reaction is ignored.
@@ -460,7 +554,7 @@ test("ban offers a cleanup picker that only the invoker can use", async () => {
       },
     ],
   });
-  await harness.moderation.handleCommand(harness.message, "ban", [
+  await harness.run("ban", [
     `<@${TARGET_ID}>`,
     "for",
     "spamming",
@@ -507,11 +601,7 @@ test("ban offers a cleanup picker that only the invoker can use", async () => {
 
 test("declining the cleanup picker keeps the kick and deletes nothing", async () => {
   const harness = makeHarness();
-  await harness.moderation.handleCommand(harness.message, "kick", [
-    `<@${TARGET_ID}>`,
-    "for",
-    "raiding",
-  ]);
+  await harness.run("kick", [`<@${TARGET_ID}>`, "for", "raiding"]);
   const picker = harness.sent.at(-1);
   assert.match(picker.payload.embeds[0].title, /Delete Recent Messages/);
   await harness.moderation.handleRawEvent({
@@ -543,11 +633,7 @@ test("a cleanup picker click without Manage Messages deletes nothing", async () 
       },
     ],
   });
-  await harness.moderation.handleCommand(harness.message, "mute", [
-    `<@${TARGET_ID}>`,
-    "1h",
-    "cooldown",
-  ]);
+  await harness.run("mute", [`<@${TARGET_ID}>`, "1h", "cooldown"]);
   const picker = harness.sent.at(-1);
   await harness.moderation.handleRawEvent({
     type: "MessageReact",
@@ -595,11 +681,7 @@ test("cleanups older than the bulk window delete one message at a time", async (
       },
     ],
   });
-  await harness.moderation.handleCommand(harness.message, "ban", [
-    TARGET_ID,
-    "delete:29d",
-    "raid",
-  ]);
+  await harness.run("ban", [TARGET_ID, "delete:29d", "raid"]);
   assert.deepEqual(
     harness.requests
       .filter(
@@ -635,11 +717,7 @@ test("a rejected bulk batch falls back to per-message deletes", async () => {
         ? { ok: false, status: 400 }
         : null,
   });
-  await harness.moderation.handleCommand(harness.message, "ban", [
-    TARGET_ID,
-    "delete:1h",
-    "spam",
-  ]);
+  await harness.run("ban", [TARGET_ID, "delete:1h", "spam"]);
   assert.ok(
     harness.requests.some(
       (entry) => entry.path === `/channels/${CHANNEL_ID}/messages/MESSAGE1`
@@ -661,11 +739,7 @@ test("oversized cleanups stop at the safety cap and report the remainder", async
     createdAt: now - (2_050 - index) * 1_000,
   }));
   const harness = makeHarness({ messages });
-  await harness.moderation.handleCommand(harness.message, "ban", [
-    TARGET_ID,
-    "delete:1h",
-    "flood",
-  ]);
+  await harness.run("ban", [TARGET_ID, "delete:1h", "flood"]);
   const deleted = harness.requests
     .filter((entry) => entry.path.endsWith("/messages/bulk"))
     .reduce((total, entry) => total + entry.body.ids.length, 0);
@@ -679,7 +753,7 @@ test("oversized cleanups stop at the safety cap and report the remainder", async
 test("automod release removes timeout and resets strikes", async () => {
   const harness = makeHarness();
   harness.timeouts.set(TARGET_ID, new Date(1_900_000_600_000).toISOString());
-  await harness.moderation.handleCommand(harness.message, "automod-release", [
+  await harness.run("automod-release", [
     TARGET_ID,
     "reason:",
     "false positive",
@@ -690,11 +764,7 @@ test("automod release removes timeout and resets strikes", async () => {
 
 test("manual moderation refuses to mutate without an audit logger", async () => {
   const harness = makeHarness({ audit: false });
-  await harness.moderation.handleCommand(harness.message, "ban", [
-    TARGET_ID,
-    "reason:",
-    "test",
-  ]);
+  await harness.run("ban", [TARGET_ID, "reason:", "test"]);
   assert.equal(
     harness.requests.some((entry) => entry.path.includes("/bans/")),
     false
@@ -716,12 +786,7 @@ test("ban cleanup preflight refuses the ban when Manage Messages is absent", asy
       },
     ],
   });
-  await harness.moderation.handleCommand(harness.message, "ban", [
-    TARGET_ID,
-    "delete:1h",
-    "reason:",
-    "spam",
-  ]);
+  await harness.run("ban", [TARGET_ID, "delete:1h", "reason:", "spam"]);
   assert.equal(
     harness.requests.some((entry) => entry.path.includes("/bans/")),
     false
@@ -749,12 +814,7 @@ test("runtime cleanup failures keep the ban and report partial results", async (
         ? { ok: false, status: 403 }
         : null,
   });
-  await harness.moderation.handleCommand(harness.message, "ban", [
-    TARGET_ID,
-    "delete:1h",
-    "reason:",
-    "spam",
-  ]);
+  await harness.run("ban", [TARGET_ID, "delete:1h", "reason:", "spam"]);
   assert.ok(harness.requests.some((entry) => entry.path.includes("/bans/")));
   assert.match(
     harness.protectedLogs[0].payload.embeds[0].description,
@@ -769,11 +829,7 @@ test("Stoat hierarchy rejection fails closed without a success log", async () =>
         ? { ok: false, status: 403 }
         : null,
   });
-  await harness.moderation.handleCommand(harness.message, "ban", [
-    TARGET_ID,
-    "reason:",
-    "test",
-  ]);
+  await harness.run("ban", [TARGET_ID, "reason:", "test"]);
   assert.equal(harness.protectedLogs.length, 0);
   assert.match(harness.sent.at(-1).payload.embeds[0].title, /Ban Failed/);
 });
@@ -799,12 +855,7 @@ test("purge retries a rate-limited batch", async () => {
         : { ok: true, status: 204 };
     },
   });
-  await harness.moderation.handleCommand(harness.message, "purge-user", [
-    TARGET_ID,
-    "window:1h",
-    "reason:",
-    "spam",
-  ]);
+  await harness.run("purge-user", [TARGET_ID, "window:1h", "reason:", "spam"]);
   await harness.moderation.handleRawEvent({
     type: "MessageReact",
     id: harness.sent[0].result._id,

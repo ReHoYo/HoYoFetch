@@ -179,7 +179,20 @@ function makeHarness({
   };
 }
 
-test("parser enforces target, exact reason delimiter, and length bounds", () => {
+test("parser reads plain sentences and keeps the legacy delimiter", () => {
+  assert.deepEqual(
+    parseSpamReportCommand("<@TARGET123> sent me a scam DM out of nowhere"),
+    {
+      ok: true,
+      targetId: TARGET_ONE,
+      reason: "sent me a scam DM out of nowhere",
+    }
+  );
+  assert.deepEqual(
+    parseSpamReportCommand("<@TARGET123> for repeated commission spam"),
+    { ok: true, targetId: TARGET_ONE, reason: "repeated commission spam" },
+    "a leading preposition is filler, not part of the reason"
+  );
   assert.deepEqual(
     parseSpamReportCommand(
       "<@TARGET123> reason: unsolicited commission scam message"
@@ -191,18 +204,25 @@ test("parser enforces target, exact reason delimiter, and length bounds", () => 
     }
   );
   assert.equal(
-    parseSpamReportCommand("not-an-id reason: enough text").ok,
+    parseSpamReportCommand(
+      `they friend requested me then ${TARGET_ONE} pitched a commission`
+    ).ok,
+    false,
+    "a bare ID is only read as the target in the leading position"
+  );
+});
+
+test("parser enforces the target and reason length bounds", () => {
+  assert.equal(
+    parseSpamReportCommand("not-an-id sent me enough text here").ok,
     false
   );
   assert.equal(parseSpamReportCommand(`${TARGET_ONE}`).ok, false);
-  assert.equal(
-    parseSpamReportCommand(`${TARGET_ONE} screenshot: yes reason: enough text`)
-      .ok,
-    false
-  );
+  assert.equal(parseSpamReportCommand(`${TARGET_ONE} for`).ok, false);
   assert.equal(parseSpamReportCommand(`${TARGET_ONE} reason: short`).ok, false);
+  assert.equal(parseSpamReportCommand(`${TARGET_ONE} spam`).ok, false);
   assert.equal(
-    parseSpamReportCommand(`${TARGET_ONE} reason: ${"x".repeat(301)}`).ok,
+    parseSpamReportCommand(`${TARGET_ONE} ${"x".repeat(301)}`).ok,
     false
   );
 });

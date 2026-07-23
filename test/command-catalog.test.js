@@ -38,7 +38,9 @@ test("help tuples are generated from the shared catalog with a custom prefix", (
   assert.ok(memberHelp.some(([syntax]) => syntax === "!FetchWuWa"));
   assert.ok(memberHelp.some(([syntax]) => syntax === "!Docs"));
   assert.ok(
-    memberHelp.some(([syntax]) => syntax === "!Report-Spam @member reason: ...")
+    memberHelp.some(
+      ([syntax]) => syntax === "!Report-Spam @member <what happened>"
+    )
   );
   assert.equal(
     formatCommandSyntax("/AuditLog status", "!"),

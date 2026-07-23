@@ -23,7 +23,7 @@ Irminsul returns active codes with reward details and a redemption link when the
 To privately notify server staff about suspected friend-request or DM spam, use a channel where Irminsul has Manage Messages:
 
 ```text
-/Report-Spam @member reason: sent an unsolicited commission scam DM
+/Report-Spam @member sent an unsolicited commission scam DM
 ```
 
 Irminsul removes the invocation before processing it. Reports never punish an account automatically.
@@ -76,8 +76,9 @@ Manual moderation fails closed when Irminsul cannot verify the actor's matching 
 - Commands work only for human members in server channels.
 - Direct messages, webhooks, and other bots are ignored.
 - Command names are case-insensitive.
-- Moderation reasons are written in plain words and may be up to 300 characters; the older `reason:` delimiter still works.
+- Moderation and spam-report reasons are written in plain words and may be up to 300 characters; the older `reason:` delimiter still works.
 - Spam-report reasons must be at least 10 characters, and the command has separate anti-abuse limits.
+- `/Ban`, `/Kick`, and `/Mute` act only after the moderator who ran them reacts ✅ to a confirmation.
 - Each member can trigger up to five recognized commands within 30 seconds.
 - Multiple simultaneous requests for the same game's codes share one upstream fetch.
 
