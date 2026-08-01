@@ -41,6 +41,11 @@ import {
 } from "./evidence-store.js";
 import { createSettingsMonitor } from "./settings-monitor.js";
 import { auditAlias, safeErrorSummary } from "./security.js";
+import {
+  buildUserInfoLines,
+  collectUserInfo,
+  evaluateBotSignals,
+} from "./user-info.js";
 
 const UNBAN_POLL_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_PENDING_SENDS = 50;
@@ -882,13 +887,19 @@ export function initAuditLog(
   });
 
   // ── Members ─────────────────────────────────────
+  // Cache-only: a join flood must never trigger a REST call per member, so
+  // this never fetches the profile (bio/banner) that /Get-Info can afford.
   client.on("serverMemberJoin", (member) => {
     const serverId = member.id.server;
-    const embed = buildAuditMemberEmbed({
-      title: "📥 Member Joined",
-      user: formatUser(client, member.id.user),
-      colour: "#2ECC71",
-    });
+    const userId = member.id.user;
+    const now = Date.now();
+    const record = collectUserInfo(client, { serverId, userId, member });
+    const signals = evaluateBotSignals(record, now);
+    const embed = buildAuditEmbed(
+      signals.length ? "📥 Member Joined — review" : "📥 Member Joined",
+      buildUserInfoLines(record, signals, { now }),
+      signals.length ? "#E67E22" : "#2ECC71"
+    );
     emitAudit(send, serverId, embed);
   });
 

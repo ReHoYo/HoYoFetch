@@ -3,6 +3,15 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Version 2.1.0
+
+### Account intelligence
+
+- Join records now include full account and membership detail — creation date, avatar status, platform badges and flags, roles, and prior automod or spam-report history — instead of just a username.
+- Added a computed **⚠️ Signals** summary to join records and `/Get-Info`, naming the specific conditions that make an account worth a second look, such as a brand-new account or one created moments before it joined.
+- Added `/Get-Info @member` to look up the same account and membership detail on demand, including for members who already left the server. Restricted to recognized moderators.
+- The join log reads only locally cached data, so a join surge never triggers extra Stoat requests; `/Get-Info` additionally fetches the account's profile since it targets one account at a time.
+
 ## Version 2.0.0
 
 ### Manual moderation and cleanup

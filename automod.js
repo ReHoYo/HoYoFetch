@@ -266,7 +266,7 @@ function createCaseId() {
   return `AM${randomBytes(6).toString("hex").toUpperCase()}`;
 }
 
-function formatAge(value, now) {
+export function formatAge(value, now) {
   const time = asTime(value);
   if (time === null || time > now) return "unknown";
   const minutes = Math.floor((now - time) / 60_000);

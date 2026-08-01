@@ -31,6 +31,10 @@ Qualifying attachments can be downloaded at post time because the original file 
 
 Set `AUDITLOG_EVIDENCE_BUDGET_MB=0` when your community prefers metadata-only delete records.
 
+## Account checks
+
+The enriched join log and `/Get-Info` (see [Account checks](/HoYoFetch/moderation/account-checks/)) read live Stoat account and membership data plus Irminsul's existing local records — automod strikes, open cases, and spam-report counts. Neither introduces new persisted storage; nothing about a lookup is written to disk beyond what audit logging or automod already record.
+
 ## Secret handling
 
 Irminsul does not intentionally persist or print:
