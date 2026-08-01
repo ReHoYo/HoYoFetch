@@ -73,6 +73,12 @@ The live pipeline and periodic reconciliation cover:
 
 Server-setting reconciliation runs at startup and roughly every five minutes, allowing changes made while the bot was offline to be detected later.
 
+## Join records now include account intelligence
+
+A join record no longer stops at a username. It carries every account and membership detail Irminsul can read locally — account creation date, avatar status, platform badges and flags, roles, and any prior automod or spam-report history — plus a **⚠️ Signals** line naming the specific conditions that make an account worth a second look (a brand-new account, an account created moments before joining, a default avatar, and so on).
+
+A join titled **📥 Member Joined — review** has at least one signal; a plain **📥 Member Joined** does not. Signals are heuristics for a moderator to weigh, not proof that an account is a bot. The join record never fetches the account's bio or banner — it works entirely from data Irminsul already has cached, so a join surge cannot turn into a burst of extra API calls. See [Account checks](/HoYoFetch/moderation/account-checks/) for the same detail on demand via `/Get-Info`.
+
 ## Recovering message content
 
 Delete events contain only a message ID. While audit logging is active, Irminsul records server messages to a local 30-day journal capped at 100,000 messages. This lets later edit and delete records include the content that the bot observed.

@@ -4,6 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "revolt.js";
+import { ulid } from "ulid";
 
 process.env.HOYOFETCH_DATA_DIR = mkdtempSync(
   join(tmpdir(), "hoyofetch-audit-test-")
@@ -18,6 +19,7 @@ const {
   emitUserIdentityUpdates,
   formatSuspects,
   hydrateAuditMemberCache,
+  initAuditLog,
   parseChannelArg,
   snapshotMessage,
   truncate,
@@ -392,4 +394,78 @@ test("bulk delete embeds show at most five cached entries", () => {
   assert.match(embed.description, /entry-5/);
   assert.doesNotMatch(embed.description, /entry-6/);
   assert.match(embed.description, /…and 3 more/);
+});
+
+async function waitForSend(sent, count = 1, timeoutMs = 1_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (sent.length < count) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for send");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+test("the enriched join log carries account details and flips to review on signals", async () => {
+  const client = new Client();
+  const serverId = "JOIN_SERVER";
+  const channelId = "JOIN_LOG_CHANNEL";
+  const cleanUserId = "01HZY3M6Q8V7N2K4J5T9W0XABD";
+
+  enableAuditLog(serverId, channelId);
+  const sent = [];
+  initAuditLog(client, {
+    sendProtected: async (chId, payload) => {
+      sent.push({ chId, payload });
+      return { _id: `SENT${sent.length}` };
+    },
+    request: async () => ({ ok: false, status: 404, data: undefined }),
+  });
+
+  client.users.getOrCreate(cleanUserId, {
+    _id: cleanUserId,
+    username: "EstablishedMember",
+    discriminator: "0001",
+    avatar: { _id: "FILE1", tag: "avatars" },
+  });
+  const cleanMember = client.serverMembers.getOrCreate(
+    { server: serverId, user: cleanUserId },
+    {
+      _id: { server: serverId, user: cleanUserId },
+      joined_at: new Date().toISOString(),
+      roles: [],
+    }
+  );
+
+  client.emit("serverMemberJoin", cleanMember);
+  await waitForSend(sent, 1);
+
+  const cleanEmbed = sent[0].payload.embeds[0];
+  assert.equal(cleanEmbed.title, "📥 Member Joined");
+  assert.match(cleanEmbed.description, /\*\*Account created:\*\*/);
+  assert.match(cleanEmbed.description, /\*\*Joined this server:\*\*/);
+  assert.doesNotMatch(cleanEmbed.description, /⚠️ Signals/);
+
+  const freshUserId = ulid(); // minted "now" so the recent-account signal fires
+  client.users.getOrCreate(freshUserId, {
+    _id: freshUserId,
+    username: "BrandNewAccount",
+    discriminator: "0002",
+  });
+  const freshMember = client.serverMembers.getOrCreate(
+    { server: serverId, user: freshUserId },
+    {
+      _id: { server: serverId, user: freshUserId },
+      joined_at: new Date().toISOString(),
+      roles: [],
+    }
+  );
+
+  client.emit("serverMemberJoin", freshMember);
+  await waitForSend(sent, 2);
+
+  const flaggedEmbed = sent[1].payload.embeds[0];
+  assert.equal(flaggedEmbed.title, "📥 Member Joined — review");
+  assert.match(flaggedEmbed.description, /⚠️ Signals/);
+  assert.match(flaggedEmbed.description, /Using the default avatar/);
+
+  disableAuditLog(serverId);
 });

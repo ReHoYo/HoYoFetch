@@ -74,6 +74,12 @@ import { createHelpMenu } from "./help-menu.js";
 import { createSpamReporter } from "./spam-report.js";
 import { createChannelExclusion } from "./channel-exclusion.js";
 import { DOCS_URL } from "./command-catalog.js";
+import {
+  buildUserInfoEmbed,
+  collectUserInfo,
+  evaluateBotSignals,
+  parseUserInfoCommand,
+} from "./user-info.js";
 
 // ── Validate token ─────────────────────────────────
 if (!CONFIG.token || CONFIG.token === "your_bot_token_here") {
@@ -396,6 +402,12 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
+    // ── Get-Info @member ────────────────────────────
+    if (cmd === "get-info" || cmd === "getinfo") {
+      await handleGetInfo(message, cmdArgs);
+      return;
+    }
+
     // ── HarHar ──────────────────────────────────────
     if (cmd === "harhar") {
       await safeSend(message.channel, {
@@ -643,6 +655,73 @@ async function handleTestAuditLog(message) {
     embeds: [
       buildStatusEmbed("🧪 Audit Log Test Queued", lines.join("\n"), "#3498DB"),
     ],
+  });
+}
+
+async function handleGetInfo(message, cmdArgs) {
+  const parsed = parseUserInfoCommand(cmdArgs);
+  if (!parsed.ok) {
+    await safeSend(message.channel, {
+      embeds: [buildStatusEmbed("⚠️ Get-Info", parsed.error, "#E74C3C")],
+    });
+    return;
+  }
+
+  const serverId = message.server?.id ?? message.channel?.serverId;
+  const { targetId } = parsed;
+
+  let member =
+    client.serverMembers.getByKey({ server: serverId, user: targetId }) ?? null;
+  if (!member) {
+    try {
+      member = await client.serverMembers.fetch(serverId, targetId);
+    } catch {
+      member = null; // not a current member — still worth a lookup
+    }
+  }
+
+  let user = client.users.get(targetId);
+  if (!user) {
+    try {
+      user = await client.users.fetch(targetId);
+    } catch {
+      user = null;
+    }
+  }
+
+  if (!user) {
+    await safeSend(message.channel, {
+      embeds: [
+        buildStatusEmbed(
+          "⚠️ Get-Info",
+          "That account could not be found. Check the mention or ID.",
+          "#E74C3C"
+        ),
+      ],
+    });
+    return;
+  }
+
+  let profile = null;
+  try {
+    profile = await user.fetchProfile();
+  } catch (err) {
+    console.warn(
+      `get-info: profile fetch failed target=${auditAlias(targetId)} ${safeErrorSummary(err)}`
+    );
+  }
+
+  const now = Date.now();
+  const record = collectUserInfo(client, {
+    serverId,
+    userId: targetId,
+    member,
+    profile,
+  });
+  const signals = evaluateBotSignals(record, now);
+
+  await safeSend(message.channel, {
+    embeds: [buildUserInfoEmbed(record, signals, { now })],
   });
 }
 

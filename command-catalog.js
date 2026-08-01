@@ -351,6 +351,24 @@ export const COMMAND_CATALOG = Object.freeze([
     ],
   },
   {
+    id: "get-info",
+    section: COMMAND_SECTIONS.MODERATION,
+    route: "get-info",
+    routeAliases: ["getinfo"],
+    access: "fetch_manager",
+    syntax: "/Get-Info @member",
+    summary:
+      "Show every account and membership detail Stoat exposes for one member, with bot-risk signals.",
+    help: "Full account, membership, and bot-risk detail for one member _(admins/mods only)_",
+    permission:
+      "Server owner, Manage Server, or a recognized moderation capability",
+    examples: ["/Get-Info @member", "/Get-Info 01ABCDEFGHJKMNPQRSTVWXYZ12"],
+    notes: [
+      "Works for members who already left the server, using their last-known Stoat identity.",
+      "Signals are heuristics for a moderator to look at, not proof an account is a bot.",
+    ],
+  },
+  {
     id: "automod-release",
     section: COMMAND_SECTIONS.MODERATION,
     route: "automod release",

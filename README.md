@@ -85,6 +85,7 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/Kick @member <reason>`                                        | Confirm with ✅, then pick a cleanup window by reaction; the kick cannot be undone (Kick Members)                |
 | `/Mute @member [10m\|30m\|1h\|4h\|24h\|3d\|7d] <reason>`        | Type a duration and confirm with ✅, or omit it for a reaction picker (Timeout Members only)                     |
 | `/Purge-User @member <reason>`                                  | Pick a window by reaction, then confirm deletion of the member's observed messages (Manage Messages only)        |
+| `/Get-Info @member`                                             | Show full account/membership detail and bot-risk signals for one member (admins/mods only)                       |
 | `/HelpHoyoFetch`                                                | Show the two-page command reference; the opener navigates with ◀️/▶️                                             |
 | `/Docs`                                                         | Open the permanent searchable documentation site                                                                 |
 
@@ -158,6 +159,16 @@ The bot needs the **Ban Members** permission to detect bans (checked when a memb
 - Messages sent before audit logging was enabled, or while the bot was offline, can't have their content recovered.
 - Invites and webhooks produce no usable gateway events, so they are detected later by REST reconciliation and only when the bot has permission to list them. Webhook tokens and usable invite codes are never persisted or logged.
 - Reconciliation can prove that a setting changed while the bot was offline, but not the exact time or actor. Voice participation is not treated as a server-setting change.
+
+### Account intelligence
+
+Stoat's own UI hides basic account facts like join date, which makes a bot or raid account harder to spot by eye. Irminsul surfaces what Stoat exposes on every join and on demand.
+
+Join records now carry full account and membership detail — creation date, avatar status, platform badges/flags, roles, and any prior automod or spam-report history — instead of just a username, plus a computed **⚠️ Signals** line naming the specific conditions worth a second look (a brand-new account, an account created moments before it joined, a default avatar, and so on). A join titled **📥 Member Joined — review** has at least one signal; a plain **📥 Member Joined** does not. The join log reads only locally cached data, so a join surge never triggers extra Stoat requests.
+
+`/Get-Info @member` shows the same detail on demand, for a current member or one who already left. Unlike the join log, it fetches the account's profile (bio/banner) since it targets one account at a time. It is restricted to recognized moderators — the same policy as `/Automod` and `/AuditLog`.
+
+Signals are heuristics for a moderator to weigh, not proof that an account is a bot.
 
 ### Anti-raid automod
 
@@ -336,6 +347,11 @@ docker run -d --name hoyofetch --restart unless-stopped \
 ```
 
 ## 📝 Changelog
+
+### v2.1.0
+
+- Added account and membership detail to join records — creation date, avatar status, platform badges/flags, roles, and prior automod/spam-report history — with a computed bot-risk signals summary
+- Added `/Get-Info @member` for the same account detail on demand, including for members who already left, restricted to recognized moderators
 
 ### v2.0.0
 
