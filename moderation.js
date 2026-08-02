@@ -7,10 +7,12 @@ import {
   tokenizeArgs,
 } from "./command-args.js";
 import { buildStatusEmbed } from "./embeds.js";
+import { subtractMonths } from "./time-windows.js";
 import {
   findArchivedMessages,
   getArchiveCoverage,
   markMessagesDeleted,
+  RETENTION_MONTHS,
 } from "./message-archive.js";
 import {
   cancelAutomodCasesForMember,
@@ -44,22 +46,50 @@ export const MUTE_DURATIONS = Object.freeze({
   "7d": 7 * 24 * 60 * 60_000,
 });
 
-// Cleanup windows. The longest window stays below message-archive's 30-day
-// retention (RETENTION_MS) so a selection can never outrun the archive that
-// feeds it.
+// Cleanup windows. Short windows are fixed-millisecond spans; long windows
+// are calendar months, walked with subtractMonths so they don't drift across
+// leap days. The longest window equals message-archive's retention
+// (RETENTION_MONTHS) exactly, so a selection can never outrun the archive
+// that feeds it.
 export const PURGE_WINDOWS = Object.freeze({
-  "1h": 60 * 60_000,
-  "6h": 6 * 60 * 60_000,
-  "1d": 24 * 60 * 60_000,
-  "3d": 3 * 24 * 60 * 60_000,
-  "7d": 7 * 24 * 60 * 60_000,
-  "14d": 14 * 24 * 60 * 60_000,
-  "29d": 29 * 24 * 60 * 60_000,
+  "1h": { ms: 60 * 60_000 },
+  "6h": { ms: 6 * 60 * 60_000 },
+  "1d": { ms: 24 * 60 * 60_000 },
+  "3d": { ms: 3 * 24 * 60 * 60_000 },
+  "7d": { ms: 7 * 24 * 60 * 60_000 },
+  "1mo": { months: 1 },
+  "3mo": { months: 3 },
+  "6mo": { months: 6 },
+  "1y": { months: RETENTION_MONTHS },
 });
 
-// 1️⃣–7️⃣ mean different things on different picker messages, so each pending
+/**
+ * The cutoff timestamp (epoch ms) for a purge window key, relative to `now`.
+ * @param {string} key one of PURGE_WINDOWS's keys
+ * @param {number} now
+ * @return {number}
+ */
+export function purgeWindowCutoff(key, now = Date.now()) {
+  const window = PURGE_WINDOWS[key];
+  if (!window) return now;
+  return window.months !== undefined
+    ? subtractMonths(now, window.months)
+    : now - window.ms;
+}
+
+// 1️⃣–9️⃣ mean different things on different picker messages, so each pending
 // interaction carries its own emoji → value map instead of a shared global.
-const DIGIT_EMOJIS = Object.freeze(["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣"]);
+const DIGIT_EMOJIS = Object.freeze([
+  "1️⃣",
+  "2️⃣",
+  "3️⃣",
+  "4️⃣",
+  "5️⃣",
+  "6️⃣",
+  "7️⃣",
+  "8️⃣",
+  "9️⃣",
+]);
 
 function buildPicker(values) {
   return Object.freeze(
@@ -682,8 +712,8 @@ export function createModeration(
     return { actionId: id, message: logged };
   }
 
-  function selectMessages(serverId, targetId, windowMs) {
-    const cutoff = now() - windowMs;
+  function selectMessages(serverId, targetId, windowKey) {
+    const cutoff = purgeWindowCutoff(windowKey, now());
     const auditChannelId = store.getAuditLogChannel(serverId);
     return archive
       .findArchivedMessages({
@@ -976,7 +1006,7 @@ export function createModeration(
     }
     purgeLocks.add(serverId);
     try {
-      const entries = selectMessages(serverId, targetId, PURGE_WINDOWS[window]);
+      const entries = selectMessages(serverId, targetId, window);
       if (!(await preflightPurge(message, entries))) return;
       if (entries.length >= SLOW_CLEANUP_THRESHOLD) {
         await respond(
@@ -1033,7 +1063,7 @@ export function createModeration(
   async function prepareTypedCleanup(message, targetId, window) {
     if (!window) return { ok: true, entries: null };
     const serverId = message.server?.id ?? message.channel?.serverId;
-    const entries = selectMessages(serverId, targetId, PURGE_WINDOWS[window]);
+    const entries = selectMessages(serverId, targetId, window);
     if (!(await preflightPurge(message, entries))) return { ok: false };
     return { ok: true, entries };
   }
@@ -1285,11 +1315,7 @@ export function createModeration(
     }
     purgeLocks.add(serverId);
     try {
-      const entries = selectMessages(
-        serverId,
-        parsed.targetId,
-        PURGE_WINDOWS[parsed.window]
-      );
+      const entries = selectMessages(serverId, parsed.targetId, parsed.window);
       if (!(await preflightPurge(message, entries))) return;
       if (entries.length >= SLOW_CLEANUP_THRESHOLD) {
         await respond(
@@ -1358,11 +1384,7 @@ export function createModeration(
 
   async function confirmPurge(message, parsed, auditChannelId) {
     const serverId = message.server?.id ?? message.channel?.serverId;
-    const entries = selectMessages(
-      serverId,
-      parsed.targetId,
-      PURGE_WINDOWS[parsed.window]
-    );
+    const entries = selectMessages(serverId, parsed.targetId, parsed.window);
     if (!(await preflightPurge(message, entries))) return;
     await openConfirm(message, {
       title: "⚠️ Confirm User Purge",

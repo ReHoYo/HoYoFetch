@@ -81,7 +81,7 @@ A join titled **📥 Member Joined — review** has at least one signal; a plain
 
 ## Recovering message content
 
-Delete events contain only a message ID. While audit logging is active, Irminsul records server messages to a local 30-day journal capped at 100,000 messages. This lets later edit and delete records include the content that the bot observed.
+Delete events contain only a message ID. While audit logging is active, Irminsul records server messages to a local journal retained for 1 year and capped at 1,000,000 messages by default. This lets later edit and delete records include the content that the bot observed.
 
 Messages sent before logging began or while the bot was offline cannot be recovered.
 

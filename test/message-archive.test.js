@@ -224,7 +224,7 @@ test("corrupt journal lines are skipped on replay", async () => {
 test("retention prune drops expired entries and compaction rewrites the journal", async () => {
   const fresh = await reimportArchive();
   const now = Date.now();
-  const ancient = now - fresh.RETENTION_MS - 1000;
+  const ancient = fresh.retentionCutoff(now) - 1000;
 
   // Old entries first (Map insertion order is what prune relies on).
   for (let i = 0; i < 1200; i++) {
@@ -264,7 +264,13 @@ test("retention prune drops expired entries and compaction rewrites the journal"
 });
 
 test("count cap evicts the oldest entries", async () => {
+  // The production default is 1,000,000 — override it for this reimport so
+  // the test doesn't have to write a million messages to exercise eviction.
+  process.env.HOYOFETCH_ARCHIVE_MAX_MESSAGES = "50";
   const fresh = await reimportArchive();
+  delete process.env.HOYOFETCH_ARCHIVE_MAX_MESSAGES;
+
+  assert.equal(fresh.MAX_MESSAGES, 50);
   const base = fresh.archiveSize();
   const toAdd = fresh.MAX_MESSAGES - base + 5;
 
@@ -281,4 +287,98 @@ test("count cap evicts the oldest entries", async () => {
   assert.equal(fresh.archiveSize(), fresh.MAX_MESSAGES);
   // The newest entry is present; the oldest pre-existing entries were evicted.
   assert.ok(fresh.getArchivedMessage(`cap${toAdd - 1}`));
+});
+
+test("countArchivedMessages counts by author, excludes soft-deleted, and respects since", () => {
+  const now = Date.now();
+  archive.recordMessage({
+    id: "countA1",
+    channelId: "chanCount",
+    serverId: "srvCount",
+    authorId: "userCount",
+    content: "one",
+    createdAt: now - 3_000,
+  });
+  archive.recordMessage({
+    id: "countA2",
+    channelId: "chanCount",
+    serverId: "srvCount",
+    authorId: "userCount",
+    content: "two",
+    createdAt: now - 2_000,
+  });
+  archive.recordMessage({
+    id: "countA3ToDelete",
+    channelId: "chanCount",
+    serverId: "srvCount",
+    authorId: "userCount",
+    content: "three (will be deleted)",
+    createdAt: now - 1_000,
+  });
+  archive.recordMessage({
+    id: "countOtherAuthor",
+    channelId: "chanCount",
+    serverId: "srvCount",
+    authorId: "someoneElse",
+    content: "not counted",
+    createdAt: now,
+  });
+
+  assert.equal(
+    archive.countArchivedMessages({
+      serverId: "srvCount",
+      authorId: "userCount",
+    }),
+    3
+  );
+
+  archive.markMessageDeleted("countA3ToDelete", now);
+  assert.equal(
+    archive.countArchivedMessages({
+      serverId: "srvCount",
+      authorId: "userCount",
+    }),
+    2
+  );
+
+  assert.equal(
+    archive.countArchivedMessages({
+      serverId: "srvCount",
+      authorId: "userCount",
+      since: now - 2_500,
+    }),
+    1
+  );
+});
+
+test("boot replay streams a journal larger than one read chunk, preserving multi-byte content", async () => {
+  const emoji = "🎉"; // 4-byte UTF-8 character, deliberately likely to straddle a chunk boundary somewhere across many entries
+  const padding = "x".repeat(2_000);
+  const messageCount = 700; // ~2KB/entry × 700 ≈ 1.4MB, past the 1MB read-chunk size
+
+  for (let i = 0; i < messageCount; i++) {
+    archive.recordMessage({
+      id: `stream${i}`,
+      channelId: "chanStream",
+      serverId: "srvStream",
+      authorId: "userStream",
+      content: `${padding} celebration ${emoji} #${i}`,
+      createdAt: Date.now(),
+    });
+  }
+
+  const rebooted = await reimportArchive();
+  assert.equal(
+    rebooted.countArchivedMessages({
+      serverId: "srvStream",
+      authorId: "userStream",
+    }),
+    messageCount
+  );
+  for (const i of [0, 1, 349, 350, 699]) {
+    assert.equal(
+      rebooted.getArchivedMessage(`stream${i}`).content,
+      `${padding} celebration ${emoji} #${i}`
+    );
+  }
 });

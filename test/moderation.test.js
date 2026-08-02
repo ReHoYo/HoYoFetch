@@ -14,8 +14,11 @@ const {
   MODERATION_CONFIRM_EMOJI,
   MODERATION_UNDO_EMOJI,
   parseModerationCommand,
+  purgeWindowCutoff,
+  PURGE_WINDOWS,
   rateLimitWaitMs,
 } = await import("../moderation.js");
+const { RETENTION_MONTHS } = await import("../message-archive.js");
 
 const SERVER_ID = "SERVER123";
 const CHANNEL_ID = "CHANNEL123";
@@ -308,9 +311,9 @@ test("moderation parser reads plain sentences in any order", () => {
   assert.equal(purge.reason, "spam");
 
   assert.equal(
-    parseModerationCommand("mute", [`<@${TARGET_ID}>`, "29d", "noisy"])
+    parseModerationCommand("mute", [`<@${TARGET_ID}>`, "1y", "noisy"])
       .deleteWindow,
-    "29d"
+    "1y"
   );
   assert.equal(
     parseModerationCommand("automod-release", [
@@ -559,6 +562,74 @@ test("purge-user picks its window by reaction and then confirms", async () => {
   );
 });
 
+test("every PURGE_WINDOWS key gets its own emoji on the cleanup picker", async () => {
+  // The reaction picker only has as many digit emojis as it's given; a
+  // window added to PURGE_WINDOWS without a matching emoji would be
+  // silently dropped from the picker instead of erroring.
+  const harness = makeHarness({ messages: [] });
+  await harness.run("purge-user", [TARGET_ID, "because", "of", "spam"]);
+  const description = harness.sent[0].payload.embeds[0].description;
+  const keys = Object.keys(PURGE_WINDOWS);
+  assert.equal(keys.length, 9);
+  for (const key of keys) {
+    assert.match(
+      description,
+      new RegExp(`\\b${key}\\b`),
+      `picker legend is missing window "${key}"`
+    );
+  }
+  // 9️⃣ specifically must be present — this is what breaks first if the
+  // digit-emoji list stops being extended alongside PURGE_WINDOWS.
+  assert.match(description, /9️⃣/);
+});
+
+test("PURGE_WINDOWS' longest window never exceeds the archive's retention", () => {
+  // A purge selection must never claim to reach further back than the
+  // archive that feeds it actually retains.
+  const now = Date.now();
+  for (const key of Object.keys(PURGE_WINDOWS)) {
+    assert.ok(
+      purgeWindowCutoff(key, now) >= purgeWindowCutoff("1y", now),
+      `"${key}" reaches further back than the longest window`
+    );
+  }
+  assert.equal(PURGE_WINDOWS["1y"].months, RETENTION_MONTHS);
+});
+
+test("choosing 9️⃣ on the cleanup picker selects the 1-year window", async () => {
+  const now = 1_900_000_000_000;
+  const harness = makeHarness({
+    messages: [
+      {
+        id: "RECENT",
+        channelId: CHANNEL_ID,
+        serverId: SERVER_ID,
+        authorId: TARGET_ID,
+        createdAt: now - 60_000,
+      },
+      {
+        // Well past a month, well within a year.
+        id: "MONTHSOLD",
+        channelId: CHANNEL_ID,
+        serverId: SERVER_ID,
+        authorId: TARGET_ID,
+        createdAt: now - 200 * 24 * 60 * 60_000,
+      },
+    ],
+  });
+  await harness.run("purge-user", [TARGET_ID, "because", "of", "spam"]);
+  await harness.moderation.handleRawEvent({
+    type: "MessageReact",
+    id: harness.sent[0].result._id,
+    user_id: MOD_ID,
+    emoji_id: "9️⃣",
+  });
+  assert.match(
+    harness.sent[1].payload.embeds[0].description,
+    /2 known message\(s\)/
+  );
+});
+
 test("ban offers a cleanup picker that only the invoker can use", async () => {
   const now = 1_900_000_000_000;
   const harness = makeHarness({
@@ -699,7 +770,7 @@ test("cleanups older than the bulk window delete one message at a time", async (
       },
     ],
   });
-  await harness.run("ban", [TARGET_ID, "delete:29d", "raid"]);
+  await harness.run("ban", [TARGET_ID, "delete:1mo", "raid"]);
   assert.deepEqual(
     harness.requests
       .filter(
@@ -922,7 +993,7 @@ test("rate-limited messages get one more pass before being reported", async () =
       return seen === 1 ? limited : { ok: true, status: 204 };
     },
   });
-  await harness.run("ban", [TARGET_ID, "delete:29d", "reason:", "raid"]);
+  await harness.run("ban", [TARGET_ID, "delete:1mo", "reason:", "raid"]);
   const summary = harness.protectedLogs[0].payload.embeds[0].description;
   assert.match(summary, /1\/2 known message\(s\) deleted/);
   assert.match(
@@ -967,7 +1038,7 @@ test("individual deletes are paced so a long cleanup stays under the limit", asy
       return null;
     },
   });
-  await harness.run("ban", [TARGET_ID, "delete:29d", "reason:", "raid"]);
+  await harness.run("ban", [TARGET_ID, "delete:1mo", "reason:", "raid"]);
   assert.equal(stamps.length, 3);
   const gaps = stamps
     .slice(1)

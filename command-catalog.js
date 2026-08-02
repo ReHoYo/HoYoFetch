@@ -285,7 +285,7 @@ export const COMMAND_CATALOG = Object.freeze([
     syntax: "/Ban @member <reason>",
     summary:
       "Confirm and ban a member, then choose a message-cleanup window by reaction.",
-    help: "Confirm with ✅, then pick a cleanup window (1h–29d) by reaction. The 10-minute ↩️ undo only unbans _(Ban Members; cleanup also needs Manage Messages)_",
+    help: "Confirm with ✅, then pick a cleanup window (1h–1y) by reaction. The 10-minute ↩️ undo only unbans _(Ban Members; cleanup also needs Manage Messages)_",
     permission: "Ban Members; Manage Messages is also required for cleanup",
     examples: [
       "/Ban @member for spamming and stuff",
@@ -305,7 +305,7 @@ export const COMMAND_CATALOG = Object.freeze([
     syntax: "/Kick @member <reason>",
     summary:
       "Confirm and remove a member, then choose a message-cleanup window by reaction.",
-    help: "Confirm with ✅, then pick a cleanup window (1h–29d) by reaction. There is no undo; the member must rejoin with an invite _(Kick Members)_",
+    help: "Confirm with ✅, then pick a cleanup window (1h–1y) by reaction. There is no undo; the member must rejoin with an invite _(Kick Members)_",
     permission: "Kick Members; Manage Messages is also required for cleanup",
     examples: [
       "/Kick @member for raiding",
@@ -340,11 +340,11 @@ export const COMMAND_CATALOG = Object.freeze([
     access: "manage_messages",
     syntax: "/Purge-User @member <reason>",
     summary: "Confirm and delete a member's messages observed by Irminsul.",
-    help: "Pick a window by reaction (1h–29d), then ✅/❌ to confirm. Audit evidence is preserved _(Manage Messages)_",
+    help: "Pick a window by reaction (1h–1y), then ✅/❌ to confirm. Audit evidence is preserved _(Manage Messages)_",
     permission: "Manage Messages",
     examples: [
       "/Purge-User @member because of spam",
-      "/Purge-User @member 29d scam link flood",
+      "/Purge-User @member 1y scam link flood",
     ],
     notes: [
       "Protected audit records and retained evidence are never erased by a purge.",
@@ -358,14 +358,15 @@ export const COMMAND_CATALOG = Object.freeze([
     access: "fetch_manager",
     syntax: "/Get-Info @member",
     summary:
-      "Show every account and membership detail Stoat exposes for one member, with bot-risk signals.",
-    help: "Full account, membership, and bot-risk detail for one member _(admins/mods only)_",
+      "List every account and membership detail Irminsul has for one member, including their archived message count, with bot-risk signals.",
+    help: "Full account, membership, message-count, and bot-risk detail for one member _(admins/mods only)_",
     permission:
       "Server owner, Manage Server, or a recognized moderation capability",
     examples: ["/Get-Info @member", "/Get-Info 01ABCDEFGHJKMNPQRSTVWXYZ12"],
     notes: [
       "Works for members who already left the server, using their last-known Stoat identity.",
       "Signals are heuristics for a moderator to look at, not proof an account is a bot.",
+      "Messages sent counts only what the archive observed while audit logging was active; deleted and purged messages are excluded.",
     ],
   },
   {

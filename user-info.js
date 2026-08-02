@@ -11,6 +11,10 @@ import {
   tokenizeArgs,
 } from "./command-args.js";
 import { buildAuditEmbed } from "./embeds.js";
+import {
+  countArchivedMessages,
+  getArchiveCoverage,
+} from "./message-archive.js";
 import { isSafeId } from "./security.js";
 import {
   findActiveAutomodCase,
@@ -24,6 +28,19 @@ const DEFAULT_STORE = Object.freeze({
   getAutomodStrike,
   getRecentSpamReports,
 });
+
+// Message counts require a full archive scan, so this seam is left null by
+// default — the join-log path (evaluateBotSignals fires on every join) must
+// stay cache-only, and only /Get-Info's handler passes this in.
+export const DEFAULT_ARCHIVE = Object.freeze({
+  countArchivedMessages,
+  getArchiveCoverage,
+});
+
+// Cap the roles list so a role-heavy member can't push the fields that
+// follow (strike level, spam reports, message count) past the embed's
+// truncation budget.
+const MAX_RENDERED_ROLES = 20;
 
 // The throwaway-farm tell: an account minted moments before it joined.
 const FRESH_ACCOUNT_JOIN_GAP_MS = 60 * 60_000;
@@ -50,7 +67,14 @@ function formatTimestamp(value, now) {
  */
 export function collectUserInfo(
   client,
-  { serverId, userId, member = null, profile = null, store = DEFAULT_STORE }
+  {
+    serverId,
+    userId,
+    member = null,
+    profile = null,
+    store = DEFAULT_STORE,
+    archive = null,
+  }
 ) {
   const user = client.users.get(userId);
 
@@ -59,6 +83,16 @@ export function collectUserInfo(
   const spamReportCount = store
     .getRecentSpamReports(serverId, Date.now() - SPAM_REPORT_RETENTION_MS)
     .filter((report) => report.targetId === userId).length;
+
+  let messageCount = null;
+  let messageCountSince = null;
+  if (archive) {
+    messageCount = archive.countArchivedMessages({
+      serverId,
+      authorId: userId,
+    });
+    messageCountSince = archive.getArchiveCoverage(serverId).earliestAt;
+  }
 
   return {
     userId,
@@ -82,6 +116,8 @@ export function collectUserInfo(
     automodStrikeLevel: strike?.level ?? null,
     hasActiveAutomodCase: Boolean(activeCase),
     spamReportCount,
+    messageCount,
+    messageCountSince,
   };
 }
 
@@ -145,11 +181,30 @@ export function evaluateBotSignals(record, now = Date.now()) {
   return signals;
 }
 
+function formatRoles(roleIds) {
+  const shown = roleIds.slice(0, MAX_RENDERED_ROLES).map((id) => `<@&${id}>`);
+  const remaining = roleIds.length - shown.length;
+  return remaining > 0
+    ? `${shown.join(", ")}, …and ${remaining} more`
+    : shown.join(", ");
+}
+
 /**
  * Build the `**Label:** value` lines this record renders as. Revolt embeds
  * have no field array, so this is what both the join log and /Get-Info send.
+ *
+ * `verbose: false` (the join log's default) omits a field entirely when it
+ * has nothing to say, keeping every-join embeds short. `verbose: true`
+ * (/Get-Info) instead lists every field the record carries, with an
+ * explicit "none"/"unknown" fallback, plus fields the compact form never
+ * shows (display name, user ID, online status, bot owner, timeout, and the
+ * archived message count).
  */
-export function buildUserInfoLines(record, signals, { now = Date.now() } = {}) {
+export function buildUserInfoLines(
+  record,
+  signals,
+  { now = Date.now(), verbose = false } = {}
+) {
   const lines = [];
 
   if (signals.length) {
@@ -163,37 +218,79 @@ export function buildUserInfoLines(record, signals, { now = Date.now() } = {}) {
   lines.push(
     `**Username:** ${record.username ? `@${record.username}` : "unknown"}${record.discriminator ? `#${record.discriminator}` : ""}`
   );
-  if (record.nickname) lines.push(`**Nickname:** ${record.nickname}`);
+  if (verbose) {
+    lines.push(`**Display name:** ${record.displayName ?? "none"}`);
+  }
+  if (record.nickname || verbose) {
+    lines.push(`**Nickname:** ${record.nickname ?? "none"}`);
+  }
+  if (verbose) lines.push(`**User ID:** \`${record.userId}\``);
   lines.push(
     `**Account created:** ${formatTimestamp(record.accountCreatedAt, now)}`
   );
-  if (record.joinedAt) {
+  if (record.joinedAt || verbose) {
     lines.push(
-      `**Joined this server:** ${formatTimestamp(record.joinedAt, now)}`
+      record.joinedAt
+        ? `**Joined this server:** ${formatTimestamp(record.joinedAt, now)}`
+        : "**Joined this server:** not currently a member"
     );
   }
   lines.push(`**Avatar:** ${record.hasCustomAvatar ? "custom" : "default"}`);
-  if (record.profileFetched) {
+  if (record.profileFetched || verbose) {
     lines.push(
-      `**Bio:** ${record.bio ? record.bio.slice(0, 200) : "*(none)*"}`
+      `**Bio:** ${
+        !record.profileFetched
+          ? "not fetched"
+          : record.bio
+            ? record.bio.slice(0, 200)
+            : "*(none)*"
+      }`
     );
   }
-  if (record.badges.length)
-    lines.push(`**Badges:** ${record.badges.join(", ")}`);
-  if (record.flags.length)
-    lines.push(`**Platform flags:** ${record.flags.join(", ")}`);
+  if (record.badges.length || verbose) {
+    lines.push(
+      `**Badges:** ${record.badges.length ? record.badges.join(", ") : "none"}`
+    );
+  }
+  if (record.flags.length || verbose) {
+    lines.push(
+      `**Platform flags:** ${record.flags.length ? record.flags.join(", ") : "none"}`
+    );
+  }
   lines.push(`**Bot account:** ${record.isBot ? "yes" : "no"}`);
-  if (record.roleIds.length) {
+  if (verbose) {
     lines.push(
-      `**Roles:** ${record.roleIds.map((id) => `<@&${id}>`).join(", ")}`
+      `**Online:** ${record.online === null ? "unknown" : record.online ? "yes" : "no"}`
+    );
+    lines.push(
+      `**Bot owner:** ${record.isBot ? (record.botOwnerId ? `<@${record.botOwnerId}>` : "unknown") : "n/a"}`
+    );
+    lines.push(
+      `**Timed out until:** ${record.timeoutUntil && record.timeoutUntil.getTime() > now ? formatTimestamp(record.timeoutUntil, now) : "none"}`
     );
   }
-  if (record.automodStrikeLevel) {
-    lines.push(`**Automod strike level:** ${record.automodStrikeLevel}/4`);
+  if (record.roleIds.length || verbose) {
+    lines.push(
+      `**Roles:** ${record.roleIds.length ? formatRoles(record.roleIds) : "none"}`
+    );
   }
-  if (record.hasActiveAutomodCase) lines.push("**Open automod case:** yes");
-  if (record.spamReportCount > 0) {
+  if (record.automodStrikeLevel || verbose) {
+    lines.push(`**Automod strike level:** ${record.automodStrikeLevel ?? 0}/4`);
+  }
+  if (record.hasActiveAutomodCase || verbose) {
+    lines.push(
+      `**Open automod case:** ${record.hasActiveAutomodCase ? "yes" : "no"}`
+    );
+  }
+  if (record.spamReportCount > 0 || verbose) {
     lines.push(`**Prior spam reports:** ${record.spamReportCount}`);
+  }
+  if (verbose && record.messageCount !== null) {
+    lines.push(
+      record.messageCount > 0
+        ? `**Messages sent:** ${record.messageCount.toLocaleString()} recorded since ${formatTimestamp(new Date(record.messageCountSince), now)} — only messages observed while audit logging was active; deleted and purged messages are excluded.`
+        : "**Messages sent:** 0 recorded — either none were observed while audit logging was active, or all were deleted or purged."
+    );
   }
 
   return lines;
@@ -203,7 +300,7 @@ export function buildUserInfoLines(record, signals, { now = Date.now() } = {}) {
  * Build the /Get-Info reply embed for one account.
  */
 export function buildUserInfoEmbed(record, signals, { now = Date.now() } = {}) {
-  const lines = buildUserInfoLines(record, signals, { now });
+  const lines = buildUserInfoLines(record, signals, { now, verbose: true });
   const label = record.username ? `@${record.username}` : record.userId;
   return buildAuditEmbed(
     `🪪 Account Info — ${label}`,

@@ -17,7 +17,7 @@ and any option may appear in any order:
 ```
 
 The last form is the older delimiter syntax; it is still accepted. A reason is always required.
-Bare option words such as `1h` or `29d` are only read as options while they come before the reason —
+Bare option words such as `1h` or `1y` are only read as options while they come before the reason —
 once the reason starts, everything that follows is part of it, so `/Mute @member for arguing for 3d
 straight` opens the duration picker and keeps the sentence intact.
 
@@ -46,7 +46,7 @@ the checks reflect the moment of the action.
 ```
 
 After ✅, `/Ban` verifies Ban Members and acts. Once the ban lands, Irminsul offers a cleanup
-picker: 1️⃣ 1h · 2️⃣ 6h · 3️⃣ 1d · 4️⃣ 3d · 5️⃣ 7d · 6️⃣ 14d · 7️⃣ 29d, or ❌ to keep the messages.
+picker: 1️⃣ 1h · 2️⃣ 6h · 3️⃣ 1d · 4️⃣ 3d · 5️⃣ 7d · 6️⃣ 1mo · 7️⃣ 3mo · 8️⃣ 6mo · 9️⃣ 1y, or ❌ to keep the messages.
 Only the moderator who ran the command can choose, and the picker expires after two minutes.
 Cleanup requires Manage Messages in every affected channel.
 
@@ -81,7 +81,7 @@ offers a ten-minute ↩️ release window to freshly authorized timeout moderato
 /Purge-User @member because of spam
 ```
 
-`/Purge-User` asks for a window with the same 1h–29d picker, then reports how many observed messages
+`/Purge-User` asks for a window with the same 1h–1y picker, then reports how many observed messages
 match and waits for a ✅/❌ confirmation. Both steps are invoker-only and expire after two minutes.
 Only one purge or cleanup runs per server at a time.
 
@@ -116,10 +116,13 @@ noticeably longer than one covering a recent burst. When a run is large enough t
 estimates the time up front.
 
 :::caution[History cleanup is best-effort]
-Cleanup reaches back 29 days, one day short of the 30-day message archive that feeds it. Stoat's ban
-route has no message-history option and its bulk-delete route accepts only recent messages, so
-Irminsul bulk-deletes archived IDs from the last seven days and removes anything older one message
-at a time. A single cleanup deletes at most 2,000 messages, oldest first.
+Cleanup reaches back up to 1 year, matching the message archive's own retention exactly — `1y`
+selects everything the archive still holds. Stoat's ban route has no message-history option and
+its bulk-delete route accepts only recent messages, so Irminsul bulk-deletes archived IDs from the
+last seven days and removes anything older one message at a time; a `1mo`–`1y` cleanup will
+typically route almost entirely through that paced individual-delete path. A single cleanup
+deletes at most 2,000 messages, oldest first — on an active member, a long window will often
+exhaust that cap before reaching the full year back.
 
 Coverage is limited to messages Irminsul observed while archiving was active. Protected audit
 entries, retained evidence, quotations, reactions, and external copies are never erased.

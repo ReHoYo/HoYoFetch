@@ -3,6 +3,15 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Unreleased
+
+### Year-long archive and retention
+
+- Extended the message archive's retention from 30 days to 1 year, using calendar-correct month/year arithmetic so retention doesn't drift across leap years.
+- Raised the archive's message cap from 100,000 to 1,000,000 (configurable via `HOYOFETCH_ARCHIVE_MAX_MESSAGES`) and moved the boot-time journal replay to a streaming reader to support the larger cap.
+- Extended `/Ban`, `/Kick`, `/Mute` cleanup, and `/Purge-User` from a 1h–29d picker to 1h–1y (1h, 6h, 1d, 3d, 7d, 1mo, 3mo, 6mo, 1y), so the longest cleanup window now matches the archive's retention exactly instead of stopping a day short.
+- Added an archived message count and its coverage start date to `/Get-Info`, and switched it to listing every account/membership field it collects instead of omitting empty ones. The join log's rendering is unchanged.
+
 ## Version 2.1.0
 
 ### Account intelligence

@@ -18,7 +18,7 @@ import {
 } from "fs";
 import { join } from "path";
 import { DATA_DIR } from "./store.js";
-import { RETENTION_MS } from "./message-archive.js";
+import { retentionCutoff } from "./message-archive.js";
 
 const EVIDENCE_DIR = join(DATA_DIR, "evidence");
 const SAFE_ID_PATTERN = /^[A-Za-z0-9]+$/;
@@ -190,7 +190,7 @@ export function deleteEvidence(path) {
  * @param {number} now
  */
 export function pruneEvidence(now = Date.now()) {
-  const cutoff = now - RETENTION_MS;
+  const cutoff = retentionCutoff(now);
   for (const [filename, meta] of files) {
     if (meta.createdAt < cutoff) {
       files.delete(filename);
