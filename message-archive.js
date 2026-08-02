@@ -20,25 +20,49 @@
 // (`Array.isArray(entry.attachments)` vs a legacy count).
 //
 // Appends are cheap (no full-file rewrite); the journal is compacted when it
-// grows well past the live set. Entries expire after RETENTION_MS.
+// grows well past the live set. Entries expire after RETENTION_MONTHS
+// (calendar months, not a fixed millisecond span, so retention doesn't drift
+// across leap days).
 import {
   appendFileSync,
+  closeSync,
   existsSync,
-  readFileSync,
+  openSync,
+  readSync,
   renameSync,
   statSync,
   writeFileSync,
 } from "fs";
+import { StringDecoder } from "string_decoder";
 import { join } from "path";
 import { DATA_DIR } from "./store.js";
+import { subtractMonths } from "./time-windows.js";
 
 const ARCHIVE_PATH = join(DATA_DIR, "message_archive.jsonl");
 
-export const RETENTION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-export const MAX_MESSAGES = 100_000;
+export const RETENTION_MONTHS = 12; // 1 year
+export const MAX_MESSAGES = envInt("HOYOFETCH_ARCHIVE_MAX_MESSAGES", 1_000_000);
 const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000; // daily
 const COMPACT_MIN_DEAD_RATIO = 2; // compact when journal lines > 2× live entries
-const COMPACT_MIN_BYTES = 20 * 1024 * 1024; // …or the file exceeds 20 MB
+const COMPACT_MIN_BYTES = 512 * 1024 * 1024; // …or the file exceeds 512 MB
+const LOAD_CHUNK_BYTES = 1024 * 1024; // 1 MB read chunks when replaying the journal
+
+function envInt(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
+/**
+ * The cutoff timestamp (epoch ms) before which archived entries have
+ * expired, as of `now`.
+ * @param {number} now
+ * @return {number}
+ */
+export function retentionCutoff(now = Date.now()) {
+  return subtractMonths(now, RETENTION_MONTHS);
+}
 
 // Map preserves insertion order → oldest entries are first, which makes both
 // retention pruning and the count-cap eviction cheap.
@@ -48,50 +72,80 @@ let journalLineCount = 0;
 // ── Boot: replay the journal ───────────────────────
 loadArchive();
 
+function applyJournalLine(line) {
+  if (!line.trim()) return;
+  journalLineCount++;
+  let op;
+  try {
+    op = JSON.parse(line);
+  } catch {
+    return; // skip corrupt lines (e.g. torn write on crash)
+  }
+  if (!op || typeof op !== "object") return;
+
+  if (op.op === "create" && typeof op.id === "string") {
+    messages.set(op.id, {
+      id: op.id,
+      channelId: op.channelId,
+      serverId: op.serverId,
+      authorId: op.authorId,
+      content: op.content,
+      attachments: op.attachments ?? [], // legacy journals may carry a plain count
+      createdAt: op.createdAt,
+      deletedAt: op.deletedAt ?? null,
+    });
+  } else if (op.op === "edit" && typeof op.id === "string") {
+    const entry = messages.get(op.id);
+    if (entry) entry.content = op.content;
+  } else if (op.op === "delete" && typeof op.id === "string") {
+    const entry = messages.get(op.id);
+    if (op.purge === true) messages.delete(op.id);
+    else if (entry) entry.deletedAt = op.deletedAt ?? Date.now();
+  }
+}
+
+// Replays the journal a chunk at a time rather than loading it whole: at the
+// 1M-message cap the journal can run into the hundreds of MB, and
+// readFileSync + split("\n") would momentarily hold both the raw text and
+// every split line in memory. StringDecoder carries a multi-byte UTF-8
+// character across a chunk boundary instead of corrupting it.
 function loadArchive() {
   if (!existsSync(ARCHIVE_PATH)) return;
 
-  let raw;
+  let fd;
   try {
-    raw = readFileSync(ARCHIVE_PATH, "utf-8");
+    fd = openSync(ARCHIVE_PATH, "r");
   } catch (err) {
     console.warn(
-      "message-archive: could not read journal:",
+      "message-archive: could not open journal:",
       err?.message || err
     );
     return;
   }
 
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
-    journalLineCount++;
-    let op;
-    try {
-      op = JSON.parse(line);
-    } catch {
-      continue; // skip corrupt lines (e.g. torn write on crash)
-    }
-    if (!op || typeof op !== "object") continue;
+  try {
+    const decoder = new StringDecoder("utf8");
+    const buffer = Buffer.alloc(LOAD_CHUNK_BYTES);
+    let carry = "";
 
-    if (op.op === "create" && typeof op.id === "string") {
-      messages.set(op.id, {
-        id: op.id,
-        channelId: op.channelId,
-        serverId: op.serverId,
-        authorId: op.authorId,
-        content: op.content,
-        attachments: op.attachments ?? [], // legacy journals may carry a plain count
-        createdAt: op.createdAt,
-        deletedAt: op.deletedAt ?? null,
-      });
-    } else if (op.op === "edit" && typeof op.id === "string") {
-      const entry = messages.get(op.id);
-      if (entry) entry.content = op.content;
-    } else if (op.op === "delete" && typeof op.id === "string") {
-      const entry = messages.get(op.id);
-      if (op.purge === true) messages.delete(op.id);
-      else if (entry) entry.deletedAt = op.deletedAt ?? Date.now();
+    for (;;) {
+      const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+
+      carry += decoder.write(buffer.subarray(0, bytesRead));
+      const lines = carry.split("\n");
+      carry = lines.pop() ?? ""; // last element may be a partial line
+      for (const line of lines) applyJournalLine(line);
     }
+    carry += decoder.end();
+    if (carry) applyJournalLine(carry);
+  } catch (err) {
+    console.warn(
+      "message-archive: could not read journal:",
+      err?.message || err
+    );
+  } finally {
+    closeSync(fd);
   }
 
   pruneArchive();
@@ -174,6 +228,27 @@ export function findArchivedMessages({
   return matches.sort((a, b) => a.createdAt - b.createdAt);
 }
 
+/**
+ * Count messages by one author without allocating a match array —
+ * findArchivedMessages's array shape is wasteful for a count-only query at
+ * archive scale.
+ */
+export function countArchivedMessages({ serverId, authorId, since = 0 } = {}) {
+  let count = 0;
+  for (const entry of messages.values()) {
+    const createdAt = Number(entry.createdAt) || 0;
+    if (
+      entry.serverId === serverId &&
+      entry.authorId === authorId &&
+      !entry.deletedAt &&
+      createdAt >= since
+    ) {
+      count++;
+    }
+  }
+  return count;
+}
+
 export function getArchiveCoverage(serverId) {
   let count = 0;
   let earliestAt = null;
@@ -253,7 +328,7 @@ export function purgeChannelFromArchive(channelId) {
  * @param {number} now
  */
 export function pruneArchive(now = Date.now()) {
-  const cutoff = now - RETENTION_MS;
+  const cutoff = retentionCutoff(now);
   for (const [id, entry] of messages) {
     if ((entry.createdAt ?? 0) < cutoff) messages.delete(id);
   }

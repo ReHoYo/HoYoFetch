@@ -143,7 +143,9 @@ test("pruneEvidence drops files past retention", async () => {
   const path = store.saveEvidence("oldmsg", 0, bytes, "image/png");
   assert.ok(path);
 
-  const farFuture = Date.now() + 31 * 24 * 60 * 60 * 1000; // 31 days later
+  // Retention is now 1 year (calendar months), so "far enough past
+  // retention" needs to clear 12 months, not 31 days.
+  const farFuture = Date.now() + 13 * 30 * 24 * 60 * 60 * 1000; // ~13 months later
   store.pruneEvidence(farFuture);
 
   assert.equal(store.readEvidence(path), null);

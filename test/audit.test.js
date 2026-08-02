@@ -443,6 +443,11 @@ test("the enriched join log carries account details and flips to review on signa
   assert.match(cleanEmbed.description, /\*\*Account created:\*\*/);
   assert.match(cleanEmbed.description, /\*\*Joined this server:\*\*/);
   assert.doesNotMatch(cleanEmbed.description, /⚠️ Signals/);
+  // The join log stays compact (verbose: false) and cache-only — it must
+  // never render /Get-Info's archive-backed message count, which would
+  // require a full archive scan on every join.
+  assert.doesNotMatch(cleanEmbed.description, /Messages sent/);
+  assert.doesNotMatch(cleanEmbed.description, /\*\*User ID:\*\*/);
 
   const freshUserId = ulid(); // minted "now" so the recent-account signal fires
   client.users.getOrCreate(freshUserId, {

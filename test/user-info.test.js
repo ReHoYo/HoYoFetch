@@ -244,3 +244,175 @@ test("parseUserInfoCommand prefers a mention over a bare ULID in the same messag
     targetId: "01HZY3M6Q8V7N2K4J5T9W0XAAA",
   });
 });
+
+test("collectUserInfo leaves the message count null when no archive is supplied (join-log path)", () => {
+  const client = makeClientWithUser(OLD_USER_ID);
+  let archiveCalls = 0;
+  const archive = {
+    countArchivedMessages: () => {
+      archiveCalls++;
+      return 999;
+    },
+    getArchiveCoverage: () => {
+      archiveCalls++;
+      return { count: 999, earliestAt: NOW, latestAt: NOW };
+    },
+  };
+  const record = collectUserInfo(client, {
+    serverId: SERVER_ID,
+    userId: OLD_USER_ID,
+    store: emptyStore(),
+    // archive intentionally omitted — matches auditlog.js's join-log call.
+  });
+  assert.equal(record.messageCount, null);
+  assert.equal(record.messageCountSince, null);
+  assert.equal(
+    archiveCalls,
+    0,
+    "the archive must not be touched on every join"
+  );
+  void archive;
+});
+
+test("collectUserInfo reads the message count from the archive when supplied", () => {
+  const client = makeClientWithUser(OLD_USER_ID);
+  const archive = {
+    countArchivedMessages: ({ serverId, authorId }) => {
+      assert.equal(serverId, SERVER_ID);
+      assert.equal(authorId, OLD_USER_ID);
+      return 42;
+    },
+    getArchiveCoverage: (serverId) => {
+      assert.equal(serverId, SERVER_ID);
+      return { count: 100, earliestAt: NOW - 86_400_000, latestAt: NOW };
+    },
+  };
+  const record = collectUserInfo(client, {
+    serverId: SERVER_ID,
+    userId: OLD_USER_ID,
+    store: emptyStore(),
+    archive,
+  });
+  assert.equal(record.messageCount, 42);
+  assert.equal(record.messageCountSince, NOW - 86_400_000);
+});
+
+test("buildUserInfoLines(verbose: true) lists every field, using explicit fallbacks for empty ones", () => {
+  const client = makeClientWithUser(OLD_USER_ID);
+  const record = collectUserInfo(client, {
+    serverId: SERVER_ID,
+    userId: OLD_USER_ID,
+    store: emptyStore(),
+    archive: {
+      countArchivedMessages: () => 0,
+      getArchiveCoverage: () => ({
+        count: 0,
+        earliestAt: null,
+        latestAt: null,
+      }),
+    },
+  });
+  const lines = buildUserInfoLines(record, [], { now: NOW, verbose: true });
+  const joined = lines.join("\n");
+
+  // revolt.js's User.displayName falls back to the username when no
+  // explicit display name is set, so this is "TestUser", not "none".
+  assert.match(joined, /\*\*Display name:\*\* TestUser/);
+  assert.match(joined, /\*\*Nickname:\*\* none/);
+  assert.match(joined, /\*\*User ID:\*\* `01HZY3M6Q8V7N2K4J5T9W0XAAA`/);
+  assert.match(joined, /\*\*Joined this server:\*\* not currently a member/);
+  assert.match(joined, /\*\*Badges:\*\* none/);
+  assert.match(joined, /\*\*Platform flags:\*\* none/);
+  assert.match(joined, /\*\*Online:\*\* unknown/);
+  assert.match(joined, /\*\*Bot owner:\*\* n\/a/);
+  assert.match(joined, /\*\*Timed out until:\*\* none/);
+  assert.match(joined, /\*\*Roles:\*\* none/);
+  assert.match(joined, /\*\*Automod strike level:\*\* 0\/4/);
+  assert.match(joined, /\*\*Open automod case:\*\* no/);
+  assert.match(joined, /\*\*Prior spam reports:\*\* 0/);
+  assert.match(joined, /\*\*Messages sent:\*\* 0 recorded/);
+});
+
+test("buildUserInfoLines(verbose: true) reports a nonzero message count with its coverage start", () => {
+  const client = makeClientWithUser(OLD_USER_ID);
+  const since = NOW - 30 * 24 * 60 * 60_000;
+  const record = collectUserInfo(client, {
+    serverId: SERVER_ID,
+    userId: OLD_USER_ID,
+    store: emptyStore(),
+    archive: {
+      countArchivedMessages: () => 1234,
+      getArchiveCoverage: () => ({
+        count: 5000,
+        earliestAt: since,
+        latestAt: NOW,
+      }),
+    },
+  });
+  const joined = buildUserInfoLines(record, [], {
+    now: NOW,
+    verbose: true,
+  }).join("\n");
+  assert.match(joined, /\*\*Messages sent:\*\* 1,234 recorded since/);
+  assert.match(
+    joined,
+    /only messages observed while audit logging was active; deleted and purged messages are excluded/
+  );
+});
+
+test("buildUserInfoLines(verbose: false) — the join log's default — omits empty fields as before", () => {
+  const client = makeClientWithUser(OLD_USER_ID);
+  const record = collectUserInfo(client, {
+    serverId: SERVER_ID,
+    userId: OLD_USER_ID,
+    store: emptyStore(),
+  });
+  const lines = buildUserInfoLines(record, [], { now: NOW });
+  const joined = lines.join("\n");
+
+  assert.ok(!joined.includes("Display name"));
+  assert.ok(!joined.includes("User ID"));
+  assert.ok(!joined.includes("Online"));
+  assert.ok(!joined.includes("Bot owner"));
+  assert.ok(!joined.includes("Timed out until"));
+  assert.ok(!joined.includes("Messages sent"));
+  assert.ok(!joined.includes("Automod strike level"));
+});
+
+test("buildUserInfoLines(verbose: true) caps a long roles list and notes the remainder", () => {
+  const client = makeClientWithUser(OLD_USER_ID);
+  const server = client.servers.getOrCreate(SERVER_ID, {
+    _id: SERVER_ID,
+    owner: "OWNER1",
+    name: "Test",
+    channels: [],
+    roles: {},
+    default_permissions: 0,
+  });
+  const roleIds = Array.from({ length: 25 }, (_, i) => `ROLE${i}`);
+  const member = client.serverMembers.getOrCreate(
+    { server: SERVER_ID, user: OLD_USER_ID },
+    {
+      _id: { server: SERVER_ID, user: OLD_USER_ID },
+      joined_at: new Date(NOW).toISOString(),
+      roles: roleIds,
+    }
+  );
+  const record = collectUserInfo(client, {
+    serverId: SERVER_ID,
+    userId: OLD_USER_ID,
+    member,
+    store: emptyStore(),
+  });
+  const joined = buildUserInfoLines(record, [], {
+    now: NOW,
+    verbose: true,
+  }).join("\n");
+  const rolesLine = joined
+    .split("\n")
+    .find((line) => line.startsWith("**Roles:**"));
+  assert.ok(rolesLine, "expected a Roles line");
+  assert.match(rolesLine, /…and 5 more/);
+  assert.equal((rolesLine.match(/<@&ROLE/g) ?? []).length, 20);
+  void server;
+});

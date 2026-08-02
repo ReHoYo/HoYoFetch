@@ -19,7 +19,7 @@ The bot persists data needed to avoid duplicate announcements and resume configu
 
 ## Message archive
 
-When audit logging is active, server messages are journaled so later edit and delete events can show what Irminsul previously observed. The default retention is 30 days with a cap of 100,000 messages.
+When audit logging is active, server messages are journaled so later edit and delete events can show what Irminsul previously observed. The default retention is 1 year (calendar-correct across leap years) with a cap of 1,000,000 messages, configurable via `HOYOFETCH_ARCHIVE_MAX_MESSAGES`.
 
 The archive is operational evidence. Restrict host access, include it in your community's retention policy, and avoid copying it into public bug reports.
 
@@ -33,7 +33,7 @@ Set `AUDITLOG_EVIDENCE_BUDGET_MB=0` when your community prefers metadata-only de
 
 ## Account checks
 
-The enriched join log and `/Get-Info` (see [Account checks](/HoYoFetch/moderation/account-checks/)) read live Stoat account and membership data plus Irminsul's existing local records — automod strikes, open cases, and spam-report counts. Neither introduces new persisted storage; nothing about a lookup is written to disk beyond what audit logging or automod already record.
+The enriched join log and `/Get-Info` (see [Account checks](/HoYoFetch/moderation/account-checks/)) read live Stoat account and membership data plus Irminsul's existing local records — automod strikes, open cases, spam-report counts, and, for `/Get-Info` only, a count of the member's messages in the local archive. Neither introduces new persisted storage; nothing about a lookup is written to disk beyond what audit logging or automod already record. The archive scan `/Get-Info` performs to produce the message count is read-only.
 
 ## Secret handling
 

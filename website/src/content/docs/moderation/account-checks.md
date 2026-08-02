@@ -16,12 +16,15 @@ The mention or ID may refer to a current member or someone who already left — 
 
 `/Get-Info` fetches the account's profile (bio and banner) as part of the lookup, since it targets one account at a time. The [join log](/HoYoFetch/moderation/audit-log/) does not do this — it works from cached data only, so a join surge never turns into a burst of extra requests.
 
+Unlike the join log, `/Get-Info` lists every field it collects rather than omitting the ones that are empty — a member with no nickname, no roles, and no moderation history still shows those fields as "none" rather than leaving them out, so a moderator can see at a glance whether a field was checked and came back empty versus never checked at all.
+
 ## What is shown
 
-- **Identity:** username, nickname, avatar status, and platform badges.
+- **Identity:** username, display name, nickname, user ID, avatar status, and platform badges.
 - **Timestamps:** account creation date and, for current members, when they joined this server — both shown as an absolute UTC time and a relative age.
-- **Platform flags:** any Suspended, Banned, or Deleted flag Stoat has set on the account.
+- **Platform flags:** any Suspended, Banned, or Deleted flag Stoat has set on the account, plus online status, bot-owner (for bot accounts), and current timeout.
 - **Moderation history:** an existing automod strike, an open automod case, or prior spam reports naming this account in this server.
+- **Messages sent:** how many of this account's messages are in Irminsul's local archive, and the date the archive's coverage begins for this server. This counts only messages observed while audit logging was active — it is not a lifetime total, and deleted or purged messages are excluded.
 - **⚠️ Signals:** the specific conditions above that read as suspicious, listed at the top. An account with nothing unusual shows no signals block at all.
 
 ## Signals are heuristics, not verdicts

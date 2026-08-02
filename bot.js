@@ -77,6 +77,7 @@ import { DOCS_URL } from "./command-catalog.js";
 import {
   buildUserInfoEmbed,
   collectUserInfo,
+  DEFAULT_ARCHIVE,
   evaluateBotSignals,
   parseUserInfoCommand,
 } from "./user-info.js";
@@ -717,6 +718,7 @@ async function handleGetInfo(message, cmdArgs) {
     userId: targetId,
     member,
     profile,
+    archive: DEFAULT_ARCHIVE,
   });
   const signals = evaluateBotSignals(record, now);
 
