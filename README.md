@@ -54,40 +54,40 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 
 ## 📋 Commands
 
-| Command                                                         | Description                                                                                                         |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `/FetchGI`                                                      | Fetch active Genshin Impact codes                                                                                   |
-| `/FetchHSR`                                                     | Fetch active Honkai: Star Rail codes                                                                                |
-| `/FetchZZZ`                                                     | Fetch active Zenless Zone Zero codes                                                                                |
-| `/FetchHI3`                                                     | Fetch active Honkai Impact 3rd codes                                                                                |
-| `/FetchNTE`                                                     | Fetch active Neverness to Everness codes                                                                            |
-| `/FetchWuWa`                                                    | Fetch active Wuthering Waves codes                                                                                  |
-| `/Report-Spam @member <what happened>`                          | Privately submit suspected friend-request or DM spam for review                                                     |
-| `/EnableFetch`                                                  | Enable HoYoverse + NTE + WuWa auto-fetch in the current channel (admins/mods only)                                  |
-| `/EnableFetchHoyo`                                              | Enable HoYoverse-only auto-fetch in the current channel (admins/mods only)                                          |
-| `/EnableFetchNTE`                                               | Enable NTE-only auto-fetch in the current channel (admins/mods only)                                                |
-| `/EnableFetchWuWa`                                              | Enable WuWa-only auto-fetch in the current channel (admins/mods only)                                               |
-| `/EnableFetchNTEWuWa`                                           | Enable NTE + WuWa auto-fetch in the current channel (admins/mods only)                                              |
-| `/DisableFetch`                                                 | Disable auto-fetch in the current channel (admins/mods only)                                                        |
-| `/EmojiMode [unicode\|custom]`                                  | Show or switch reward-emoji rendering at runtime (admins/mods only)                                                 |
-| `/Restart`                                                      | Restart the bot after deploying updates (admins/mods only)                                                          |
-| `/AuditLog [status\|here\|#channel\|off\|confirm CODE\|cancel]` | View or request an Enka-approved audit-log configuration change (admins/mods only)                                  |
-| `/Test-AuditLog`                                                | Send a test event through the audit pipeline to verify delivery (admins/mods only; legacy diagnostic alias)         |
-| `/Exclude-Channel [status\|here\|#channel\|remove #channel]`    | Request Enka-approved message-content privacy exclusions (admins/mods only)                                         |
-| `/Automod status`                                               | Show this server's automod mode, logger, and ban quorum (admins/mods only)                                          |
-| `/Automod monitor [here\|#channel]`                             | Detect and log cases without changing messages or members (admins/mods only)                                        |
-| `/Automod enforce [here\|#channel]`                             | Enable temporary containment and staff-approved ban cases (admins/mods only)                                        |
-| `/Automod off`                                                  | Disable anti-raid evaluation for this server (admins/mods only)                                                     |
-| `/Automod quorum 1\|2`                                          | Set the approval quorum for new cases; production defaults to two (admins/mods only)                                |
-| `/Automod approve CASE_ID`                                      | Approve a pending ban case (owner, Manage Server, or Ban Members only)                                              |
-| `/Automod release @member <reason>`                             | Remove a timeout and reset that member's automod escalation history (Timeout Members only)                          |
-| `/Ban @member <reason>`                                         | Confirm with ✅, then pick a 1h–1y cleanup window by reaction (Ban Members; cleanup also needs Manage Messages)     |
-| `/Kick @member <reason>`                                        | Confirm with ✅, then pick a cleanup window by reaction; the kick cannot be undone (Kick Members)                   |
-| `/Mute @member [10m\|30m\|1h\|4h\|24h\|3d\|7d] <reason>`        | Type a duration and confirm with ✅, or omit it for a reaction picker (Timeout Members only)                        |
-| `/Purge-User @member <reason>`                                  | Pick a window by reaction, then confirm deletion of the member's observed messages (Manage Messages only)           |
-| `/Get-Info @member`                                             | Show full account/membership detail, archived message count, and bot-risk signals for one member (admins/mods only) |
-| `/HelpHoyoFetch`                                                | Show the two-page command reference; the opener navigates with ◀️/▶️                                                |
-| `/Docs`                                                         | Open the permanent searchable documentation site                                                                    |
+| Command                                                         | Description                                                                                                                       |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `/FetchGI`                                                      | Fetch active Genshin Impact codes                                                                                                 |
+| `/FetchHSR`                                                     | Fetch active Honkai: Star Rail codes                                                                                              |
+| `/FetchZZZ`                                                     | Fetch active Zenless Zone Zero codes                                                                                              |
+| `/FetchHI3`                                                     | Fetch active Honkai Impact 3rd codes                                                                                              |
+| `/FetchNTE`                                                     | Fetch active Neverness to Everness codes                                                                                          |
+| `/FetchWuWa`                                                    | Fetch active Wuthering Waves codes                                                                                                |
+| `/Report-Spam @member <what happened>`                          | Privately submit suspected friend-request or DM spam for review                                                                   |
+| `/EnableFetch`                                                  | Enable HoYoverse + NTE + WuWa auto-fetch in the current channel (admins/mods only)                                                |
+| `/EnableFetchHoyo`                                              | Enable HoYoverse-only auto-fetch in the current channel (admins/mods only)                                                        |
+| `/EnableFetchNTE`                                               | Enable NTE-only auto-fetch in the current channel (admins/mods only)                                                              |
+| `/EnableFetchWuWa`                                              | Enable WuWa-only auto-fetch in the current channel (admins/mods only)                                                             |
+| `/EnableFetchNTEWuWa`                                           | Enable NTE + WuWa auto-fetch in the current channel (admins/mods only)                                                            |
+| `/DisableFetch`                                                 | Disable auto-fetch in the current channel (admins/mods only)                                                                      |
+| `/EmojiMode [unicode\|custom]`                                  | Show or switch reward-emoji rendering at runtime (admins/mods only)                                                               |
+| `/Restart`                                                      | Restart the bot after deploying updates (admins/mods only)                                                                        |
+| `/AuditLog [status\|here\|#channel\|off\|confirm CODE\|cancel]` | View or request an Enka-approved audit-log configuration change (admins/mods only)                                                |
+| `/Test-AuditLog`                                                | Send a test event through the audit pipeline to verify delivery (admins/mods only; legacy diagnostic alias)                       |
+| `/Exclude-Channel [status\|here\|#channel\|remove #channel]`    | Request Enka-approved message-content privacy exclusions (admins/mods only)                                                       |
+| `/Automod status`                                               | Show this server's automod mode, logger, and ban quorum (admins/mods only)                                                        |
+| `/Automod monitor [here\|#channel]`                             | Detect and log cases without changing messages or members (admins/mods only)                                                      |
+| `/Automod enforce [here\|#channel]`                             | Enable temporary containment and staff-approved ban cases (admins/mods only)                                                      |
+| `/Automod off`                                                  | Disable anti-raid evaluation for this server (admins/mods only)                                                                   |
+| `/Automod quorum 1\|2`                                          | Set the approval quorum for new cases; production defaults to two (admins/mods only)                                              |
+| `/Automod approve CASE_ID`                                      | Approve a pending ban case (owner, Manage Server, or Ban Members only)                                                            |
+| `/Automod release @member <reason>`                             | Remove a timeout and reset that member's automod escalation history (Timeout Members only)                                        |
+| `/Ban @member <reason>`                                         | Confirm with ✅, then pick a 1h–1y cleanup window by reaction (Ban Members; cleanup also needs Manage Messages)                   |
+| `/Kick @member <reason>`                                        | Confirm with ✅, then pick a cleanup window by reaction; the kick cannot be undone (Kick Members)                                 |
+| `/Mute @member [10m\|30m\|1h\|4h\|24h\|3d\|7d] <reason>`        | Type a duration and confirm with ✅, or omit it for a reaction picker (Timeout Members only)                                      |
+| `/Purge-User @member <reason>`                                  | Pick a window by reaction, then confirm deletion of the member's observed messages (Manage Messages only)                         |
+| `/Get-Info <@member\|account ID>`                               | Vet current, departed, banned, or never-joined accounts with tiered account, ban, archive, and bot-risk detail (admins/mods only) |
+| `/HelpHoyoFetch`                                                | Show the two-page command reference; the opener navigates with ◀️/▶️                                                              |
+| `/Docs`                                                         | Open the permanent searchable documentation site                                                                                  |
 
 > **Note:** Revolt does not support Discord-style slash commands. These are message-based prefix commands using `/` as the prefix. Command names are case-insensitive; channel IDs are preserved exactly.
 
@@ -153,6 +153,7 @@ The bot needs the **Ban Members** permission to detect bans (checked when a memb
 
 **Platform limitations that cannot be worked around:**
 
+- Stoat has no username-to-ID search for bots, so `/Get-Info` needs a mention or a 26-character account ID; non-members cannot be found by username alone.
 - Stoat's server, channel, role, member, and user-profile update events do not identify who acted. These entries explicitly say **Actor unavailable from Stoat** rather than guessing. Emoji and invite creators are shown as verified actors when their resource data supplies a creator.
 - The gateway never reports **who** deleted a message. Delete entries list the author and members with effective **Manage Messages** permission as **possible deleters**, clearly labeled as a heuristic; this is not proof of who acted.
 - Newer backends can label a member departure as `Leave`, `Kick`, or `Ban`. When the backend omits that reason, the bot can only report that the member left or was removed.
@@ -166,7 +167,9 @@ Stoat's own UI hides basic account facts like join date, which makes a bot or ra
 
 Join records now carry full account and membership detail — creation date, avatar status, platform badges/flags, roles, and any prior automod or spam-report history — instead of just a username, plus a computed **⚠️ Signals** line naming the specific conditions worth a second look (a brand-new account, an account created moments before it joined, a default avatar, and so on). A join titled **📥 Member Joined — review** has at least one signal; a plain **📥 Member Joined** does not. The join log reads only locally cached data, so a join surge never triggers extra Stoat requests.
 
-`/Get-Info @member` lists every field it collects — even the ones the join log omits when empty — plus the member's archived message count and its coverage start date, for a current member or one who already left. Unlike the join log, it fetches the account's profile (bio/banner) since it targets one account at a time. It is restricted to recognized moderators — the same policy as `/Automod` and `/AuditLog`.
+`/Get-Info @member` or `/Get-Info <account ID>` now degrades gracefully across current, departed, banned, and never-joined accounts. It labels the lookup scope, derives the creation date directly from any valid Stoat ULID, reads ban-list identity and reasons when permitted, checks platform flags when full identity is unavailable, and includes local archive/moderation evidence. When another cached mutual server makes the account visible, the report names up to three such servers. Unlike the join log, it may fetch the account's profile because it targets one account at a time. Access remains restricted to recognized moderators — the same policy as `/Automod` and `/AuditLog`.
+
+Stoat has no username-to-ID search, so a non-member must be looked up by their 26-character account ID (or by a mention when one is available).
 
 Signals are heuristics for a moderator to weigh, not proof that an account is a bot.
 
@@ -348,7 +351,12 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ## 📝 Changelog
 
-### Unreleased
+### v2.3.0
+
+- Expanded `/Get-Info` into a tiered lookup for current, departed, banned, never-joined, invisible, and deleted accounts, with ID-derived creation dates, ban reasons, platform flags, and named cached mutual servers
+- Prevented invalid user responses from poisoning the revolt.js cache, stopped denied profiles from producing false “No bio” signals, and honored identities supplied by the ban list
+
+### v2.2.0
 
 - Extended the message archive's retention from 30 days to 1 year (calendar-correct across leap years), raised the message cap from 100k to 1,000,000 (configurable via `HOYOFETCH_ARCHIVE_MAX_MESSAGES`), and moved the boot-time journal replay to a streaming reader
 - Extended `/Ban`, `/Kick`, `/Mute` cleanup, and `/Purge-User` from a 1h–29d picker to 1h–1y (1h, 6h, 1d, 3d, 7d, 1mo, 3mo, 6mo, 1y), matching the archive's new retention exactly

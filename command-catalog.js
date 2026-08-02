@@ -356,15 +356,17 @@ export const COMMAND_CATALOG = Object.freeze([
     route: "get-info",
     routeAliases: ["getinfo"],
     access: "fetch_manager",
-    syntax: "/Get-Info @member",
+    syntax: "/Get-Info <@member|account ID>",
     summary:
-      "List every account and membership detail Irminsul has for one member, including their archived message count, with bot-risk signals.",
-    help: "Full account, membership, message-count, and bot-risk detail for one member _(admins/mods only)_",
+      "Look up account, membership, ban, archive, and bot-risk detail for current, departed, banned, or never-joined accounts.",
+    help: "Tiered account, membership, ban, archive, and bot-risk detail for any Stoat account ID _(admins/mods only)_",
     permission:
       "Server owner, Manage Server, or a recognized moderation capability",
     examples: ["/Get-Info @member", "/Get-Info 01ABCDEFGHJKMNPQRSTVWXYZ12"],
     notes: [
-      "Works for members who already left the server, using their last-known Stoat identity.",
+      "The lookup scope states whether the target is current, banned, former, visible elsewhere, platform-only, or inconclusive.",
+      "Ban reasons require Irminsul to have Ban Members; without it, the report states that a local ban could not be ruled out.",
+      "For accounts cached in another mutual server, the report names up to three of those servers to authorized moderators.",
       "Signals are heuristics for a moderator to look at, not proof an account is a bot.",
       "Messages sent counts only what the archive observed while audit logging was active; deleted and purged messages are excluded.",
     ],
