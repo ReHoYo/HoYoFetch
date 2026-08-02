@@ -1,22 +1,26 @@
-## Source Availability
+Irminsul License
+Copyright (c) 2026 Enka
 
 Irminsul is proprietary software.
 
-The source code is intentionally not published because the project contains
-anti-abuse, moderation, and detection logic that could become less effective
-if publicly disclosed.
+The source code is not publicly distributed. Access to the source code may be
+granted upon request at the sole discretion of the copyright holder.
 
-To promote transparency while protecting the integrity of the project,
-source code access may be granted upon request to:
+If access is granted, you may view and study the source code for educational,
+security, auditing, or contribution purposes only.
 
-- Approved contributors
-- Server administrators evaluating or deploying Irminsul
-- Security researchers performing responsible security reviews
+Unless explicitly authorized in writing, you may NOT:
 
-Access requests are reviewed individually and granted at the sole discretion
-of the copyright holder.
+- Redistribute the source code or any portion of it.
+- Publish the source code.
+- Create derivative works.
+- Use the source code in another project.
+- Commercially exploit the source code.
+- Remove or modify copyright notices.
 
-Access to the source code is provided for inspection, auditing, security
-research, or contribution purposes only. It does not grant permission to
-redistribute, publish, create derivative works, or use the code in other
-projects unless explicitly authorized in writing.
+Receiving access to the source code does not transfer ownership or grant any
+rights beyond those expressly stated above.
+
+The copyright holder reserves the right to revoke source access at any time.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
