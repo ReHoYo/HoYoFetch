@@ -10,11 +10,15 @@ process.env.HOYOFETCH_DATA_DIR = mkdtempSync(
 );
 
 const {
+  buildUserInfoEmbed,
   buildUserInfoLines,
   collectUserInfo,
+  deriveAccountCreatedAt,
   evaluateBotSignals,
+  isEmptyLookup,
   parseUserInfoCommand,
 } = await import("../user-info.js");
+const { LOOKUP_SCOPE } = await import("../account-lookup.js");
 
 const SERVER_ID = "SERVER123";
 // revolt.js derives createdAt from a ULID, so ids below are shaped like real
@@ -28,6 +32,24 @@ function emptyStore() {
     findActiveAutomodCase: () => null,
     getAutomodStrike: () => null,
     getRecentSpamReports: () => [],
+  };
+}
+
+function fakeLookup(overrides = {}) {
+  return {
+    scope: LOOKUP_SCOPE.UNKNOWN,
+    identitySource: "none",
+    identity: null,
+    accountExists: null,
+    platformFlags: null,
+    banned: false,
+    banReason: null,
+    banListChecked: true,
+    mutualElsewhere: false,
+    mutualServers: [],
+    idWellFormed: true,
+    probeStatuses: {},
+    ...overrides,
   };
 }
 
@@ -61,6 +83,68 @@ test("collectUserInfo tolerates an unknown user without throwing", () => {
   assert.deepEqual(evaluateBotSignals(record, NOW), [
     "Using the default avatar",
   ]);
+});
+
+test("derives creation time from a ULID but not a malformed id", () => {
+  const createdAt = deriveAccountCreatedAt(OLD_USER_ID);
+  assert.ok(createdAt instanceof Date);
+  assert.equal(Number.isNaN(createdAt.getTime()), false);
+  assert.equal(deriveAccountCreatedAt("UNKNOWN_ID"), null);
+
+  const record = collectUserInfo(new Client(), {
+    serverId: SERVER_ID,
+    userId: OLD_USER_ID,
+    user: null,
+    store: emptyStore(),
+  });
+  assert.equal(record.accountCreatedAtSource, "id");
+  assert.equal(record.accountCreatedAt.getTime(), createdAt.getTime());
+});
+
+test("an explicitly supplied user wins over a different cached user", () => {
+  const client = makeClientWithUser(OLD_USER_ID);
+  const supplied = {
+    username: "Supplied",
+    discriminator: "9999",
+    displayName: "Supplied Name",
+    createdAt: new Date(NOW - 1_000),
+    avatar: null,
+  };
+  const record = collectUserInfo(client, {
+    serverId: SERVER_ID,
+    userId: OLD_USER_ID,
+    user: supplied,
+    store: emptyStore(),
+  });
+  assert.equal(record.username, "Supplied");
+  assert.equal(record.displayName, "Supplied Name");
+});
+
+test("lookup identity and platform flags fill otherwise invisible records", () => {
+  const record = collectUserInfo(new Client(), {
+    serverId: SERVER_ID,
+    userId: OLD_USER_ID,
+    user: null,
+    store: emptyStore(),
+    lookup: fakeLookup({
+      scope: LOOKUP_SCOPE.BANNED,
+      identitySource: "ban-list",
+      identity: {
+        username: "BanIdentity",
+        discriminator: "4444",
+        displayName: null,
+        hasCustomAvatar: true,
+      },
+      platformFlags: 2,
+      banned: true,
+    }),
+  });
+  assert.equal(record.username, "BanIdentity");
+  assert.equal(record.hasCustomAvatar, true);
+  assert.deepEqual(record.flags, ["Deleted"]);
+  assert.ok(
+    evaluateBotSignals(record, NOW).includes("Banned from this server")
+  );
 });
 
 test("collectUserInfo reads badges, flags, and bot info from the cached user", () => {
@@ -412,7 +496,213 @@ test("buildUserInfoLines(verbose: true) caps a long roles list and notes the rem
     .split("\n")
     .find((line) => line.startsWith("**Roles:**"));
   assert.ok(rolesLine, "expected a Roles line");
-  assert.match(rolesLine, /…and 5 more/);
-  assert.equal((rolesLine.match(/<@&ROLE/g) ?? []).length, 20);
+  assert.match(rolesLine, /…and 10 more/);
+  assert.equal((rolesLine.match(/<@&ROLE/g) ?? []).length, 15);
   void server;
+});
+
+test("lookup-only signals do not affect the join-log path", () => {
+  const base = collectUserInfo(new Client(), {
+    serverId: SERVER_ID,
+    userId: OLD_USER_ID,
+    user: null,
+    store: emptyStore(),
+  });
+  assert.ok(!evaluateBotSignals(base, NOW).includes("Banned from this server"));
+  for (const verbose of [false, true]) {
+    const joined = buildUserInfoLines(base, [], { now: NOW, verbose }).join(
+      "\n"
+    );
+    assert.ok(!joined.includes("Lookup scope"));
+    assert.ok(!joined.includes("Ban reason"));
+  }
+});
+
+test("unknown identity does not claim the default avatar or an empty bio", () => {
+  const record = collectUserInfo(new Client(), {
+    serverId: SERVER_ID,
+    userId: OLD_USER_ID,
+    user: null,
+    profile: null,
+    store: emptyStore(),
+    lookup: fakeLookup(),
+  });
+  const signals = evaluateBotSignals(record, NOW);
+  assert.ok(!signals.includes("Using the default avatar"));
+  assert.ok(!signals.includes("No bio set"));
+  assert.match(
+    buildUserInfoLines(record, signals, { now: NOW, verbose: true }).join("\n"),
+    /\*\*Avatar:\*\* unknown/
+  );
+});
+
+test("a deleted account with local evidence is promoted to former and signaled", () => {
+  const record = collectUserInfo(new Client(), {
+    serverId: SERVER_ID,
+    userId: OLD_USER_ID,
+    user: null,
+    store: {
+      ...emptyStore(),
+      getAutomodStrike: () => ({ level: 2 }),
+    },
+    lookup: fakeLookup({
+      scope: LOOKUP_SCOPE.MISSING,
+      accountExists: false,
+    }),
+  });
+  assert.equal(record.lookup.scope, LOOKUP_SCOPE.FORMER);
+  assert.ok(
+    evaluateBotSignals(record, NOW).some((signal) =>
+      signal.startsWith("Stoat no longer has an account")
+    )
+  );
+});
+
+test("local evidence does not downgrade a confirmed ban to former", () => {
+  const record = collectUserInfo(new Client(), {
+    serverId: SERVER_ID,
+    userId: OLD_USER_ID,
+    user: null,
+    store: {
+      ...emptyStore(),
+      getAutomodStrike: () => ({ level: 1 }),
+    },
+    lookup: fakeLookup({
+      scope: LOOKUP_SCOPE.BANNED,
+      accountExists: true,
+      banned: true,
+    }),
+  });
+  assert.equal(record.lookup.scope, LOOKUP_SCOPE.BANNED);
+});
+
+test("renders every lookup scope and the ban-permission caveat", () => {
+  const expected = new Map([
+    [LOOKUP_SCOPE.MEMBER, "Current member of this server."],
+    [LOOKUP_SCOPE.BANNED, "Not a member — banned from this server."],
+    [LOOKUP_SCOPE.FORMER, "No longer a member of this server."],
+    [LOOKUP_SCOPE.OUTSIDE, "visible to me through another community"],
+    [LOOKUP_SCOPE.PLATFORM, "the account exists on Stoat"],
+    [LOOKUP_SCOPE.UNKNOWN, "did not confirm whether this account exists"],
+    [LOOKUP_SCOPE.MISSING, "no account has this ID"],
+  ]);
+  for (const [scope, sentence] of expected) {
+    const record = collectUserInfo(new Client(), {
+      serverId: SERVER_ID,
+      userId: OLD_USER_ID,
+      user: null,
+      store: emptyStore(),
+      lookup: fakeLookup({ scope, banListChecked: false }),
+    });
+    const line = buildUserInfoLines(record, [], {
+      now: NOW,
+      verbose: true,
+    }).find((value) => value.startsWith("**Lookup scope:**"));
+    assert.ok(line.includes(sentence), scope);
+    if (scope === LOOKUP_SCOPE.MEMBER) {
+      assert.ok(!line.includes("needs Ban Members"));
+    } else {
+      assert.ok(line.includes("needs Ban Members"));
+    }
+  }
+});
+
+test("renders at most three mutual server names and summarizes the rest", () => {
+  const record = collectUserInfo(new Client(), {
+    serverId: SERVER_ID,
+    userId: OLD_USER_ID,
+    user: null,
+    store: emptyStore(),
+    lookup: fakeLookup({
+      scope: LOOKUP_SCOPE.OUTSIDE,
+      mutualServers: [
+        { id: "1", name: "One" },
+        { id: "2", name: "Two" },
+        { id: "3", name: "Three" },
+        { id: "4", name: "Four" },
+      ],
+    }),
+  });
+  const joined = buildUserInfoLines(record, [], {
+    now: NOW,
+    verbose: true,
+  }).join("\n");
+  assert.match(joined, /\*\*Also seen in:\*\* One, Two, Three, …and 1 more/);
+  assert.ok(!joined.includes("Four"));
+});
+
+test("isEmptyLookup only accepts a confirmed missing account with no local evidence", () => {
+  const base = collectUserInfo(new Client(), {
+    serverId: SERVER_ID,
+    userId: OLD_USER_ID,
+    user: null,
+    store: emptyStore(),
+    archive: {
+      countArchivedMessages: () => 0,
+      getArchiveCoverage: () => ({ earliestAt: null }),
+    },
+    lookup: fakeLookup({
+      scope: LOOKUP_SCOPE.MISSING,
+      accountExists: false,
+    }),
+  });
+  assert.equal(isEmptyLookup(base), true);
+  assert.equal(isEmptyLookup({ ...base, spamReportCount: 1 }), false);
+  assert.equal(
+    isEmptyLookup({
+      ...base,
+      lookup: { ...base.lookup, accountExists: null },
+    }),
+    false
+  );
+  assert.equal(
+    isEmptyLookup({
+      ...base,
+      lookup: { ...base.lookup, banListChecked: false },
+    }),
+    false
+  );
+});
+
+test("a maximal lookup embed stays within Stoat's description budget", () => {
+  const client = makeClientWithUser(OLD_USER_ID, {
+    badges: 1,
+    flags: 1,
+    avatar: { _id: "AVATAR", tag: "avatars" },
+  });
+  const member = {
+    nickname: "N".repeat(100),
+    joinedAt: new Date(NOW - 1_000),
+    roles: Array.from({ length: 30 }, (_, i) => `ROLE${i}${"X".repeat(20)}`),
+    timeout: new Date(NOW + 60_000),
+  };
+  const record = collectUserInfo(client, {
+    serverId: SERVER_ID,
+    userId: OLD_USER_ID,
+    member,
+    profile: { content: "B".repeat(300) },
+    store: {
+      findActiveAutomodCase: () => ({ caseId: "CASE" }),
+      getAutomodStrike: () => ({ level: 4 }),
+      getRecentSpamReports: () => [{ targetId: OLD_USER_ID }],
+    },
+    archive: {
+      countArchivedMessages: () => 999_999,
+      getArchiveCoverage: () => ({ earliestAt: NOW - 1_000 }),
+    },
+    lookup: fakeLookup({
+      scope: LOOKUP_SCOPE.BANNED,
+      identitySource: "fetch",
+      banned: true,
+      banReason: "R".repeat(500),
+      mutualServers: Array.from({ length: 5 }, (_, i) => ({
+        id: String(i),
+        name: `Server ${i} ${"S".repeat(80)}`,
+      })),
+    }),
+  });
+  const signals = evaluateBotSignals(record, NOW);
+  assert.ok(
+    buildUserInfoEmbed(record, signals, { now: NOW }).description.length <= 2000
+  );
 });

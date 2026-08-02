@@ -1,6 +1,6 @@
 {
   "name": "hoyofetch",
-  "version": "2.1.0",
+  "version": "2.3.0",
   "description": "HoYoverse redemption code fetcher bot for Revolt/Stoat.chat",
   "main": "bot.js",
   "type": "module",
@@ -16,6 +16,7 @@
   "dependencies": {
     "node-fetch": "^3.3.2",
     "revolt.js": "^7.0.4",
+    "ulid": "^2.4.0",
     "ws": "8.21.0"
   },
   "devDependencies": {
@@ -24,8 +25,7 @@
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-import": "^2.29.0",
     "globals": "^15.0.0",
-    "prettier": "^3.2.0",
-    "ulid": "^2.4.0"
+    "prettier": "^3.2.0"
   },
   "engines": {
     "node": ">=18.0.0"

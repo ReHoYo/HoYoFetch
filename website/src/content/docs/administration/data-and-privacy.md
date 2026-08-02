@@ -33,7 +33,11 @@ Set `AUDITLOG_EVIDENCE_BUDGET_MB=0` when your community prefers metadata-only de
 
 ## Account checks
 
-The enriched join log and `/Get-Info` (see [Account checks](/HoYoFetch/moderation/account-checks/)) read live Stoat account and membership data plus Irminsul's existing local records — automod strikes, open cases, spam-report counts, and, for `/Get-Info` only, a count of the member's messages in the local archive. Neither introduces new persisted storage; nothing about a lookup is written to disk beyond what audit logging or automod already record. The archive scan `/Get-Info` performs to produce the message count is read-only.
+The enriched join log and `/Get-Info` (see [Account checks](/HoYoFetch/moderation/account-checks/)) read live Stoat account and membership data plus Irminsul's existing local records. `/Get-Info` may read the full server ban list to confirm a ban and recover its reason and limited identity, probe the target's platform flags as an existence check, fetch a visible profile, and count the target's messages in the local archive.
+
+These reads introduce no new persisted storage. A lookup is not written to disk, the archive scan is read-only, and `/Get-Info` deliberately does **not** update `knownBans`; that snapshot belongs to unban polling, where replacing it from an ad hoc lookup could suppress a real unban audit entry.
+
+When the target is cached as a member elsewhere, `/Get-Info` names up to three other servers Irminsul shares with that account. Only members authorized under the `FETCH_MANAGER` policy (server owner, Manage Server, or a recognized moderation capability) can run the command. Even with that restriction, this means one server's membership can be disclosed to moderators of another server using the same bot instance. Server operators should account for that in their member-facing privacy policy.
 
 ## Secret handling
 

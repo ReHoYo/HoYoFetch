@@ -3,7 +3,21 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
-## Unreleased
+## Version 2.3.0
+
+### Account lookup beyond the server
+
+- Expanded `/Get-Info` into a tiered lookup for current members, banned and departed accounts, accounts visible through another community, and accounts that have never joined this server.
+- Account creation time is now derived from a valid Stoat ID even when no network identity is visible. Ban-list identity and reasons, platform flags, local moderation history, and archive evidence are combined without turning permission or network failures into false not-found errors.
+- Reports state their lookup scope, whether ban-list access was unavailable, and up to three other cached mutual servers through which Irminsul can see the target.
+
+### Reliability fixes
+
+- Validated all user and member payload IDs before hydrating revolt.js collections, preventing error bodies or mismatched responses from poisoning the user cache.
+- Stopped denied profile requests from producing a false “No bio set” signal and stopped unknown avatar state from being described as a default avatar.
+- Fixed account collection so an identity supplied by the caller, including ban-list identity, is no longer discarded in favor of a cache reread.
+
+## Version 2.2.0
 
 ### Year-long archive and retention
 

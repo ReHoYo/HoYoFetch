@@ -4,11 +4,14 @@
 // bot/raid accounts. Signals are heuristics for a moderator to look at, not
 // proof of anything.
 import { UserBadges, UserFlags } from "revolt.js";
+import { decodeTime } from "ulid";
+import { LOOKUP_SCOPE } from "./account-lookup.js";
 import { AUTOMOD_LIMITS, formatAge } from "./automod.js";
 import {
   BARE_ID_PATTERN,
   findTargetToken,
   tokenizeArgs,
+  ULID_PATTERN,
 } from "./command-args.js";
 import { buildAuditEmbed } from "./embeds.js";
 import {
@@ -40,7 +43,7 @@ export const DEFAULT_ARCHIVE = Object.freeze({
 // Cap the roles list so a role-heavy member can't push the fields that
 // follow (strike level, spam reports, message count) past the embed's
 // truncation budget.
-const MAX_RENDERED_ROLES = 20;
+const MAX_RENDERED_ROLES = 15;
 
 // The throwaway-farm tell: an account minted moments before it joined.
 const FRESH_ACCOUNT_JOIN_GAP_MS = 60 * 60_000;
@@ -59,6 +62,35 @@ function formatTimestamp(value, now) {
   return `${value.toISOString().replace("T", " ").slice(0, 16)} UTC (${formatAge(value, now)})`;
 }
 
+/** ULIDs embed their mint time, so an account's creation date needs no network. */
+export function deriveAccountCreatedAt(userId) {
+  if (!ULID_PATTERN.test(userId)) return null;
+  try {
+    const ms = decodeTime(userId);
+    return Number.isFinite(ms) ? new Date(ms) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function promoteScopeWithLocalEvidence(
+  scope,
+  { messageCount, automodStrikeLevel, spamReportCount }
+) {
+  if (
+    [
+      LOOKUP_SCOPE.OUTSIDE,
+      LOOKUP_SCOPE.PLATFORM,
+      LOOKUP_SCOPE.UNKNOWN,
+      LOOKUP_SCOPE.MISSING,
+    ].includes(scope) &&
+    (messageCount > 0 || automodStrikeLevel || spamReportCount > 0)
+  ) {
+    return LOOKUP_SCOPE.FORMER;
+  }
+  return scope;
+}
+
 /**
  * Gather every locally-cached (or explicitly supplied) fact about one
  * account. Never throws — a missing user/member simply yields fewer fields,
@@ -70,13 +102,15 @@ export function collectUserInfo(
   {
     serverId,
     userId,
+    user = undefined,
     member = null,
     profile = null,
     store = DEFAULT_STORE,
     archive = null,
+    lookup = null,
   }
 ) {
-  const user = client.users.get(userId);
+  const resolvedUser = user === undefined ? client.users.get(userId) : user;
 
   const strike = store.getAutomodStrike(serverId, userId);
   const activeCase = store.findActiveAutomodCase(serverId, userId);
@@ -94,19 +128,46 @@ export function collectUserInfo(
     messageCountSince = archive.getArchiveCoverage(serverId).earliestAt;
   }
 
+  const accountCreatedAt =
+    resolvedUser?.createdAt ?? deriveAccountCreatedAt(userId);
+  const accountCreatedAtSource = resolvedUser?.createdAt
+    ? "user"
+    : accountCreatedAt
+      ? "id"
+      : null;
+  const identity = lookup?.identity;
+  const promotedLookup = lookup
+    ? Object.freeze({
+        ...lookup,
+        scope: promoteScopeWithLocalEvidence(lookup.scope, {
+          messageCount,
+          automodStrikeLevel: strike?.level ?? null,
+          spamReportCount,
+        }),
+      })
+    : null;
+
   return {
     userId,
     serverId,
-    username: user?.username ?? null,
-    discriminator: user?.discriminator ?? null,
-    displayName: user?.displayName ?? null,
-    accountCreatedAt: user?.createdAt ?? null,
-    hasCustomAvatar: Boolean(user?.avatar),
-    badges: flagNames(UserBadges, user?.badges),
-    flags: flagNames(UserFlags, user?.flags),
-    isBot: Boolean(user?.bot),
-    botOwnerId: user?.bot?.owner ?? null,
-    online: user?.online ?? null,
+    username: resolvedUser?.username ?? identity?.username ?? null,
+    discriminator:
+      resolvedUser?.discriminator ?? identity?.discriminator ?? null,
+    displayName: resolvedUser?.displayName ?? identity?.displayName ?? null,
+    accountCreatedAt,
+    accountCreatedAtSource,
+    hasCustomAvatar:
+      resolvedUser != null
+        ? Boolean(resolvedUser.avatar)
+        : (identity?.hasCustomAvatar ?? false),
+    badges: flagNames(UserBadges, resolvedUser?.badges),
+    flags: flagNames(
+      UserFlags,
+      resolvedUser?.flags ?? lookup?.platformFlags ?? 0
+    ),
+    isBot: Boolean(resolvedUser?.bot),
+    botOwnerId: resolvedUser?.bot?.owner ?? null,
+    online: resolvedUser?.online ?? null,
     bio: profile?.content ?? null,
     profileFetched: profile !== null,
     nickname: member?.nickname ?? null,
@@ -118,6 +179,7 @@ export function collectUserInfo(
     spamReportCount,
     messageCount,
     messageCountSince,
+    lookup: promotedLookup,
   };
 }
 
@@ -144,7 +206,10 @@ export function evaluateBotSignals(record, now = Date.now()) {
     }
   }
 
-  if (!record.hasCustomAvatar) {
+  if (
+    !record.hasCustomAvatar &&
+    (record.lookup ? record.lookup.identitySource !== "none" : true)
+  ) {
     signals.push("Using the default avatar");
   }
 
@@ -178,12 +243,54 @@ export function evaluateBotSignals(record, now = Date.now()) {
     );
   }
 
+  if (record.lookup?.banned) {
+    signals.push("Banned from this server");
+  }
+
+  if (
+    record.lookup?.accountExists === false &&
+    (record.messageCount > 0 ||
+      record.automodStrikeLevel ||
+      record.spamReportCount > 0)
+  ) {
+    signals.push(
+      "Stoat no longer has an account with this ID (deleted, or the ID is wrong)"
+    );
+  }
+
   return signals;
 }
 
 function formatRoles(roleIds) {
   const shown = roleIds.slice(0, MAX_RENDERED_ROLES).map((id) => `<@&${id}>`);
   const remaining = roleIds.length - shown.length;
+  return remaining > 0
+    ? `${shown.join(", ")}, …and ${remaining} more`
+    : shown.join(", ");
+}
+
+const SCOPE_SENTENCES = Object.freeze({
+  [LOOKUP_SCOPE.MEMBER]: "Current member of this server.",
+  [LOOKUP_SCOPE.BANNED]:
+    "Not a member — banned from this server. Identity below comes from the ban list.",
+  [LOOKUP_SCOPE.FORMER]: "No longer a member of this server.",
+  [LOOKUP_SCOPE.OUTSIDE]:
+    "Not a member of this server; visible to me through another community I'm in.",
+  [LOOKUP_SCOPE.PLATFORM]:
+    "Not visible to me — the account exists on Stoat but shares no server with me, so only ID-derived facts are shown.",
+  [LOOKUP_SCOPE.UNKNOWN]:
+    "Not visible to me, and Stoat did not confirm whether this account exists.",
+  [LOOKUP_SCOPE.MISSING]: "Stoat reports that no account has this ID.",
+});
+
+function truncate(value, max) {
+  const text = String(value ?? "");
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+function formatMutualServers(servers) {
+  const shown = servers.slice(0, 3).map((server) => server.name ?? server.id);
+  const remaining = servers.length - shown.length;
   return remaining > 0
     ? `${shown.join(", ")}, …and ${remaining} more`
     : shown.join(", ");
@@ -215,6 +322,28 @@ export function buildUserInfoLines(
     );
   }
 
+  if (record.lookup) {
+    let scope = SCOPE_SENTENCES[record.lookup.scope] ?? SCOPE_SENTENCES.unknown;
+    if (
+      !record.lookup.banListChecked &&
+      record.lookup.scope !== LOOKUP_SCOPE.MEMBER
+    ) {
+      scope +=
+        " I can't read this server's ban list (needs Ban Members), so a ban here isn't ruled out.";
+    }
+    lines.push(`**Lookup scope:** ${scope}`);
+    if (record.lookup.banned) {
+      lines.push(
+        `**Ban reason:** ${record.lookup.banReason ? truncate(record.lookup.banReason, 200) : "*(none given)*"}`
+      );
+    }
+    if (record.lookup.mutualServers?.length) {
+      lines.push(
+        `**Also seen in:** ${formatMutualServers(record.lookup.mutualServers)}`
+      );
+    }
+  }
+
   lines.push(
     `**Username:** ${record.username ? `@${record.username}` : "unknown"}${record.discriminator ? `#${record.discriminator}` : ""}`
   );
@@ -226,7 +355,7 @@ export function buildUserInfoLines(
   }
   if (verbose) lines.push(`**User ID:** \`${record.userId}\``);
   lines.push(
-    `**Account created:** ${formatTimestamp(record.accountCreatedAt, now)}`
+    `**Account created:** ${formatTimestamp(record.accountCreatedAt, now)}${record.accountCreatedAtSource === "id" ? " — derived from the account ID" : ""}`
   );
   if (record.joinedAt || verbose) {
     lines.push(
@@ -235,7 +364,9 @@ export function buildUserInfoLines(
         : "**Joined this server:** not currently a member"
     );
   }
-  lines.push(`**Avatar:** ${record.hasCustomAvatar ? "custom" : "default"}`);
+  lines.push(
+    `**Avatar:** ${record.lookup?.identitySource === "none" ? "unknown" : record.hasCustomAvatar ? "custom" : "default"}`
+  );
   if (record.profileFetched || verbose) {
     lines.push(
       `**Bio:** ${
@@ -306,6 +437,21 @@ export function buildUserInfoEmbed(record, signals, { now = Date.now() } = {}) {
     `🪪 Account Info — ${label}`,
     lines,
     signals.length ? "#E67E22" : "#3498DB"
+  );
+}
+
+/** True only for a well-formed ID Stoat denied with no local evidence. */
+export function isEmptyLookup(record) {
+  return Boolean(
+    record.lookup?.idWellFormed &&
+    record.lookup.accountExists === false &&
+    record.lookup.banListChecked &&
+    !record.username &&
+    !record.lookup.banned &&
+    !record.joinedAt &&
+    !(record.messageCount > 0) &&
+    !record.automodStrikeLevel &&
+    !(record.spamReportCount > 0)
   );
 }
 

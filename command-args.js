@@ -5,7 +5,7 @@ import { isSafeId } from "./security.js";
 const MENTION_PATTERN = /^<@!?([A-Za-z0-9]+)>$/;
 // Stoat IDs are ULIDs. isSafeId() alone accepts any alphanumeric word, so a
 // bare ID is only recognized mid-sentence when it has the full ULID shape.
-const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+export const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 // A bare leading token is only read as a user ID when it is long and carries a
 // digit or capital, so `/Kick for raiding` asks for a member instead of trying
 // to moderate someone called "for".

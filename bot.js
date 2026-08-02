@@ -74,11 +74,13 @@ import { createHelpMenu } from "./help-menu.js";
 import { createSpamReporter } from "./spam-report.js";
 import { createChannelExclusion } from "./channel-exclusion.js";
 import { DOCS_URL } from "./command-catalog.js";
+import { buildLookupProbes, resolveAccountLookup } from "./account-lookup.js";
 import {
   buildUserInfoEmbed,
   collectUserInfo,
   DEFAULT_ARCHIVE,
   evaluateBotSignals,
+  isEmptyLookup,
   parseUserInfoCommand,
 } from "./user-info.js";
 
@@ -95,6 +97,7 @@ const client = new Client();
 let restartInProgress = false;
 const commandRateLimiter = new CommandRateLimiter();
 const codeFetchSingleFlight = new SingleFlight();
+const accountLookupProbes = buildLookupProbes(apiRequest);
 const tamperProtection = createTamperProtection(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
   request: apiRequest,
@@ -670,32 +673,52 @@ async function handleGetInfo(message, cmdArgs) {
 
   const serverId = message.server?.id ?? message.channel?.serverId;
   const { targetId } = parsed;
-
-  let member =
-    client.serverMembers.getByKey({ server: serverId, user: targetId }) ?? null;
-  if (!member) {
-    try {
-      member = await client.serverMembers.fetch(serverId, targetId);
-    } catch {
-      member = null; // not a current member — still worth a lookup
+  const { user, member, profile, summary } = await resolveAccountLookup(
+    client,
+    {
+      serverId,
+      userId: targetId,
+      probes: accountLookupProbes,
     }
-  }
+  );
 
-  let user = client.users.get(targetId);
-  if (!user) {
-    try {
-      user = await client.users.fetch(targetId);
-    } catch {
-      user = null;
-    }
-  }
+  const now = Date.now();
+  const record = collectUserInfo(client, {
+    serverId,
+    userId: targetId,
+    user,
+    member,
+    profile,
+    archive: DEFAULT_ARCHIVE,
+    lookup: summary,
+  });
 
-  if (!user) {
+  const hasLocalEvidence = Boolean(
+    record.username ||
+    record.joinedAt ||
+    record.lookup?.banned ||
+    record.messageCount > 0 ||
+    record.automodStrikeLevel ||
+    record.spamReportCount > 0
+  );
+  if (!summary.idWellFormed && !hasLocalEvidence) {
     await safeSend(message.channel, {
       embeds: [
         buildStatusEmbed(
           "⚠️ Get-Info",
-          "That account could not be found. Check the mention or ID.",
+          "That doesn't look like a Stoat account ID. Mention the member or paste their 26-character ID.",
+          "#E74C3C"
+        ),
+      ],
+    });
+    return;
+  }
+  if (isEmptyLookup(record)) {
+    await safeSend(message.channel, {
+      embeds: [
+        buildStatusEmbed(
+          "⚠️ Get-Info",
+          "Stoat has no account with that ID. Check for a typo — I searched this server's members and ban list too.",
           "#E74C3C"
         ),
       ],
@@ -703,23 +726,6 @@ async function handleGetInfo(message, cmdArgs) {
     return;
   }
 
-  let profile = null;
-  try {
-    profile = await user.fetchProfile();
-  } catch (err) {
-    console.warn(
-      `get-info: profile fetch failed target=${auditAlias(targetId)} ${safeErrorSummary(err)}`
-    );
-  }
-
-  const now = Date.now();
-  const record = collectUserInfo(client, {
-    serverId,
-    userId: targetId,
-    member,
-    profile,
-    archive: DEFAULT_ARCHIVE,
-  });
   const signals = evaluateBotSignals(record, now);
 
   await safeSend(message.channel, {
