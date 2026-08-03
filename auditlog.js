@@ -20,6 +20,7 @@ import {
   disableAuditLog,
   isChannelExcluded,
   isAuditLogEnabled,
+  getProtectedMessageByRecordId,
 } from "./store.js";
 import {
   recordMessage,
@@ -30,11 +31,16 @@ import {
   startArchiveMaintenance,
   archiveSize,
 } from "./message-archive.js";
-import { evidenceStats, startEvidenceMaintenance } from "./evidence-store.js";
+import { evidenceModeStats, purgeLegacyEvidence } from "./evidence-store.js";
 import {
-  buildAttachmentDescriptors,
+  buildAttachmentArchiveEmbed,
+  createAttachmentArchiveQueue,
+  finaliseArchiveDescriptors,
   humanReadableSize,
-  resolveAttachmentEvidence,
+  metadataOnlyDescriptors,
+  prepareAttachmentCopies,
+  resolveAttachmentArchive,
+  SKIP_REASONS,
 } from "./attachment-evidence.js";
 import { createSettingsMonitor } from "./settings-monitor.js";
 import { auditAlias, safeErrorSummary } from "./security.js";
@@ -57,8 +63,8 @@ const ignoredSystemMessages = createMessageCache(5_000);
 // Set by initAuditLog so runAuditLogTest can reuse the real send pipeline.
 let sendRef = null;
 let settingsMonitorRef = null;
-// Downloads (evidence capture) and uploads (re-hosting on delete) go through
-// this so tests can inject a fake without touching the network.
+// RAM-only source downloads and Stoat uploads go through this so tests can
+// inject a fake without touching the network.
 let fetchImplRef = fetch;
 
 function debugLog(message) {
@@ -70,7 +76,7 @@ let chain = Promise.resolve();
 let pending = 0;
 const failureCounts = new Map(); // serverId -> consecutive failure count
 
-function queueSend(serverId, channelId, send, embed, attachments) {
+function queueSend(serverId, channelId, send, embed, extras = {}) {
   if (pending >= MAX_PENDING_SENDS) {
     console.warn(
       `auditlog: send queue full, dropping an event for server ${serverId}`
@@ -81,7 +87,8 @@ function queueSend(serverId, channelId, send, embed, attachments) {
   chain = chain.then(async () => {
     try {
       const payload = { embeds: [embed] };
-      if (attachments?.length) payload.attachments = attachments;
+      if (extras.attachments?.length) payload.attachments = extras.attachments;
+      if (extras.replies?.length) payload.replies = extras.replies;
       const result = await send(channelId, payload);
       if (result === undefined) {
         bumpFailure(serverId);
@@ -107,7 +114,7 @@ function bumpFailure(serverId) {
   }
 }
 
-function emitAudit(send, serverId, embed, attachments) {
+function emitAudit(send, serverId, embed, extras) {
   if (!serverId) return;
   const channelId = getAuditLogChannel(serverId);
   if (!channelId) {
@@ -117,7 +124,7 @@ function emitAudit(send, serverId, embed, attachments) {
     return;
   }
   debugLog(`emitAudit: queueing "${embed.title}" → channel ${channelId}`);
-  queueSend(serverId, channelId, send, embed, attachments);
+  queueSend(serverId, channelId, send, embed, extras);
 }
 
 /**
@@ -129,16 +136,24 @@ function emitAudit(send, serverId, embed, attachments) {
  */
 export function runAuditLogTest(serverId) {
   const channelId = getAuditLogChannel(serverId);
-  const evidence = evidenceStats();
+  const evidence = evidenceModeStats();
+  const archiveQueue = attachmentArchiveQueue.stats();
+  const captureFailures = Object.fromEntries(attachmentCaptureFailures);
+  const captureFailureCount = Object.values(captureFailures).reduce(
+    (sum, count) => sum + count,
+    0
+  );
   const status = {
     enabled: Boolean(channelId),
     channelId,
     archivedCount: archiveSize(),
     consecutiveFailures: failureCounts.get(serverId) ?? 0,
     queuedTest: false,
-    evidenceFiles: evidence.files,
-    evidenceBytes: evidence.bytes,
-    evidenceBudgetBytes: evidence.budgetBytes,
+    evidenceMode: evidence.mode,
+    evidenceBytes: evidence.diskBytes,
+    evidencePerFileCapBytes: evidence.perFileCapBytes,
+    attachmentArchiveQueue: archiveQueue,
+    attachmentCaptureFailures: captureFailures,
     settings: settingsMonitorRef?.status(serverId) ?? null,
   };
   if (!channelId || !sendRef) return status;
@@ -148,7 +163,10 @@ export function runAuditLogTest(serverId) {
     [
       "If you can read this, the audit pipeline is delivering events to this channel.",
       `**Messages currently archived:** ${status.archivedCount}`,
-      `**Evidence stored:** ${status.evidenceFiles} file(s), ${humanReadableSize(status.evidenceBytes)} / ${humanReadableSize(status.evidenceBudgetBytes)}`,
+      "**Attachment storage:** Stoat-hosted; 0 B retained on VPS",
+      `**Per-file archive cap:** ${humanReadableSize(status.evidencePerFileCapBytes)}`,
+      `**Archive queue:** ${archiveQueue.active} active, ${archiveQueue.queued} waiting, ${archiveQueue.failed} failed, ${archiveQueue.rejected} rejected`,
+      `**Capture failures since startup:** ${captureFailureCount}`,
     ],
     "#3498DB"
   );
@@ -441,7 +459,25 @@ export function buildMemberUpdateAuditSections(
   return sections;
 }
 
-const BULK_DELETE_MAX_REUPLOADS = 10;
+const attachmentArchiveQueue = createAttachmentArchiveQueue();
+const attachmentArchiveInFlight = new Map();
+const attachmentCaptureFailures = new Map();
+const CAPTURE_FAILURE_REASONS = new Set([
+  SKIP_REASONS.DOWNLOAD_FAILED,
+  SKIP_REASONS.UPLOAD_FAILED,
+  SKIP_REASONS.LOGGER_SEND_FAILED,
+  SKIP_REASONS.QUEUE_FULL,
+]);
+
+function trackAttachmentCaptureFailures(descriptors) {
+  for (const descriptor of descriptors ?? []) {
+    if (!CAPTURE_FAILURE_REASONS.has(descriptor.skipReason)) continue;
+    attachmentCaptureFailures.set(
+      descriptor.skipReason,
+      (attachmentCaptureFailures.get(descriptor.skipReason) ?? 0) + 1
+    );
+  }
+}
 
 // ═══════════════════════════════════════════════════
 //  Event wiring
@@ -466,7 +502,13 @@ export function initAuditLog(
   sendRef = send;
   fetchImplRef = fetchImpl ?? fetch;
   startArchiveMaintenance();
-  startEvidenceMaintenance();
+  const legacyPurge = purgeLegacyEvidence();
+  if (legacyPurge.files || legacyPurge.errors) {
+    console.log(
+      `attachment-archive: purged ${legacyPurge.files} legacy VPS file(s), ` +
+        `${legacyPurge.errors} error(s)`
+    );
+  }
   settingsMonitorRef = createSettingsMonitor(client, {
     request,
     emit: (serverId, embed) => emitAudit(send, serverId, embed),
@@ -477,8 +519,8 @@ export function initAuditLog(
   // show the original content, even across restarts. The bot's own messages
   // are archived too — otherwise deleting them (e.g. its own loading embeds)
   // would be logged as "unknown message deleted". Qualifying attachments are
-  // downloaded and cached locally here (§evidence-store.js) since Stoat is
-  // likely to purge the CDN copy the moment the message is deleted.
+  // mirrored immediately into the protected Logger channel. Bytes exist only
+  // in RAM during transfer and never enter the VPS data directory.
   client.on("messageCreate", async (message) => {
     const serverId = client.channels.get(message.channelId)?.serverId;
     if (!serverId || !isAuditLogEnabled(serverId)) return;
@@ -488,26 +530,83 @@ export function initAuditLog(
       ignoredSystemMessages.set(message.id, true);
       return;
     }
-    if (await shouldExcludeMessage(message)) {
-      ignoredSystemMessages.set(message.id, true);
-      return;
-    }
-
-    const attachments = await buildAttachmentDescriptors(
-      client,
-      message.id,
-      message.attachments,
-      { fetchImpl: fetchImplRef, debugLog }
-    );
-
-    recordMessage({
-      id: message.id,
-      channelId: message.channelId,
-      serverId,
-      authorId: message.authorId,
-      content: message.content ?? "",
-      attachments,
+    let finishProcessing;
+    const processing = new Promise((resolve) => {
+      finishProcessing = resolve;
     });
+    attachmentArchiveInFlight.set(message.id, processing);
+    try {
+      if (await shouldExcludeMessage(message)) {
+        ignoredSystemMessages.set(message.id, true);
+        return;
+      }
+
+      if (!message.attachments?.length) {
+        recordMessage({
+          id: message.id,
+          channelId: message.channelId,
+          serverId,
+          authorId: message.authorId,
+          content: message.content ?? "",
+          attachments: [],
+        });
+        return;
+      }
+
+      await attachmentArchiveQueue
+        .run(async () => {
+          const prepared = await prepareAttachmentCopies(
+            client,
+            message.attachments,
+            { fetchImpl: fetchImplRef, debugLog }
+          );
+          const embed = buildAttachmentArchiveEmbed({
+            author: formatUser(client, message.authorId),
+            channel: `<#${message.channelId}>`,
+            messageId: message.id,
+            descriptors: prepared.descriptors,
+          });
+          let posted;
+          try {
+            posted = await send(getAuditLogChannel(serverId), {
+              embeds: [embed],
+              ...(prepared.uploadIds.length
+                ? { attachments: prepared.uploadIds }
+                : {}),
+            });
+          } catch (error) {
+            debugLog(`Logger archive send failed: ${error?.message || error}`);
+          }
+          return finaliseArchiveDescriptors(prepared.descriptors, posted);
+        })
+        .then((result) => {
+          const attachments = !result.accepted
+            ? metadataOnlyDescriptors(
+                message.attachments,
+                SKIP_REASONS.QUEUE_FULL
+              )
+            : result.error
+              ? metadataOnlyDescriptors(
+                  message.attachments,
+                  SKIP_REASONS.LOGGER_SEND_FAILED
+                )
+              : result.value;
+          trackAttachmentCaptureFailures(attachments);
+          recordMessage({
+            id: message.id,
+            channelId: message.channelId,
+            serverId,
+            authorId: message.authorId,
+            content: message.content ?? "",
+            attachments,
+          });
+        });
+    } finally {
+      finishProcessing();
+      if (attachmentArchiveInFlight.get(message.id) === processing) {
+        attachmentArchiveInFlight.delete(message.id);
+      }
+    }
   });
 
   // ── Messages: raw gateway events ────────────────
@@ -520,7 +619,7 @@ export function initAuditLog(
       if (event.type === "MessageDelete") {
         await handleRawMessageDelete(client, send, event);
       } else if (event.type === "MessageUpdate") {
-        handleRawMessageUpdate(client, send, event);
+        await handleRawMessageUpdate(client, send, event);
       } else if (event.type === "BulkMessageDelete") {
         await handleRawBulkDelete(client, send, event);
       } else if (event.type === "ServerMemberLeave") {
@@ -546,6 +645,7 @@ export function initAuditLog(
     if (ignoredSystemMessages.delete(event.id)) return;
     if (await shouldExcludeMessageDelete(event.id)) return;
 
+    await attachmentArchiveInFlight.get(event.id);
     const entry = getArchivedMessage(event.id);
     markMessageDeleted(event.id);
     if (entry && isSelf(entry.authorId)) {
@@ -555,10 +655,9 @@ export function initAuditLog(
 
     debugLog(`MessageDelete ${event.id}: logging (archived=${Boolean(entry)})`);
 
-    const { lines: attachmentLines, ids: preservedAttachmentIds } =
-      await resolveAttachmentEvidence(client, entry, {
-        fetchImpl: fetchImplRef,
-        debugLog,
+    const { lines: attachmentLines, replyMessageIds } =
+      resolveAttachmentArchive(entry, {
+        getProtectedRecord: getProtectedMessageByRecordId,
       });
 
     const suspects = await computeSuspects(client, channel, entry?.authorId);
@@ -570,10 +669,16 @@ export function initAuditLog(
       attachmentLines,
       suspects: formatSuspects(suspects.authorLabel, suspects.moderatorLabels),
     });
-    emitAudit(send, serverId, embed, preservedAttachmentIds);
+    emitAudit(send, serverId, embed, {
+      replies: replyMessageIds.slice(0, 1).map((id) => ({
+        id,
+        mention: false,
+        fail_if_not_exists: false,
+      })),
+    });
   }
 
-  function handleRawMessageUpdate(client, send, event) {
+  async function handleRawMessageUpdate(client, send, event) {
     const after = event.data?.content;
     if (typeof after !== "string") return; // embed-only update (e.g. link unfurl)
 
@@ -583,6 +688,7 @@ export function initAuditLog(
     if (event.channel === getAuditLogChannel(serverId)) return;
     if (isChannelExcluded(event.channel)) return;
 
+    await attachmentArchiveInFlight.get(event.id);
     const entry = getArchivedMessage(event.id);
     if (entry && isSelf(entry.authorId)) {
       debugLog(`MessageUpdate ${event.id}: skipped (bot's own message)`);
@@ -602,6 +708,9 @@ export function initAuditLog(
       : typeof entry?.attachments === "number"
         ? entry.attachments
         : 0;
+    const { replyMessageIds } = resolveAttachmentArchive(entry, {
+      getProtectedRecord: getProtectedMessageByRecordId,
+    });
     const embed = buildAuditMessageEditEmbed({
       author: entry ? formatUser(client, entry.authorId) : "*unknown*",
       channelId: event.channel,
@@ -609,7 +718,13 @@ export function initAuditLog(
       after,
       attachmentCount,
     });
-    emitAudit(send, serverId, embed);
+    emitAudit(send, serverId, embed, {
+      replies: replyMessageIds.slice(0, 1).map((id) => ({
+        id,
+        mention: false,
+        fail_if_not_exists: false,
+      })),
+    });
 
     // Keep the archive current so the next edit diffs against this one
     applyEdit(event.id, after);
@@ -623,6 +738,9 @@ export function initAuditLog(
     if (event.channel === getAuditLogChannel(serverId)) return;
     if (isChannelExcluded(event.channel)) return;
 
+    await Promise.all(
+      (event.ids ?? []).map((id) => attachmentArchiveInFlight.get(id))
+    );
     const entries = (event.ids ?? [])
       .filter((id) => !ignoredSystemMessages.delete(id))
       .map((id) => ({ id, entry: getArchivedMessage(id) }));
@@ -638,26 +756,22 @@ export function initAuditLog(
         : `*unknown message ${id} (not archived)*`
     );
 
-    // Bulk deletes can carry many attachments at once; cap total re-uploads
-    // across the whole event rather than per message so a large raid purge
-    // can't spawn an unbounded number of Autumn uploads.
     const attachmentLines = [];
-    const preservedAttachmentIds = [];
-    let reuploadBudget = BULK_DELETE_MAX_REUPLOADS;
+    const replyMessageIds = [];
     for (const { entry } of relevant) {
       if (!entry) continue;
-      const { lines, ids } = await resolveAttachmentEvidence(client, entry, {
-        fetchImpl: fetchImplRef,
-        debugLog,
-        maxReuploads: reuploadBudget,
-      });
+      const { lines, replyMessageIds: archiveReplies } =
+        resolveAttachmentArchive(entry, {
+          getProtectedRecord: getProtectedMessageByRecordId,
+        });
       if (!lines.length) continue;
       attachmentLines.push(
         `**${formatUser(client, entry.authorId)}:**`,
         ...lines
       );
-      preservedAttachmentIds.push(...ids);
-      reuploadBudget -= ids.length;
+      for (const id of archiveReplies) {
+        if (!replyMessageIds.includes(id)) replyMessageIds.push(id);
+      }
     }
 
     const suspects = await computeSuspects(client, channel);
@@ -668,7 +782,13 @@ export function initAuditLog(
       attachmentLines,
       suspects: formatSuspects(null, suspects.moderatorLabels),
     });
-    emitAudit(send, serverId, embed, preservedAttachmentIds);
+    emitAudit(send, serverId, embed, {
+      replies: replyMessageIds.slice(0, 5).map((id) => ({
+        id,
+        mention: false,
+        fail_if_not_exists: false,
+      })),
+    });
   }
 
   async function handleRawMemberLeave(client, send, event) {

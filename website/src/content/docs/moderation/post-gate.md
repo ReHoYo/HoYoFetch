@@ -49,18 +49,18 @@ Only one protected request can be pending per server at a time (shared with `/Au
 
 ## Reviewing a held post
 
-Every held message posts a review card to the configured channel with the author, channel, content, and any captured attachments, and seeds ✅/❌ reactions. Any single recognized moderator with Manage Messages in the review channel can clear it — by reacting or with:
+Every held message posts a review card to the configured channel with the author, channel, content, and any successfully Stoat-hosted attachments, and seeds ✅/❌ reactions. Attachment bytes pass through RAM only; the VPS queue retains metadata. Any single recognized moderator with Manage Messages in the review channel can clear it — by reacting or with:
 
 ```text
 /Post-Gate approve QUEUE_ID
 /Post-Gate reject QUEUE_ID
 ```
 
-**Approve** re-uploads any captured attachment evidence and reposts the content as Irminsul, attributed to the original author, in the channel it was originally sent to.
+**Approve** downloads every held attachment from the Stoat review card into RAM, creates fresh one-use Stoat uploads, and reposts the complete content as Irminsul, attributed to the original author, in the original channel. If any attachment is unavailable, approval fails without a partial or text-only repost and the queue remains pending. After success, the review card is intentionally deleted and untracked.
 
-**Reject** discards the held content and captured evidence, and increases the author's automod strike level by one (capped at 4) — the same ladder `/Automod` escalates on repeated triggers. Rejection does **not** apply a timeout by itself; it only means the _next_ automod trigger for that account escalates faster.
+**Reject** deletes the review card and its Stoat media, discards the held content, and increases the author's automod strike level by one (capped at 4) — the same ladder `/Automod` escalates on repeated triggers. Rejection does **not** apply a timeout by itself; it only means the _next_ automod trigger for that account escalates faster.
 
-An unreviewed hold expires after **7 days**: the content and any captured evidence are discarded automatically, with no strike recorded, and a notice is posted to the review channel.
+An unreviewed hold expires after **7 days**: the review card and its Stoat media are deleted, the queued content is discarded with no strike, and a notice is posted to the review channel.
 
 :::note[Reversible by design]
 A held post never leaves the server permanently without a decision — it is either reposted, discarded with a recorded strike, or discarded after 7 days of no response. This is why review only needs one moderator instead of the two-approval quorum `/Automod` requires for a permanent ban.

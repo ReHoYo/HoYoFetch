@@ -64,4 +64,6 @@ Failure at an authorization or validation boundary stops the mutation.
 
 ## Audit durability flow
 
-Live events are combined with local message/evidence context and persistent server-setting baselines. Protected sends store their wire payload. Raw deletion events and periodic verification restore missing protected entries while bounded retry backoff prevents hot failure loops.
+Live events are combined with local message metadata and persistent server-setting baselines. A two-worker, 50-message attachment queue copies qualifying media through RAM into protected Stoat Logger cards before the local journal records their stable record IDs. Delete and edit events wait for an in-flight copy, then reference the Logger card without moving bytes again.
+
+Protected sends store their wire payload. Attachment-bearing records also store a metadata-only restoration payload: raw deletion events and periodic verification can restore the record without replaying invalid one-use file IDs. Bounded retry backoff prevents hot failure loops.

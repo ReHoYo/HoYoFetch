@@ -64,7 +64,7 @@ docker run -d --name hoyofetch --restart unless-stopped \
   hoyofetch
 ```
 
-Mount persistent storage for `/app/data`; otherwise channel configuration, code history, audit state, and evidence disappear when the container is replaced.
+Mount persistent storage for `/app/data`; otherwise channel configuration, code history, message metadata, protected-record references, and audit state disappear when the container is replaced. Attachment bytes live on Stoat, not in this volume.
 
 ## Deploy versus restart
 
@@ -78,4 +78,6 @@ Updating production generally has three separate steps:
 
 ## Backups
 
-Back up the configured data directory if you need continuity for subscriptions, protected records, audit baselines, automod cases, spam-report correlation, and evidence. Protect backups with the same access controls as the live data.
+Back up the configured data directory if you need continuity for subscriptions, protected records, audit baselines, automod cases, spam-report correlation, message content, and attachment metadata. Protect backups with the same access controls as the live data.
+
+The first upgraded startup removes direct regular files from the former `data/evidence/` cache. It cannot remove copies already present in VPS snapshots, backup archives, or separately copied data directories; operators must clean those locations according to their retention policy.

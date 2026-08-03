@@ -9,7 +9,6 @@ import {
 } from "./approval-gate.js";
 import { parseChannelArg } from "./auditlog.js";
 import { buildAuditEmbed, buildStatusEmbed } from "./embeds.js";
-import { deleteEvidence } from "./evidence-store.js";
 import { purgeChannelFromArchive } from "./message-archive.js";
 import {
   addChannelExclusion,
@@ -17,6 +16,7 @@ import {
   getAuditLogChannel,
   getExcludedChannels,
   getPrivacyDigestState,
+  getProtectedMessageByRecordId,
   isChannelExcluded,
   removeChannelExclusion,
   setPrivacyDigestState,
@@ -81,7 +81,8 @@ export function createChannelExclusion(
     approverUserId,
     approvalGate,
     purgeArchive = purgeChannelFromArchive,
-    removeEvidence = deleteEvidence,
+    removeEvidence = () => false,
+    runIntentionalDelete,
     scheduleTimeout = setTimeout,
     scheduleInterval = setInterval,
   } = {}
@@ -350,6 +351,7 @@ export function createChannelExclusion(
     }
 
     let purgedEvidence = 0;
+    let purgedArchiveRecords = 0;
     if (action === "exclude") {
       store.addChannelExclusion({
         channelId,
@@ -359,9 +361,34 @@ export function createChannelExclusion(
         approvedBy,
         requestId: challenge.requestId,
       });
-      const paths = purgeArchive(channelId);
-      for (const path of paths) {
+      const purgeResult = purgeArchive(channelId);
+      const paths = Array.isArray(purgeResult)
+        ? purgeResult
+        : purgeResult.evidencePaths;
+      const archiveRecordIds = Array.isArray(purgeResult)
+        ? []
+        : purgeResult.archiveRecordIds;
+      purgedArchiveRecords = archiveRecordIds?.length ?? 0;
+      for (const path of paths ?? []) {
         if (removeEvidence(path)) purgedEvidence += 1;
+      }
+      for (const recordId of archiveRecordIds ?? []) {
+        const record = getProtectedMessageByRecordId(recordId);
+        if (!isSafeId(record?.messageId) || !isSafeId(record?.channelId)) {
+          continue;
+        }
+        const operation = async () => {
+          const response = await request(
+            "DELETE",
+            `/channels/${record.channelId}/messages/${record.messageId}`
+          );
+          return Boolean(response.ok);
+        };
+        if (typeof runIntentionalDelete === "function") {
+          await runIntentionalDelete(record.messageId, operation);
+        } else {
+          await operation();
+        }
       }
     } else {
       store.removeChannelExclusion(channelId);
@@ -372,7 +399,7 @@ export function createChannelExclusion(
       action === "exclude"
         ? `${channelLabel(
             channelId
-          )} will no longer archive or relay message content. Existing archived content and ${purgedEvidence} evidence file(s) were purged.`
+          )} will no longer archive or relay message content. Existing archived content, ${purgedArchiveRecords} Stoat attachment record(s), and ${purgedEvidence} legacy evidence file(s) were purged.`
         : `${channelLabel(
             channelId
           )} will resume message-content logging for new activity.`;

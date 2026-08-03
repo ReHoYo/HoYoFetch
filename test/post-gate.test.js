@@ -105,7 +105,13 @@ function makeStore() {
   };
 }
 
-function makeHarness({ clock = 1_800_000_000_000 } = {}) {
+function makeHarness({
+  clock = 1_800_000_000_000,
+  attachmentDownloadFails = false,
+  attachmentUploadFails = false,
+  attachmentUploadFailsAfter = Number.POSITIVE_INFINITY,
+  sourceRepostFailsOnce = false,
+} = {}) {
   let current = clock;
   const store = makeStore();
   const responses = [];
@@ -115,6 +121,8 @@ function makeHarness({ clock = 1_800_000_000_000 } = {}) {
   const reactionPuts = [];
   const deletedMessageIds = [];
   const removedEvidencePaths = [];
+  let attachmentUploads = 0;
+  let sourceRepostFailuresRemaining = sourceRepostFailsOnce ? 1 : 0;
 
   const channels = new Map([
     [
@@ -137,6 +145,10 @@ function makeHarness({ clock = 1_800_000_000_000 } = {}) {
       [APPROVER_ID, { username: "Enka", discriminator: "4961" }],
     ]),
     servers: new Map([[SERVER_ID, { name: "Test Server" }]]),
+    configuration: {
+      features: { autumn: { url: "https://autumn.test" } },
+    },
+    authenticationHeader: ["X-Bot-Token", "secret"],
     api: {
       async get(path) {
         const memberMatch = path.match(
@@ -218,6 +230,14 @@ function makeHarness({ clock = 1_800_000_000_000 } = {}) {
   const postGate = createPostGate(client, {
     send: async (channelId, payload) => {
       sendCalls.push({ channelId, payload });
+      if (
+        channelId === SOURCE_CHANNEL_ID &&
+        payload.content?.includes("Reposted for") &&
+        sourceRepostFailuresRemaining
+      ) {
+        sourceRepostFailuresRemaining -= 1;
+        return undefined;
+      }
       return { _id: `SEND${++nextId}` };
     },
     sendProtected: async (channelId, payload) => {
@@ -225,15 +245,32 @@ function makeHarness({ clock = 1_800_000_000_000 } = {}) {
       return { _id: `PROTECTED${++nextId}` };
     },
     request,
+    fetchImpl: async (_url, options) => {
+      if (options?.method === "POST") {
+        attachmentUploads += 1;
+        if (
+          attachmentUploadFails ||
+          attachmentUploads > attachmentUploadFailsAfter
+        ) {
+          return { ok: false, status: 503 };
+        }
+        return {
+          ok: true,
+          json: async () => ({ id: `HELDATT${attachmentUploads}` }),
+        };
+      }
+      if (attachmentDownloadFails) return { ok: false, status: 404 };
+      return {
+        ok: true,
+        arrayBuffer: async () => new TextEncoder().encode("bytes").buffer,
+      };
+    },
     store,
     now: () => current,
     codeFactory: () => "123456",
     queueIdFactory: () => `PGQUEUE${++nextId}`,
     requestIdFactory: () => `PGREQ${++nextId}`,
-    removeEvidence: (path) => {
-      removedEvidencePaths.push(path);
-      return true;
-    },
+    runIntentionalDelete: async (_messageId, operation) => operation(),
     scheduleTimeout: () => ({ unref() {} }),
     scheduleInterval: () => ({ unref() {} }),
     logger: { log() {}, warn() {} },
@@ -249,6 +286,9 @@ function makeHarness({ clock = 1_800_000_000_000 } = {}) {
     reactionPuts,
     deletedMessageIds,
     removedEvidencePaths,
+    get attachmentUploads() {
+      return attachmentUploads;
+    },
     advance(ms) {
       current += ms;
     },
@@ -333,6 +373,123 @@ test("holds a first-post attachment from a brand-new account", async () => {
   assert.deepEqual(harness.deletedMessageIds, ["MSGATT1"]);
   const [record] = [...harness.store.queue.values()];
   assert.equal(record.attachments.length, 1);
+  assert.equal(record.attachments[0].archiveAttachmentId, "HELDATT1");
+  assert.equal(record.attachments[0].archiveRecordId, record.reviewMessageId);
+  assert.deepEqual(harness.protectedLogs[0].payload.attachments, ["HELDATT1"]);
+});
+
+test("approving held media copies every attachment through Stoat and removes the review card", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGMEDIAAPPROVE",
+      attachments: [
+        {
+          id: "ATTAPPROVE",
+          filename: "proof.png",
+          size: 5,
+          contentType: "image/png",
+          url: "https://autumn.test/attachments/ATTAPPROVE",
+        },
+      ],
+    })
+  );
+  const [record] = [...harness.store.queue.values()];
+  const result = await harness.postGate.handleCommand(
+    {
+      server: { id: SERVER_ID },
+      channelId: REVIEW_CHANNEL_ID,
+      authorId: MOD_USER_ID,
+    },
+    ["approve", record.queueId]
+  );
+
+  assert.equal(result.outcome, "approved");
+  assert.equal(harness.attachmentUploads, 2);
+  const repost = harness.sendCalls.find(
+    (call) => call.channelId === SOURCE_CHANNEL_ID
+  );
+  assert.deepEqual(repost.payload.attachments, ["HELDATT2"]);
+  assert.ok(harness.deletedMessageIds.includes(record.reviewMessageId));
+});
+
+test("tampered or unavailable review media cannot be silently approved as text-only", async () => {
+  const harness = makeHarness({ attachmentDownloadFails: true });
+  await enableHold(harness);
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGMEDIAFAIL",
+      content: "caption",
+      attachments: [
+        {
+          id: "ATTFAIL",
+          filename: "proof.png",
+          size: 5,
+          contentType: "image/png",
+          url: "https://autumn.test/attachments/ATTFAIL",
+        },
+      ],
+    })
+  );
+  const [record] = [...harness.store.queue.values()];
+  const result = await harness.postGate.handleCommand(
+    {
+      server: { id: SERVER_ID },
+      channelId: REVIEW_CHANNEL_ID,
+      authorId: MOD_USER_ID,
+    },
+    ["approve", record.queueId]
+  );
+  assert.equal(result.outcome, "attachments_unavailable");
+  assert.equal(harness.store.getHeldPost(record.queueId).status, "pending");
+  assert.equal(
+    harness.sendCalls.some((call) => call.channelId === SOURCE_CHANNEL_ID),
+    false
+  );
+});
+
+test("a partial held-media copy cannot approve or repost the source message", async () => {
+  const harness = makeHarness({ attachmentUploadFailsAfter: 3 });
+  await enableHold(harness);
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGPARTIALFAIL",
+      content: "two files",
+      attachments: [
+        {
+          id: "ATTPART1",
+          filename: "one.png",
+          size: 5,
+          contentType: "image/png",
+          url: "https://autumn.test/attachments/ATTPART1",
+        },
+        {
+          id: "ATTPART2",
+          filename: "two.png",
+          size: 5,
+          contentType: "image/png",
+          url: "https://autumn.test/attachments/ATTPART2",
+        },
+      ],
+    })
+  );
+  const [record] = [...harness.store.queue.values()];
+  const result = await harness.postGate.handleCommand(
+    {
+      server: { id: SERVER_ID },
+      channelId: REVIEW_CHANNEL_ID,
+      authorId: MOD_USER_ID,
+    },
+    ["approve", record.queueId]
+  );
+
+  assert.equal(result.outcome, "attachments_unavailable");
+  assert.equal(harness.store.getHeldPost(record.queueId).status, "pending");
+  assert.equal(
+    harness.sendCalls.some((call) => call.channelId === SOURCE_CHANNEL_ID),
+    false
+  );
 });
 
 test("ignores a plain-text first post with no link or attachment", async () => {
@@ -461,6 +618,37 @@ test("approving a held post reposts it and clears the queue entry", async () => 
   assert.equal(harness.store.getHeldPost(record.queueId).status, "approved");
 });
 
+test("a failed approval remains pending and can be retried", async () => {
+  const harness = makeHarness({ sourceRepostFailsOnce: true });
+  await enableHold(harness);
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGAPPROVERETRY",
+      content: "https://example.com/retry",
+    })
+  );
+  const [record] = [...harness.store.queue.values()];
+  const commandMessage = {
+    server: { id: SERVER_ID },
+    channelId: REVIEW_CHANNEL_ID,
+    authorId: MOD_USER_ID,
+  };
+
+  const failed = await harness.postGate.handleCommand(commandMessage, [
+    "approve",
+    record.queueId,
+  ]);
+  assert.equal(failed.outcome, "repost_failed");
+  assert.equal(harness.store.getHeldPost(record.queueId).status, "pending");
+
+  const retried = await harness.postGate.handleCommand(commandMessage, [
+    "approve",
+    record.queueId,
+  ]);
+  assert.equal(retried.outcome, "approved");
+  assert.equal(harness.store.getHeldPost(record.queueId).status, "approved");
+});
+
 test("rejecting a held post discards it and increases the automod strike level", async () => {
   const harness = makeHarness();
   await enableHold(harness);
@@ -487,6 +675,7 @@ test("rejecting a held post discards it and increases the automod strike level",
     harness.sendCalls.every((call) => call.channelId !== SOURCE_CHANNEL_ID)
   );
   assert.equal(harness.store.getHeldPost(record.queueId).status, "rejected");
+  assert.ok(harness.deletedMessageIds.includes(record.reviewMessageId));
   assert.equal(harness.store.getAutomodStrike(SERVER_ID, NEW_USER_ID).level, 1);
 
   // A second offense within the quiet-reset window escalates further.
@@ -520,6 +709,7 @@ test("an unreviewed held post expires after 7 days with no strike", async () => 
   await harness.postGate.maintainQueue();
 
   assert.equal(harness.store.getHeldPost(record.queueId).status, "expired");
+  assert.ok(harness.deletedMessageIds.includes(record.reviewMessageId));
   assert.equal(harness.store.getAutomodStrike(SERVER_ID, NEW_USER_ID), null);
 });
 

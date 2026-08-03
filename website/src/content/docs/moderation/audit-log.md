@@ -1,6 +1,6 @@
 ---
 title: Audit log
-description: Configure protected server activity records, archive message content, preserve qualifying attachments, and understand platform limits.
+description: Configure protected server activity records, archive message content, mirror qualifying attachments to Stoat, and understand platform limits.
 ---
 
 Stoat does not provide a native server audit log. Irminsul can relay activity into one protected channel per server.
@@ -18,7 +18,7 @@ Stoat does not provide a native server audit log. Irminsul can relay activity in
 
 The older `/Enable-AuditLog` and `/Disable-AuditLog` forms remain accepted for compatibility.
 
-Run `/Test-AuditLog` after setup. It sends a test event through the real protected-delivery pipeline and reports message archive, evidence usage, settings baseline, and webhook coverage.
+Run `/Test-AuditLog` after setup. It sends a test event through the real protected-delivery pipeline and reports message archive coverage, Stoat-hosted attachment mode, queue activity, capture failures since startup, settings baseline, and webhook coverage.
 
 Enabling, moving, or disabling the audit log requires **two steps**:
 
@@ -50,7 +50,7 @@ An approved exclusion withholds only message content:
 
 - new messages and attachments are not archived;
 - edits, deletes, and bulk deletes are not relayed;
-- existing archive entries and locally captured evidence for the channel are permanently purged; and
+- existing archive entries and their Stoat-hosted attachment archive cards are permanently purged; and
 - automod continues detecting raids, but its protected case log replaces excerpts from the channel with a privacy-withheld notice.
 
 Channel, role, permission, moderation, membership, and other server events continue logging. The audit-log destination itself cannot be excluded. A protected daily digest lists every active exclusion so a privacy change cannot remain quiet.
@@ -85,25 +85,29 @@ Delete events contain only a message ID. While audit logging is active, Irminsul
 
 Messages sent before logging began or while the bot was offline cannot be recovered.
 
-## Attachment evidence
+## Stoat-hosted attachment archive
 
-Attachment URLs may stop working as soon as their message is deleted. Irminsul can download qualifying attachments when they are posted, then re-upload the local copy with a later delete, edit, or bulk-delete record.
+Attachment URLs may stop working as soon as their message is deleted, and Stoat upload IDs belong to one message. Irminsul therefore copies qualifying attachments immediately into one protected **📎 Attachment Archived** Logger card per source message. The card identifies the source author, channel, message ID, filenames, sizes, and any failures without duplicating the source text.
 
-The default per-file limit is 20 MB and the default total evidence budget is 1 GB. Oldest evidence is evicted first when the budget is full. Set `AUDITLOG_EVIDENCE_BUDGET_MB=0` to disable capture and keep metadata-only notices.
+Bytes exist only in RAM during the source download and Stoat upload. The local journal retains metadata and the protected Logger record ID, never the file. The default per-file limit is 20 MB; set `AUDITLOG_EVIDENCE_MAX_MB=0` to disable media copies and keep metadata-only notices. The worker allows two concurrent transfers plus at most 50 queued source messages.
 
-When an attachment wasn't captured, the record states the specific reason instead of one generic notice:
+When an attachment was not archived, the record states the reason:
 
-- evidence capture is disabled on the server;
-- the attachment URL wasn't a recognized Stoat CDN link;
+- attachment archiving is disabled with a zero per-file cap;
+- the attachment URL was not a recognized Stoat CDN link;
 - the file exceeded the per-file size cap;
-- the download failed, was unavailable, or came back oversized; or
-- saving the local copy failed.
+- the source download failed or came back oversized;
+- the Stoat upload failed;
+- the Logger archive card could not be sent; or
+- the bounded archive queue was full.
 
-A bulk delete re-uploads up to **10** preserved attachments per event; any beyond that are reported as captured but not re-uploaded, to bound worst-case load from a large raid purge. Edited messages note how many attachments the message carries, since an edit cannot add, remove, or change them.
+Delete and edit records reply to the existing Logger card and perform no new media transfer. Bulk deletes reply to at most five archive cards—the Stoat reply limit—and list the stable record IDs for all remaining attachments in the embed.
+
+If someone deletes an attachment archive card, Stoat deletes the associated media. Tamper protection restores the metadata without stale file IDs, marks the media as lost, and does not retry forever. `/Exclude-Channel` intentionally deletes related archive cards when purging a channel.
 
 ## Protected messages
 
-Audit records sent through the protected pipeline are persisted. Raw delete events and reconciliation detect removal and repost the stored payload. Reposted records remain protected across restarts.
+Audit records sent through the protected pipeline are persisted. Raw delete events and reconciliation detect removal and repost the stored payload. Attachment-bearing records use a metadata-only restoration payload because their one-use Stoat file IDs cannot be replayed.
 
 ## Limits the platform does not expose
 

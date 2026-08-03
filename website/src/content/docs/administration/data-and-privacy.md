@@ -28,13 +28,15 @@ An approved `/Exclude-Channel` request purges that channel's existing archive en
 
 ## First-post gate queue
 
-A message held by `/Post-Gate` (see [First-post gate](/HoYoFetch/moderation/post-gate/)) is removed from its original channel and its content and any captured attachment evidence are retained in the held-post queue pending a moderator decision. Approving reposts the content publicly; rejecting or letting the hold expire after 7 days discards the content and its evidence. Privacy-excluded channels are never gated, since the gate would otherwise capture content that exclusion is meant to withhold.
+A message held by `/Post-Gate` (see [First-post gate](/HoYoFetch/moderation/post-gate/)) is removed from its original channel. Its text and attachment metadata enter the held-post queue, while copied media is attached to the Stoat review card. Approval copies every attachment through RAM to the repost and then deletes the review card. Rejection or 7-day expiry deletes the review card and its Stoat media. Privacy-excluded channels are never gated.
 
 ## Attachments
 
-Qualifying attachments can be downloaded at post time because the original file may disappear with a deleted message. The per-file and total-size limits are operator-configurable. Oldest evidence is evicted first when the total budget is reached.
+Qualifying attachments are downloaded into a bounded memory buffer and copied immediately to a protected archive card in the configured Logger. Irminsul persists the filename, size, Stoat URL, and protected record ID in its local message journal, but never persists the attachment bytes. Later edit and delete records reference the existing Logger card.
 
-Set `AUDITLOG_EVIDENCE_BUDGET_MB=0` when your community prefers metadata-only delete records.
+The default per-file limit is 20 MB; set `AUDITLOG_EVIDENCE_MAX_MB=0` when your community prefers metadata-only records. Two transfers run concurrently and at most 50 source messages may be active or queued.
+
+On upgrade, direct regular files in the exact legacy `data/evidence/` directory are deleted without following symlinks or entering subdirectories. Old journal and held-queue descriptors are marked `legacy_purged`. External backups, filesystem snapshots, and copied data directories are not automatically scrubbed.
 
 ## Account checks
 
@@ -55,7 +57,7 @@ Irminsul does not intentionally persist or print:
 
 ## Protected audit records
 
-Protected audit messages are intentionally difficult to erase silently: when deletion is detected, Irminsul reposts the stored record and tracks its replacement. A member purge never removes protected audit records or locally retained evidence. An Enka-approved channel exclusion is the exception: it deliberately deletes archived content and evidence for that channel.
+Protected audit messages are intentionally difficult to erase silently: when deletion is detected, Irminsul reposts the stored record and tracks its replacement. If an attachment archive card is deleted, Stoat removes its media; Irminsul restores the metadata card with a clear media-loss notice because it has no VPS copy. A member purge never removes protected records. An Enka-approved channel exclusion deliberately deletes the channel's local archive entries and associated Stoat attachment cards.
 
 Spam-report reasons exist only inside these protected records. The separate `spam_reports.json` file stores identifiers, timestamps, channel references, and the protected message reference for 30-day correlation; it does not duplicate the supplied reason.
 

@@ -34,16 +34,20 @@ test("record → lookup round trip with attachment descriptors", () => {
       filename: "a.png",
       size: 100,
       contentType: "image/png",
-      url: "https://x/a.png",
-      evidencePath: null,
+      archiveAttachmentId: "copy1",
+      archiveUrl: "https://x/copy1/a.png",
+      archiveRecordId: "logger1",
+      skipReason: null,
     },
     {
       id: "att2",
       filename: "b.png",
       size: 200,
       contentType: "image/png",
-      url: "https://x/b.png",
-      evidencePath: "/data/evidence/msg1_1.png",
+      archiveAttachmentId: null,
+      archiveUrl: null,
+      archiveRecordId: null,
+      skipReason: "upload_failed",
     },
   ];
   archive.recordMessage({
@@ -166,14 +170,19 @@ test("applyEdit returns previous content and updates the entry", () => {
   assert.equal(archive.applyEdit("ghost", "x"), undefined);
 });
 
-test("purgeChannelFromArchive removes only one channel and returns evidence paths", async () => {
+test("purgeChannelFromArchive removes only one channel and returns Logger records", async () => {
   archive.recordMessage({
     id: "privacyOne",
     channelId: "privacyChannel",
     serverId: "srv1",
     authorId: "userA",
     content: "private",
-    attachments: [{ evidencePath: "/evidence/private.png" }],
+    attachments: [
+      {
+        filename: "private.png",
+        archiveRecordId: "LOGGERPRIVATE",
+      },
+    ],
   });
   archive.recordMessage({
     id: "publicOne",
@@ -183,9 +192,10 @@ test("purgeChannelFromArchive removes only one channel and returns evidence path
     content: "public",
   });
 
-  assert.deepEqual(archive.purgeChannelFromArchive("privacyChannel"), [
-    "/evidence/private.png",
-  ]);
+  assert.deepEqual(archive.purgeChannelFromArchive("privacyChannel"), {
+    evidencePaths: [],
+    archiveRecordIds: ["LOGGERPRIVATE"],
+  });
   assert.equal(archive.getArchivedMessage("privacyOne"), null);
   assert.equal(archive.getArchivedMessage("publicOne").content, "public");
 

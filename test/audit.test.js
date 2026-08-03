@@ -23,7 +23,8 @@ const {
   parseChannelArg,
   truncate,
 } = await import("../auditlog.js");
-const { disableAuditLog, enableAuditLog } = await import("../store.js");
+const { addProtectedMessage, disableAuditLog, enableAuditLog } =
+  await import("../store.js");
 const {
   buildAuditBulkDeleteEmbed,
   buildAuditMessageDeleteEmbed,
@@ -387,7 +388,7 @@ async function waitForSend(sent, count = 1, timeoutMs = 1_000) {
   }
 }
 
-test("bulk delete preserves attachment evidence up to a per-event cap", async () => {
+test("bulk delete references Stoat archive cards without re-uploading", async () => {
   const serverId = "BULKATTACH_SERVER";
   const sourceChannelId = "BULKATTACH_SOURCE";
   const auditChannelId = "BULKATTACH_AUDIT";
@@ -417,7 +418,7 @@ test("bulk delete preserves attachment evidence up to a per-event cap", async ()
       for (const listener of listeners.get(name) ?? []) listener(...args);
     },
     emitRaw(event) {
-      for (const listener of rawListeners) listener(event);
+      return Promise.all(rawListeners.map((listener) => listener(event)));
     },
   };
 
@@ -427,7 +428,9 @@ test("bulk delete preserves attachment evidence up to a per-event cap", async ()
   initAuditLog(client, {
     sendProtected: async (chId, payload) => {
       sent.push({ chId, payload });
-      return { _id: `SENT${sent.length}` };
+      const result = { _id: `SENT${sent.length}` };
+      addProtectedMessage(chId, result._id, payload);
+      return result;
     },
     request: async () => ({ ok: false, status: 404, data: undefined }),
     fetchImpl: async (url, options) => {
@@ -463,18 +466,32 @@ test("bulk delete preserves attachment evidence up to a per-event cap", async ()
       ],
     });
   }
-  // messageCreate's handler is async but emit() doesn't await it, so give
-  // evidence capture a few turns to finish before the bulk delete fires.
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await client.emitRaw({
+    type: "BulkMessageDelete",
+    channel: sourceChannelId,
+    ids,
+  });
+  await waitForSend(sent, MESSAGE_COUNT);
+  const deadline = Date.now() + 1_000;
+  while (!sent.some(({ payload }) => /Bulk/.test(payload.embeds?.[0]?.title))) {
+    if (Date.now() >= deadline)
+      throw new Error("Timed out waiting for bulk log");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 
-  client.emitRaw({ type: "BulkMessageDelete", channel: sourceChannelId, ids });
-  await waitForSend(sent, 1);
-
-  const { payload } = sent[0];
+  assert.equal(uploadCount, MESSAGE_COUNT);
+  assert.equal(
+    sent.filter(({ payload }) => payload.attachments?.length === 1).length,
+    MESSAGE_COUNT
+  );
+  const { payload } = sent.find(({ payload }) =>
+    /Bulk/.test(payload.embeds?.[0]?.title)
+  );
   const description = payload.embeds[0].description;
   assert.match(description, /\*\*Attachments:\*\*/);
-  assert.equal(payload.attachments.length, 10);
-  assert.match(description, /re-upload limit was already reached/);
+  assert.equal(payload.attachments, undefined);
+  assert.equal(payload.replies.length, 5);
+  assert.match(description, /archived in Logger record/);
 
   disableAuditLog(serverId);
 });

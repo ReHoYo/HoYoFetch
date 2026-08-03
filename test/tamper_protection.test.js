@@ -8,11 +8,11 @@ import { join } from "node:path";
 process.env.HOYOFETCH_DATA_DIR = mkdtempSync(
   join(tmpdir(), "hoyofetch-tamper-")
 );
-process.env.AUDITLOG_EVIDENCE_BUDGET_MB = "0";
 
 const storeModule = await import("../store.js");
 const { buildTamperNotice, buildRestoredEmbed } = await import("../embeds.js");
-const { createTamperProtection } = await import("../tamper-protection.js");
+const { buildMediaSafeRestorationPayload, createTamperProtection } =
+  await import("../tamper-protection.js");
 const { initAuditLog, runAuditLogTest } = await import("../auditlog.js");
 const { getArchivedMessage } = await import("../message-archive.js");
 const { isSpamReportInvocation } = await import("../spam-report.js");
@@ -43,12 +43,14 @@ function makeMemoryStore({ clock = () => NOW, backoffMs = 10 } = {}) {
   const messageIndex = new Map();
 
   return {
-    addProtectedMessage(channelId, messageId, payload) {
+    addProtectedMessage(channelId, messageId, payload, restorationPayload) {
       const record = makeRecord({
         recordId: messageId,
         channelId,
         messageId,
         payload: structuredClone(payload),
+        restorationPayload: structuredClone(restorationPayload),
+        mediaLost: false,
         createdAt: clock(),
         lastVerifiedAt: clock(),
       });
@@ -226,6 +228,44 @@ test("protected sends persist the exact wire payload", async () => {
   const record = memoryStore.getProtectedMessageByMessageId("MESSAGE1");
   assert.equal(record.channelId, "CHANNEL1");
   assert.deepEqual(record.payload, sent[0].payload);
+});
+
+test("attachment records restore metadata without stale file ids", async () => {
+  const memoryStore = makeMemoryStore();
+  const restored = [];
+  const protection = createTamperProtection(makeClient(), {
+    store: memoryStore,
+    send: async () => ({ _id: "MEDIA1" }),
+    request: async (_method, _path, payload) => {
+      restored.push(payload);
+      return { ok: true, status: 200, data: { _id: "MEDIA2" } };
+    },
+    restoreFloorMs: 0,
+    logger: silentLogger,
+  });
+
+  const original = {
+    embeds: [{ title: "Attachment archived", description: "media below" }],
+    attachments: ["FILE1"],
+  };
+  assert.equal(
+    buildMediaSafeRestorationPayload(original).attachments,
+    undefined
+  );
+  await protection.sendProtected("CHANNEL1", original);
+  await protection.handleRawEvent({
+    type: "MessageDelete",
+    id: "MEDIA1",
+    channel: "CHANNEL1",
+  });
+
+  assert.equal(restored.length, 1);
+  assert.equal(restored[0].attachments, undefined);
+  assert.match(restored[0].embeds[0].description, /keeps no VPS copy/);
+  assert.equal(
+    memoryStore.getProtectedMessageByMessageId("MEDIA2").mediaLost,
+    true
+  );
 });
 
 test("a send without a valid message id is reported as unprotected", async () => {

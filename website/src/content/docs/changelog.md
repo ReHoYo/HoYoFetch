@@ -3,6 +3,16 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Unreleased
+
+### Stoat-hosted attachment archive
+
+- Replaced the persistent VPS attachment cache with immediate RAM-only copies into protected Stoat Logger cards. The local journal now keeps filenames, sizes, Stoat URLs, and protected record IDs but never attachment bytes.
+- Delete and edit records reference the existing Logger card; bulk deletes reply to at most five cards and list the remaining record IDs without re-uploading media.
+- Added a bounded two-worker, 50-message archive queue, precise transfer failure reasons, metadata-only tamper restoration, and automatic cleanup of direct regular files in the legacy `data/evidence/` directory.
+- Moved first-post attachment storage to the Stoat review card. Approval requires every file and copies it through RAM; approval, rejection, and expiry intentionally remove the review card on completion.
+- Retired `AUDITLOG_EVIDENCE_BUDGET_MB`; `AUDITLOG_EVIDENCE_MAX_MB=0` is now the metadata-only opt-out.
+
 ## Version 2.4.0
 
 ### First-post gate

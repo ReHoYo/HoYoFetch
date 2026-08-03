@@ -12,12 +12,11 @@
 //   {"op":"delete", id, deletedAt}
 //
 // `attachments` is an array of descriptors:
-//   {id, filename, size, contentType, url, evidencePath}
-// `evidencePath` points into evidence-store.js's local byte cache, or is
-// null if the attachment didn't qualify (too large, capture failed, or
-// evidence capture is disabled). Journals written before this field existed
-// carry a plain number (attachment count) — callers must accept both shapes
-// (`Array.isArray(entry.attachments)` vs a legacy count).
+//   {id, filename, size, contentType, archiveAttachmentId, archiveUrl,
+//    archiveRecordId, skipReason}
+// Attachment bytes live only in the referenced Stoat Logger record. Legacy
+// `evidencePath` descriptors normalize to `legacy_purged`; older journals may
+// also carry a plain number (attachment count), which callers still accept.
 //
 // Appends are cheap (no full-file rewrite); the journal is compacted when it
 // grows well past the live set. Entries expire after RETENTION_MONTHS
@@ -37,6 +36,7 @@ import { StringDecoder } from "string_decoder";
 import { join } from "path";
 import { DATA_DIR } from "./store.js";
 import { subtractMonths } from "./time-windows.js";
+import { normaliseAttachmentDescriptors } from "./attachment-evidence.js";
 
 const ARCHIVE_PATH = join(DATA_DIR, "message_archive.jsonl");
 
@@ -90,7 +90,9 @@ function applyJournalLine(line) {
       serverId: op.serverId,
       authorId: op.authorId,
       content: op.content,
-      attachments: op.attachments ?? [], // legacy journals may carry a plain count
+      attachments: Array.isArray(op.attachments)
+        ? normaliseAttachmentDescriptors(op.attachments)
+        : (op.attachments ?? []), // legacy journals may carry a plain count
       createdAt: op.createdAt,
       deletedAt: op.deletedAt ?? null,
     });
@@ -158,7 +160,9 @@ function loadArchive() {
  * @param {{id: string, channelId: string, serverId: string, authorId: string,
  *          content: string,
  *          attachments?: Array<{id: string, filename: string, size: number,
- *            contentType: string, url: string, evidencePath: string|null}>,
+ *            contentType: string, archiveAttachmentId: string|null,
+ *            archiveUrl: string|null, archiveRecordId: string|null,
+ *            skipReason: string|null}>,
  *          createdAt?: number}} entry
  */
 export function recordMessage(entry) {
@@ -169,7 +173,9 @@ export function recordMessage(entry) {
     serverId: entry.serverId,
     authorId: entry.authorId,
     content: entry.content ?? "",
-    attachments: entry.attachments ?? [],
+    attachments: Array.isArray(entry.attachments)
+      ? normaliseAttachmentDescriptors(entry.attachments)
+      : (entry.attachments ?? []),
     createdAt: entry.createdAt ?? Date.now(),
     deletedAt: null,
   };
@@ -280,7 +286,7 @@ export function applyEdit(id, newContent) {
   return previous;
 }
 
-/** Keep retained evidence while excluding a deleted message from purges. */
+/** Mark a deletion while retaining its archive metadata for audit history. */
 export function markMessageDeleted(id, deletedAt = Date.now()) {
   return markMessagesDeleted([id], deletedAt) === 1;
 }
@@ -300,10 +306,12 @@ export function markMessagesDeleted(ids, deletedAt = Date.now()) {
 /**
  * Permanently remove all archived content for one privacy-excluded channel.
  * @param {string} channelId
- * @return {string[]} evidence paths formerly referenced by removed entries
+ * @return {{evidencePaths: string[], archiveRecordIds: string[]}}
+ *   legacy paths and Stoat Logger records formerly referenced by removed entries
  */
 export function purgeChannelFromArchive(channelId) {
   const evidencePaths = [];
+  const archiveRecordIds = [];
   const ops = [];
   const deletedAt = Date.now();
   for (const [id, entry] of messages) {
@@ -313,13 +321,19 @@ export function purgeChannelFromArchive(channelId) {
         if (typeof attachment?.evidencePath === "string") {
           evidencePaths.push(attachment.evidencePath);
         }
+        if (
+          typeof attachment?.archiveRecordId === "string" &&
+          !archiveRecordIds.includes(attachment.archiveRecordId)
+        ) {
+          archiveRecordIds.push(attachment.archiveRecordId);
+        }
       }
     }
     messages.delete(id);
     ops.push({ op: "delete", id, deletedAt, purge: true });
   }
   appendOps(ops);
-  return evidencePaths;
+  return { evidencePaths, archiveRecordIds };
 }
 
 /**
