@@ -22,6 +22,13 @@ A message is deleted and queued for review only when **all** of the following ar
 
 Obfuscated links (spaced-out domains, homoglyphs, URL shorteners disguised as plain text) are not detected — the pattern matches ordinary `https://`, `www.`, and bare common-TLD links only.
 
+:::tip[Tell new members up front]
+Irminsul does not notify an author when their message is held — a quiet hold is harder for a raid account to route around than an explicit warning, but it also means a genuine new member gets no explanation if their first link or image briefly disappears. Consider a line in your server rules or welcome message covering it generically, without describing the exact trigger, for example:
+
+> Due to spam and abuse, new members' first links or media may be held for a quick moderator check before staying visible.
+
+:::
+
 ## Configuration
 
 ```text
