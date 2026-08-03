@@ -3,7 +3,7 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
-## Unreleased
+## Version 2.4.1
 
 ### Stoat-hosted attachment archive
 
