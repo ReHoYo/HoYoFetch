@@ -71,6 +71,7 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/DisableFetch`                                                 | Disable auto-fetch in the current channel (admins/mods only)                                                                      |
 | `/EmojiMode [unicode\|custom]`                                  | Show or switch reward-emoji rendering at runtime (admins/mods only)                                                               |
 | `/Restart`                                                      | Restart the bot after deploying updates (admins/mods only)                                                                        |
+| `/Server-Info`                                                  | Show cached server, archive, feature-health, and safe VPS diagnostics (admins/mods only)                                          |
 | `/AuditLog [status\|here\|#channel\|off\|confirm CODE\|cancel]` | View or request an Enka-approved audit-log configuration change (admins/mods only)                                                |
 | `/Test-AuditLog`                                                | Send a test event through the audit pipeline to verify delivery (admins/mods only; legacy diagnostic alias)                       |
 | `/Exclude-Channel [status\|here\|#channel\|remove #channel]`    | Request Enka-approved message-content privacy exclusions (admins/mods only)                                                       |

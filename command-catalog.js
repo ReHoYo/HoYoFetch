@@ -302,6 +302,23 @@ export const COMMAND_CATALOG = Object.freeze([
     ],
   },
   {
+    id: "server-info",
+    section: COMMAND_SECTIONS.SETUP,
+    route: "server-info",
+    access: "fetch_manager",
+    syntax: "/Server-Info",
+    summary:
+      "Show local server, archive, bot-health, and safe VPS diagnostics.",
+    help: "Show server, archive, feature-health, and safe VPS diagnostics _(admins/mods only)_",
+    permission:
+      "Server owner, Manage Server, or a recognized moderation capability",
+    examples: ["/Server-Info"],
+    notes: [
+      "Uses cached and local data only; it does not make live Stoat requests.",
+      "Hostnames, IP addresses, filesystem paths, secrets, and environment values are never shown.",
+    ],
+  },
+  {
     id: "ban",
     section: COMMAND_SECTIONS.MODERATION,
     route: "ban",

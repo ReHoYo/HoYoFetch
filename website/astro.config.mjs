@@ -78,6 +78,7 @@ export default defineConfig({
           label: "Help and administration",
           items: [
             { slug: "troubleshooting" },
+            { slug: "administration/server-info" },
             { slug: "administration/configuration" },
             { slug: "administration/data-and-privacy" },
             { slug: "administration/self-hosting" },

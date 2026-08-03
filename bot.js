@@ -84,6 +84,7 @@ import {
   isEmptyLookup,
   parseUserInfoCommand,
 } from "./user-info.js";
+import { buildServerInfoEmbed } from "./server-info.js";
 
 // ── Validate token ─────────────────────────────────
 if (!CONFIG.token || CONFIG.token === "your_bot_token_here") {
@@ -365,6 +366,14 @@ client.on("messageCreate", async (message) => {
     // ── Restart ──────────────────────────────────
     if (cmd === "restart") {
       await handleRestart(message);
+      return;
+    }
+
+    // ── Server-Info ──────────────────────────────
+    if (cmd === "server-info") {
+      await safeSend(message.channel, {
+        embeds: [buildServerInfoEmbed(client, message.server.id)],
+      });
       return;
     }
 

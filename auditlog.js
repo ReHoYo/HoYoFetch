@@ -135,7 +135,8 @@ function emitAudit(send, serverId, embed, extras) {
  *           consecutiveFailures: number, queuedTest: boolean}}
  */
 export function runAuditLogTest(serverId) {
-  const channelId = getAuditLogChannel(serverId);
+  const diagnostics = getAuditDiagnostics(serverId);
+  const { channelId } = diagnostics;
   const evidence = evidenceModeStats();
   const archiveQueue = attachmentArchiveQueue.stats();
   const captureFailures = Object.fromEntries(attachmentCaptureFailures);
@@ -144,10 +145,8 @@ export function runAuditLogTest(serverId) {
     0
   );
   const status = {
-    enabled: Boolean(channelId),
-    channelId,
+    ...diagnostics,
     archivedCount: archiveSize(),
-    consecutiveFailures: failureCounts.get(serverId) ?? 0,
     queuedTest: false,
     evidenceMode: evidence.mode,
     evidenceBytes: evidence.diskBytes,
@@ -173,6 +172,22 @@ export function runAuditLogTest(serverId) {
   emitAudit(sendRef, serverId, embed);
   status.queuedTest = true;
   return status;
+}
+
+/**
+ * Return a read-only snapshot of audit delivery and settings health without
+ * sending a test event or making a network request.
+ */
+export function getAuditDiagnostics(serverId) {
+  const channelId = getAuditLogChannel(serverId);
+  return {
+    enabled: Boolean(channelId),
+    channelId,
+    consecutiveFailures: failureCounts.get(serverId) ?? 0,
+    queuePending: pending,
+    queueLimit: MAX_PENDING_SENDS,
+    settings: settingsMonitorRef?.status(serverId) ?? null,
+  };
 }
 
 // ── Formatting helpers ─────────────────────────────

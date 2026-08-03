@@ -15,6 +15,10 @@ description: Major public Irminsul capabilities and documentation milestones.
 
 ## Version 2.4.0
 
+### Server diagnostics
+
+- Added `/Server-Info` for recognized administrators and moderators, combining cached server inventory, server-scoped archive coverage, configured safety features, audit health, process uptime, and safe aggregate VPS metrics without making live Stoat requests or exposing host identifiers and paths.
+
 ### First-post gate
 
 - Added `/Post-Gate`, an Enka-approved review queue that holds a message instead of leaving it visible when it carries a link or an attachment **and** its author is a new account, a newly joined member, or has no other archived message in this server.
