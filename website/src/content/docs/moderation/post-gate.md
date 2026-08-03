@@ -1,0 +1,60 @@
+---
+title: First-post gate
+description: Hold a new or first-time poster's first link or attachment for moderator review before it stays visible.
+---
+
+Automod's behavioral detection (rapid bursts, duplicate floods, mention floods) needs several messages to accumulate before it triggers — a single message from a fresh account passes straight through it. The post gate closes that gap by holding, rather than blocking, the specific case that matters most: a link or attachment as someone's first move in the server.
+
+The post gate is **off by default for every server**.
+
+## When a message is held
+
+A message is deleted and queued for review only when **all** of the following are true:
+
+- The server's post gate is in `hold` mode with a configured review channel.
+- The channel is not privacy-excluded via `/Exclude-Channel` — excluded channels retain nothing, so the gate never touches them.
+- The author is not a recognized moderator. This is checked with the same fresh permission verification `/Automod` uses, and fails closed: if the check itself is unavailable, nothing is held.
+- The message contains a link **or** at least one attachment.
+- The author is, by locally cached or archived evidence, **new**:
+  - the account was created less than 7 days ago, or
+  - the author joined this server less than 24 hours ago, or
+  - the author has no other message Irminsul has archived in this server.
+
+Obfuscated links (spaced-out domains, homoglyphs, URL shorteners disguised as plain text) are not detected — the pattern matches ordinary `https://`, `www.`, and bare common-TLD links only.
+
+## Configuration
+
+```text
+/Post-Gate status
+/Post-Gate here
+/Post-Gate #new-member-review
+/Post-Gate off
+/Post-Gate confirm 123456
+/Post-Gate cancel
+```
+
+Turning the gate on, moving its review channel, and turning it off each require the same two-step approval as `/AuditLog` and `/Exclude-Channel`:
+
+1. A recognized moderator requests the change.
+2. Irminsul DMs a ten-minute, six-digit code exclusively to **Enka#4961**, who can reply with `approve CODE`, `deny CODE`, or the bare code, or relay it for `/Post-Gate confirm CODE` in the server.
+
+Only one protected request can be pending per server at a time (shared with `/AuditLog` and `/Exclude-Channel`'s own approvals), and three incorrect attempts destroy it. `/Post-Gate status` and reviewing a held post are both immediate and never require Enka's approval.
+
+## Reviewing a held post
+
+Every held message posts a review card to the configured channel with the author, channel, content, and any captured attachments, and seeds ✅/❌ reactions. Any single recognized moderator with Manage Messages in the review channel can clear it — by reacting or with:
+
+```text
+/Post-Gate approve QUEUE_ID
+/Post-Gate reject QUEUE_ID
+```
+
+**Approve** re-uploads any captured attachment evidence and reposts the content as Irminsul, attributed to the original author, in the channel it was originally sent to.
+
+**Reject** discards the held content and captured evidence, and increases the author's automod strike level by one (capped at 4) — the same ladder `/Automod` escalates on repeated triggers. Rejection does **not** apply a timeout by itself; it only means the _next_ automod trigger for that account escalates faster.
+
+An unreviewed hold expires after **7 days**: the content and any captured evidence are discarded automatically, with no strike recorded, and a notice is posted to the review channel.
+
+:::note[Reversible by design]
+A held post never leaves the server permanently without a decision — it is either reposted, discarded with a recorded strike, or discarded after 7 days of no response. This is why review only needs one moderator instead of the two-approval quorum `/Automod` requires for a permanent ban.
+:::

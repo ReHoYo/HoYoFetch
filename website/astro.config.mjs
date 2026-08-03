@@ -71,6 +71,7 @@ export default defineConfig({
             { slug: "moderation/audit-log" },
             { slug: "moderation/account-checks" },
             { slug: "moderation/automod" },
+            { slug: "moderation/post-gate" },
           ],
         },
         {

@@ -73,6 +73,7 @@ import { createModeration } from "./moderation.js";
 import { createHelpMenu } from "./help-menu.js";
 import { createSpamReporter } from "./spam-report.js";
 import { createChannelExclusion } from "./channel-exclusion.js";
+import { createPostGate } from "./post-gate.js";
 import { DOCS_URL } from "./command-catalog.js";
 import { buildLookupProbes, resolveAccountLookup } from "./account-lookup.js";
 import {
@@ -133,13 +134,44 @@ const channelExclusion = createChannelExclusion(client, {
   prefix: CONFIG.prefix,
   approvalGate,
 });
+const postGate = createPostGate(client, {
+  send: (channelId, data) => safeSend({ id: channelId }, data),
+  sendProtected: tamperProtection.sendProtected,
+  request: apiRequest,
+  prefix: CONFIG.prefix,
+  approvalGate,
+});
+client.on("messageCreate", (message) => {
+  postGate
+    .handleMessage(message)
+    .catch((error) =>
+      console.error(
+        "post-gate: message handler failed:",
+        error?.message || error
+      )
+    );
+});
+client.events.on("event", (event) => {
+  postGate
+    .handleRawEvent(event)
+    .catch((error) =>
+      console.error(
+        "post-gate: reaction handler failed:",
+        error?.message || error
+      )
+    );
+});
 
 // ── Audit log ───────────────────────────────────────
 const auditLog = initAuditLog(client, {
   sendProtected: tamperProtection.sendProtected,
   request: apiRequest,
-  shouldExcludeMessage: spamReporter.shouldExcludeMessage,
-  shouldExcludeMessageDelete: spamReporter.shouldExcludeMessageDelete,
+  shouldExcludeMessage: async (message) =>
+    (await spamReporter.shouldExcludeMessage(message)) ||
+    (await postGate.shouldExcludeMessage(message)),
+  shouldExcludeMessageDelete: async (messageId) =>
+    (await spamReporter.shouldExcludeMessageDelete(messageId)) ||
+    (await postGate.shouldExcludeMessageDelete(messageId)),
 });
 const auditLogConfiguration = createAuditLogConfiguration(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
@@ -177,6 +209,7 @@ client.on("ready", async () => {
 
   approvalGate.resolveApprover();
   channelExclusion.startDigest();
+  postGate.startQueuePrune();
 
   // Seed known codes on first boot so we don't spam existing codes
   await seedAllGames();
@@ -378,6 +411,12 @@ client.on("messageCreate", async (message) => {
     // ── Exclude-Channel [status|here|remove|confirm|cancel] ─
     if (cmd === "exclude-channel" || cmd === "excludechannel") {
       await channelExclusion.handleCommand(message, cmdArgs);
+      return;
+    }
+
+    // ── Post-Gate [status|here|off|confirm|cancel|approve|reject] ─
+    if (cmd === "post-gate" || cmd === "postgate") {
+      await postGate.handleCommand(message, cmdArgs);
       return;
     }
 

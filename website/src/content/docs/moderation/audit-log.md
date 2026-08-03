@@ -87,9 +87,19 @@ Messages sent before logging began or while the bot was offline cannot be recove
 
 ## Attachment evidence
 
-Attachment URLs may stop working as soon as their message is deleted. Irminsul can download qualifying attachments when they are posted, then re-upload the local copy with a later delete record.
+Attachment URLs may stop working as soon as their message is deleted. Irminsul can download qualifying attachments when they are posted, then re-upload the local copy with a later delete, edit, or bulk-delete record.
 
 The default per-file limit is 20 MB and the default total evidence budget is 1 GB. Oldest evidence is evicted first when the budget is full. Set `AUDITLOG_EVIDENCE_BUDGET_MB=0` to disable capture and keep metadata-only notices.
+
+When an attachment wasn't captured, the record states the specific reason instead of one generic notice:
+
+- evidence capture is disabled on the server;
+- the attachment URL wasn't a recognized Stoat CDN link;
+- the file exceeded the per-file size cap;
+- the download failed, was unavailable, or came back oversized; or
+- saving the local copy failed.
+
+A bulk delete re-uploads up to **10** preserved attachments per event; any beyond that are reported as captured but not re-uploaded, to bound worst-case load from a large raid purge. Edited messages note how many attachments the message carries, since an edit cannot add, remove, or change them.
 
 ## Protected messages
 

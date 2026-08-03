@@ -30,15 +30,12 @@ import {
   startArchiveMaintenance,
   archiveSize,
 } from "./message-archive.js";
-import { uploadAttachmentBytes } from "./easter-eggs.js";
+import { evidenceStats, startEvidenceMaintenance } from "./evidence-store.js";
 import {
-  saveEvidence,
-  readEvidence,
-  isEvidenceEnabled,
-  perFileCapBytes,
-  evidenceStats,
-  startEvidenceMaintenance,
-} from "./evidence-store.js";
+  buildAttachmentDescriptors,
+  humanReadableSize,
+  resolveAttachmentEvidence,
+} from "./attachment-evidence.js";
 import { createSettingsMonitor } from "./settings-monitor.js";
 import { auditAlias, safeErrorSummary } from "./security.js";
 import {
@@ -196,24 +193,6 @@ export function createMessageCache(limit = 5_000) {
     return cache;
   };
   return cache;
-}
-
-export function snapshotMessage(message, channel = message?.channel) {
-  return {
-    id: message?.id,
-    channelId: message?.channelId ?? channel?.id,
-    serverId: channel?.serverId ?? message?.server?.id,
-    authorId: message?.authorId,
-    authorLabel: message?.author?.username
-      ? `@${message.author.username}`
-      : "Webhook/Unknown",
-    content: message?.content ?? "",
-    attachments: (message?.attachments ?? []).map((attachment) => ({
-      filename: attachment.filename ?? "file",
-      size: attachment.size ?? 0,
-    })),
-    createdAt: message?.createdAt?.toISOString?.() ?? new Date().toISOString(),
-  };
 }
 
 const CHANNEL_ID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
@@ -462,165 +441,7 @@ export function buildMemberUpdateAuditSections(
   return sections;
 }
 
-function humanReadableSize(bytes) {
-  if (!bytes || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex++;
-  }
-  const decimals = unitIndex > 0 && value < 10 ? 1 : 0;
-  return `${value.toFixed(decimals)} ${units[unitIndex]}`;
-}
-
-function isTrustedAttachmentUrl(client, url) {
-  const autumnBase = client.configuration?.features?.autumn?.url;
-  return (
-    Boolean(autumnBase) && typeof url === "string" && url.startsWith(autumnBase)
-  );
-}
-
-async function downloadAttachmentBytes(url, maxBytes) {
-  let response;
-  try {
-    response = await fetchImplRef(url);
-  } catch {
-    return null;
-  }
-  if (!response?.ok) return null;
-
-  try {
-    const buffer = Buffer.from(await response.arrayBuffer());
-    return buffer.length <= maxBytes ? buffer : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Build attachment descriptors for a freshly created message, downloading
- * and locally caching bytes for attachments that qualify as evidence.
- */
-async function buildAttachmentDescriptors(client, messageId, attachments) {
-  if (!attachments?.length) return [];
-
-  const descriptors = [];
-  for (let i = 0; i < attachments.length; i++) {
-    const att = attachments[i];
-    const descriptor = {
-      id: att.id,
-      filename: att.filename || "file",
-      size: att.size ?? 0,
-      contentType: att.contentType || "application/octet-stream",
-      url: att.url ?? null,
-      evidencePath: null,
-    };
-
-    const qualifies =
-      isEvidenceEnabled() &&
-      descriptor.url &&
-      isTrustedAttachmentUrl(client, descriptor.url) &&
-      descriptor.size > 0 &&
-      descriptor.size <= perFileCapBytes();
-
-    if (qualifies) {
-      try {
-        const bytes = await downloadAttachmentBytes(
-          descriptor.url,
-          perFileCapBytes()
-        );
-        if (bytes) {
-          descriptor.evidencePath = saveEvidence(
-            messageId,
-            i,
-            bytes,
-            descriptor.contentType
-          );
-          debugLog(
-            `evidence captured for ${descriptor.id} (${bytes.length} bytes)`
-          );
-        } else {
-          debugLog(
-            `evidence download unavailable/too large for ${descriptor.id}`
-          );
-        }
-      } catch (err) {
-        debugLog(
-          `evidence capture error for ${descriptor.id}: ${err?.message || err}`
-        );
-      }
-    }
-
-    descriptors.push(descriptor);
-  }
-  return descriptors;
-}
-
-/**
- * For a deleted message's archived attachments, re-upload any locally saved
- * evidence and describe what happened to each attachment for the embed body.
- * @return {{lines: string[], ids: string[]}}
- */
-async function resolveAttachmentEvidence(client, entry) {
-  const lines = [];
-  const ids = [];
-  if (!entry) return { lines, ids };
-
-  const attachments = entry.attachments;
-  if (typeof attachments === "number") {
-    if (attachments > 0) {
-      lines.push(
-        `_(${attachments} attachment${attachments > 1 ? "s" : ""} — recorded before evidence capture existed)_`
-      );
-    }
-    return { lines, ids };
-  }
-  if (!Array.isArray(attachments) || !attachments.length) return { lines, ids };
-
-  for (const att of attachments) {
-    const sizeLabel = humanReadableSize(att.size);
-    if (!att.evidencePath) {
-      lines.push(
-        `⚠️ \`${att.filename}\` (${sizeLabel}) — not preserved (too large or evidence capture was disabled)`
-      );
-      continue;
-    }
-
-    const bytes = readEvidence(att.evidencePath);
-    if (!bytes) {
-      lines.push(
-        `⚠️ \`${att.filename}\` (${sizeLabel}) — evidence copy was evicted before this deletion`
-      );
-      continue;
-    }
-
-    try {
-      const newId = await uploadAttachmentBytes({
-        bytes,
-        filename: att.filename,
-        contentType: att.contentType,
-        autumnUrl: client.configuration?.features?.autumn?.url,
-        authenticationHeader: client.authenticationHeader,
-        fetchImpl: fetchImplRef,
-      });
-      ids.push(newId);
-      lines.push(
-        `✅ \`${att.filename}\` (${sizeLabel}) — preserved, attached above`
-      );
-    } catch (err) {
-      debugLog(
-        `evidence re-upload failed for ${att.id}: ${err?.message || err}`
-      );
-      lines.push(
-        `⚠️ \`${att.filename}\` (${sizeLabel}) — preserved locally but re-upload failed`
-      );
-    }
-  }
-
-  return { lines, ids };
-}
+const BULK_DELETE_MAX_REUPLOADS = 10;
 
 // ═══════════════════════════════════════════════════
 //  Event wiring
@@ -675,7 +496,8 @@ export function initAuditLog(
     const attachments = await buildAttachmentDescriptors(
       client,
       message.id,
-      message.attachments
+      message.attachments,
+      { fetchImpl: fetchImplRef, debugLog }
     );
 
     recordMessage({
@@ -734,7 +556,10 @@ export function initAuditLog(
     debugLog(`MessageDelete ${event.id}: logging (archived=${Boolean(entry)})`);
 
     const { lines: attachmentLines, ids: preservedAttachmentIds } =
-      await resolveAttachmentEvidence(client, entry);
+      await resolveAttachmentEvidence(client, entry, {
+        fetchImpl: fetchImplRef,
+        debugLog,
+      });
 
     const suspects = await computeSuspects(client, channel, entry?.authorId);
     const embed = buildAuditMessageDeleteEmbed({
@@ -772,11 +597,17 @@ export function initAuditLog(
 
     debugLog(`MessageUpdate ${event.id}: logging (archived=${Boolean(entry)})`);
 
+    const attachmentCount = Array.isArray(entry?.attachments)
+      ? entry.attachments.length
+      : typeof entry?.attachments === "number"
+        ? entry.attachments
+        : 0;
     const embed = buildAuditMessageEditEmbed({
       author: entry ? formatUser(client, entry.authorId) : "*unknown*",
       channelId: event.channel,
       before: entry ? before : undefined,
       after,
+      attachmentCount,
     });
     emitAudit(send, serverId, embed);
 
@@ -807,14 +638,37 @@ export function initAuditLog(
         : `*unknown message ${id} (not archived)*`
     );
 
+    // Bulk deletes can carry many attachments at once; cap total re-uploads
+    // across the whole event rather than per message so a large raid purge
+    // can't spawn an unbounded number of Autumn uploads.
+    const attachmentLines = [];
+    const preservedAttachmentIds = [];
+    let reuploadBudget = BULK_DELETE_MAX_REUPLOADS;
+    for (const { entry } of relevant) {
+      if (!entry) continue;
+      const { lines, ids } = await resolveAttachmentEvidence(client, entry, {
+        fetchImpl: fetchImplRef,
+        debugLog,
+        maxReuploads: reuploadBudget,
+      });
+      if (!lines.length) continue;
+      attachmentLines.push(
+        `**${formatUser(client, entry.authorId)}:**`,
+        ...lines
+      );
+      preservedAttachmentIds.push(...ids);
+      reuploadBudget -= ids.length;
+    }
+
     const suspects = await computeSuspects(client, channel);
     const embed = buildAuditBulkDeleteEmbed({
       channelId: event.channel,
       count: relevant.length,
       entries: shown,
+      attachmentLines,
       suspects: formatSuspects(null, suspects.moderatorLabels),
     });
-    emitAudit(send, serverId, embed);
+    emitAudit(send, serverId, embed, preservedAttachmentIds);
   }
 
   async function handleRawMemberLeave(client, send, event) {

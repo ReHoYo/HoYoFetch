@@ -16,8 +16,10 @@ import {
   getAllChannelExclusions,
   getAuditLogChannel,
   getExcludedChannels,
+  getPrivacyDigestState,
   isChannelExcluded,
   removeChannelExclusion,
+  setPrivacyDigestState,
 } from "./store.js";
 import { auditAlias, isSafeId, safeErrorSummary } from "./security.js";
 
@@ -26,15 +28,24 @@ export const EXCLUSION_CHALLENGE_TTL_MS = APPROVAL_CHALLENGE_TTL_MS;
 export const EXCLUSION_MAX_ATTEMPTS = APPROVAL_MAX_ATTEMPTS;
 
 const CHALLENGE_KIND = "channel_exclusion";
-const DIGEST_INTERVAL_MS = 24 * 60 * 60 * 1_000;
+export const DIGEST_INTERVAL_MS = 24 * 60 * 60 * 1_000;
+// A restart-resilient digest can't rely on a single 24h setTimeout — a bot
+// that restarts more often than once a day (e.g. via /Restart) would keep
+// resetting that timer and the digest would never fire. Instead this polls
+// hourly and posts per-server only once persisted state shows a server's
+// window has actually elapsed, so a run of restarts just re-checks the same
+// persisted timestamp instead of losing progress.
+const DIGEST_TICK_MS = 60 * 60 * 1_000;
 
 const DEFAULT_STORE = Object.freeze({
   addChannelExclusion,
   getAllChannelExclusions,
   getAuditLogChannel,
   getExcludedChannels,
+  getPrivacyDigestState,
   isChannelExcluded,
   removeChannelExclusion,
+  setPrivacyDigestState,
 });
 
 function defaultRequestIdFactory() {
@@ -676,6 +687,51 @@ export function createChannelExclusion(
     return requestChange(message, "exclude", first);
   }
 
+  async function postDigestForServer(serverId, records) {
+    const auditChannelId = store.getAuditLogChannel(serverId);
+    if (!isSafeId(auditChannelId)) return;
+    try {
+      await sendProtected(auditChannelId, {
+        embeds: [
+          buildAuditEmbed(
+            "🔐 Daily Privacy Exclusion Digest",
+            [
+              `**Server:** ${serverLabel(serverId)}`,
+              "**Currently excluded channels:**",
+              ...records.map(
+                (record) =>
+                  `- ${channelLabel(record.channelId)} — approved <t:${Math.floor(
+                    record.excludedAt / 1000
+                  )}:R>`
+              ),
+              "Only message content is withheld; channel, role, permission, moderation, and membership events remain logged.",
+            ],
+            "#9B59B6"
+          ),
+        ],
+      });
+      // Only recorded on success — a failed send retries on the next hourly
+      // tick instead of silently skipping this server for a full day.
+      store.setPrivacyDigestState(serverId, now());
+      logger.log?.(
+        `🔐  channel-exclusion digest posted server=${auditAlias(serverId)}`
+      );
+    } catch (error) {
+      logger.warn?.(
+        `channel-exclusion: digest failed server=${auditAlias(
+          serverId
+        )} ${safeErrorSummary(error)}`
+      );
+    }
+  }
+
+  /**
+   * Post the digest for any server whose persisted `lastPostedAt` is null or
+   * more than a day old. Persisted (rather than timer-only) state means a
+   * process that restarts more often than once a day — /Restart exists as a
+   * command — still reaches every server's first tick instead of the
+   * previous fixed 24h `setInterval` restarting from zero on every boot.
+   */
   async function postDigest() {
     const grouped = new Map();
     for (const record of store.getAllChannelExclusions()) {
@@ -683,46 +739,24 @@ export function createChannelExclusion(
       records.push(record);
       grouped.set(record.serverId, records);
     }
+    const current = now();
     for (const [serverId, records] of grouped) {
-      const auditChannelId = store.getAuditLogChannel(serverId);
-      if (!isSafeId(auditChannelId)) continue;
-      try {
-        await sendProtected(auditChannelId, {
-          embeds: [
-            buildAuditEmbed(
-              "🔐 Daily Privacy Exclusion Digest",
-              [
-                `**Server:** ${serverLabel(serverId)}`,
-                "**Currently excluded channels:**",
-                ...records.map(
-                  (record) =>
-                    `- ${channelLabel(record.channelId)} — approved <t:${Math.floor(
-                      record.excludedAt / 1000
-                    )}:R>`
-                ),
-                "Only message content is withheld; channel, role, permission, moderation, and membership events remain logged.",
-              ],
-              "#9B59B6"
-            ),
-          ],
-        });
-      } catch (error) {
-        logger.warn?.(
-          `channel-exclusion: digest failed server=${auditAlias(
-            serverId
-          )} ${safeErrorSummary(error)}`
-        );
+      const { lastPostedAt } = store.getPrivacyDigestState(serverId);
+      if (
+        lastPostedAt !== null &&
+        current - lastPostedAt < DIGEST_INTERVAL_MS
+      ) {
+        continue;
       }
+      await postDigestForServer(serverId, records);
     }
   }
 
   function startDigest() {
     if (digestStarted) return;
     digestStarted = true;
-    const interval = scheduleInterval(
-      () => void postDigest(),
-      DIGEST_INTERVAL_MS
-    );
+    void postDigest();
+    const interval = scheduleInterval(() => void postDigest(), DIGEST_TICK_MS);
     interval?.unref?.();
   }
 

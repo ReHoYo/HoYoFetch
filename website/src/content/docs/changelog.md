@@ -3,6 +3,26 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Version 2.4.0
+
+### First-post gate
+
+- Added `/Post-Gate`, an Enka-approved review queue that holds a message instead of leaving it visible when it carries a link or an attachment **and** its author is a new account, a newly joined member, or has no other archived message in this server.
+- A held message is deleted immediately and posted to a dedicated review channel with a bounded evidence excerpt; a single recognized moderator clears it with ✅/❌ or `/Post-Gate approve|reject QUEUE_ID`.
+- Approving reposts the content as Irminsul, attributed to the original author. Rejecting discards it and increases the author's automod strike level, so a repeat offender escalates faster without applying a timeout by itself.
+- Turning the gate on, moving its review channel, and turning it off each require a fresh one-time code sent exclusively to Enka#4961, the same approval flow used by `/AuditLog` and `/Exclude-Channel`. Privacy-excluded channels are never gated, and recognized moderators are always exempt.
+- Unreviewed holds expire and are discarded after 7 days with no strike.
+
+### Consistent attachment logging
+
+- Bulk message deletes now resolve and re-upload preserved attachment evidence like single deletes and edits already did, instead of showing only text; re-uploads are capped at 10 files per bulk event to bound worst-case load.
+- Edited messages now note how many attachments the message carries, since edits cannot change them.
+- Replaced the single generic "not preserved (too large or evidence capture was disabled)" line with the actual reason — evidence capture disabled, an untrusted URL, over the size cap, a failed download, or a local save error — consolidated into one shared module (`attachment-evidence.js`) so every caller reports it identically.
+
+### Daily privacy digest fix
+
+- Fixed the privacy exclusion digest never firing for a bot that restarts more often than once a day: it previously reset a fixed 24-hour timer on every boot with no memory of when it last posted. The digest now persists each server's last-posted time and polls hourly, so a restart no longer loses progress and a failed send retries within the hour instead of silently skipping a day.
+
 ## Version 2.3.0
 
 ### Account lookup beyond the server

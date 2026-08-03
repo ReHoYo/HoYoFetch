@@ -7,6 +7,8 @@ Irminsul moderation is designed around exact permission checks, explicit reasons
 
 Member safety reports use the same protected-record destination but are not moderation actions. A report can raise a staff-review priority when several independent members report the same account, but it never changes the target's account or server state.
 
+Anti-abuse coverage is layered: automod reacts to _behavior_ (message bursts, floods, join surges) that needs several messages to show itself, while the [first-post gate](/HoYoFetch/moderation/post-gate/) reacts to _one_ message — a link or attachment as a new or first-time poster's opening move — before behavioral signals have a chance to accumulate.
+
 ## Before the first action
 
 Configure an audit destination and test it:
@@ -36,8 +38,9 @@ Stoat does not provide command interaction buttons, so Irminsul uses reactions f
 - a duration picker when `/Mute` omits its duration, which doubles as that command's confirmation;
 - a 1h–1y message-cleanup picker after every ban, kick, and mute;
 - a window picker and then a ✅/❌ confirmation for `/Purge-User`;
-- ten-minute undo windows for bans and mutes; and
-- staff approvals for automod ban cases.
+- ten-minute undo windows for bans and mutes;
+- staff approvals for automod ban cases; and
+- ✅/❌ approve/discard review of a held first post.
 
 Reaction handlers re-check the reacting moderator's current permission before applying the action, and only the moderator who ran the command can answer their own picker.
 
@@ -47,4 +50,4 @@ History cleanup covers only messages Irminsul observed while archiving was activ
 
 Results never claim complete erasure. Every message Irminsul could not delete is reported by cause — already gone from Stoat, blocked by a missing Manage Messages permission, still rate limited, or failed outright — so a partial result says what to do about it rather than only how many were lost. A message that Stoat no longer has is reconciled into the archive rather than counted as a failure, so repeat cleanups stop retrying it.
 
-Continue to [Spam reports](/HoYoFetch/moderation/spam-reports/), [Manual actions](/HoYoFetch/moderation/manual-actions/), [Audit log](/HoYoFetch/moderation/audit-log/), or [Automod](/HoYoFetch/moderation/automod/).
+Continue to [Spam reports](/HoYoFetch/moderation/spam-reports/), [Manual actions](/HoYoFetch/moderation/manual-actions/), [Audit log](/HoYoFetch/moderation/audit-log/), [Automod](/HoYoFetch/moderation/automod/), or [First-post gate](/HoYoFetch/moderation/post-gate/).

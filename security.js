@@ -54,6 +54,17 @@ export function getCommandAccess(body, commandGameMap = {}) {
   if (body === "automod" || body.startsWith("automod ")) {
     return COMMAND_ACCESS.FETCH_MANAGER;
   }
+  if (
+    body === "post-gate approve" ||
+    body.startsWith("post-gate approve ") ||
+    body === "post-gate reject" ||
+    body.startsWith("post-gate reject ")
+  ) {
+    return COMMAND_ACCESS.MANAGE_MESSAGES;
+  }
+  if (body === "post-gate" || body.startsWith("post-gate ")) {
+    return COMMAND_ACCESS.FETCH_MANAGER;
+  }
   const baseCommand = body.split(/\s+/, 1)[0];
   if (COMMAND_ACCESS_BY_ROUTE[baseCommand]) {
     return COMMAND_ACCESS_BY_ROUTE[baseCommand];

@@ -321,3 +321,97 @@ test("reversible moderation actions support message lookup and expiry", () => {
   store.pruneModerationActions(now + 25_000);
   assert.equal(store.getModerationAction("MDACTION1"), null);
 });
+
+test("post-gate configuration defaults off and persists mode + review channel", () => {
+  assert.deepEqual(store.getPostGateConfig("server-postgate"), {
+    mode: "off",
+    reviewChannelId: null,
+    updatedAt: null,
+  });
+  store.setPostGateConfig("server-postgate", {
+    mode: "hold",
+    reviewChannelId: "channel-postgate",
+  });
+  const config = store.getPostGateConfig("server-postgate");
+  assert.equal(config.mode, "hold");
+  assert.equal(config.reviewChannelId, "channel-postgate");
+  assert.ok(config.updatedAt);
+  assert.doesNotThrow(() =>
+    JSON.parse(readFileSync(join(dataDir, "post_gate.json"), "utf-8"))
+  );
+});
+
+test("post-gate queue supports lookup by id and by review message, pending listing, and eviction cleanup", () => {
+  const now = Date.now();
+  store.createHeldPost({
+    queueId: "PG1",
+    serverId: "PGSERVER",
+    channelId: "PGCHANNEL",
+    userId: "PGUSER",
+    messageId: "PGMSG1",
+    content: "check this link",
+    attachments: [],
+    reviewMessageId: "PGREVIEW1",
+    status: "pending",
+    createdAt: now,
+    expiresAt: now + 7 * 24 * 60 * 60 * 1000,
+  });
+  assert.equal(store.getHeldPost("PG1").queueId, "PG1");
+  assert.equal(store.findHeldPostByReviewMessage("PGREVIEW1").queueId, "PG1");
+  assert.equal(store.getPendingHeldPosts("PGSERVER").length, 1);
+
+  store.updateHeldPost("PG1", {
+    status: "approved",
+    reviewedBy: "MOD1",
+    reviewedAt: now,
+  });
+  assert.equal(store.getPendingHeldPosts("PGSERVER").length, 0);
+  assert.equal(store.getHeldPost("PG1").status, "approved");
+
+  // Resolved entries stick around for a 7-day accountability window, then
+  // their evidence is released.
+  const evidencePaths = store.prunePostGateQueue(now + 6 * 24 * 60 * 60 * 1000);
+  assert.deepEqual(evidencePaths, []);
+  assert.ok(store.getHeldPost("PG1"));
+
+  store.updateHeldPost("PG1", {
+    attachments: [{ filename: "x.png", evidencePath: "/tmp/pg-evidence.png" }],
+  });
+  const releasedPaths = store.prunePostGateQueue(now + 8 * 24 * 60 * 60 * 1000);
+  assert.deepEqual(releasedPaths, ["/tmp/pg-evidence.png"]);
+  assert.equal(store.getHeldPost("PG1"), null);
+});
+
+test("post-gate queue reports pending entries whose review window has elapsed", () => {
+  const now = Date.now();
+  store.createHeldPost({
+    queueId: "PG2",
+    serverId: "PGSERVER2",
+    channelId: "PGCHANNEL2",
+    userId: "PGUSER2",
+    messageId: "PGMSG2",
+    content: "",
+    attachments: [],
+    reviewMessageId: "PGREVIEW2",
+    status: "pending",
+    createdAt: now,
+    expiresAt: now + 1_000,
+  });
+  assert.equal(store.getExpiredPendingPosts(now).length, 0);
+  const expired = store.getExpiredPendingPosts(now + 2_000);
+  assert.equal(expired.length, 1);
+  assert.equal(expired[0].queueId, "PG2");
+});
+
+test("privacy digest state round-trips per server and defaults to null", () => {
+  assert.deepEqual(store.getPrivacyDigestState("digest-server"), {
+    lastPostedAt: null,
+  });
+  store.setPrivacyDigestState("digest-server", 123_456);
+  assert.deepEqual(store.getPrivacyDigestState("digest-server"), {
+    lastPostedAt: 123_456,
+  });
+  assert.doesNotThrow(() =>
+    JSON.parse(readFileSync(join(dataDir, "privacy_digest.json"), "utf-8"))
+  );
+});

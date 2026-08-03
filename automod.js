@@ -266,6 +266,19 @@ function createCaseId() {
   return `AM${randomBytes(6).toString("hex").toUpperCase()}`;
 }
 
+/**
+ * The strike-ladder arithmetic shared by automod's own containment flow and
+ * any other module (e.g. post-gate.js) that needs to bump a strike level
+ * without applying a timeout of its own.
+ */
+export function nextStrikeLevel(stored, now = Date.now()) {
+  const quietReset =
+    !stored ||
+    !Number.isFinite(stored.lastContainedAt) ||
+    now - stored.lastContainedAt >= AUTOMOD_LIMITS.strikeResetMs;
+  return quietReset ? 1 : Math.min(4, stored.level + 1);
+}
+
 export function formatAge(value, now) {
   const time = asTime(value);
   if (time === null || time > now) return "unknown";
@@ -425,11 +438,7 @@ export function createAutomod(
       !quietReset &&
       Number(stored.timeoutUntil) > current &&
       memberTimeout > current;
-    const level = active
-      ? stored.level
-      : quietReset
-        ? 1
-        : Math.min(4, stored.level + 1);
+    const level = active ? stored.level : nextStrikeLevel(stored, current);
     return {
       active,
       level,
