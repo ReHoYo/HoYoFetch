@@ -7,20 +7,20 @@ Irminsul uses Stoat's **effective permissions**, not role names. A role called â
 
 ## Access matrix
 
-| Capability                                                 | Commands                                                                                                                    |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Every human server member                                  | `/Fetch*`, `/HelpHoyoFetch`, `/Docs`, `/Report-Spam`                                                                        |
-| Owner, Manage Server, or a recognized moderator capability | Auto-fetch, emoji mode, audit-log configuration/testing and privacy exclusions, restart, automod configuration, `/Get-Info` |
-| Ban Members                                                | `/Ban`, automod ban approval                                                                                                |
-| Kick Members                                               | `/Kick`                                                                                                                     |
-| Timeout Members                                            | `/Mute`, `/Automod release`                                                                                                 |
-| Manage Messages in the current channel                     | `/Purge-User`; also required for `/Ban`, `/Kick`, and `/Mute` message cleanup                                               |
+| Capability                                                 | Commands                                                                                                                                             |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Every human server member                                  | `/Fetch*`, `/HelpHoyoFetch`, `/Docs`, `/Report-Spam`                                                                                                 |
+| Owner, Manage Server, or a recognized moderator capability | Auto-fetch, emoji mode, audit-log configuration/testing and privacy exclusions, restart, automod configuration, post-gate configuration, `/Get-Info` |
+| Ban Members                                                | `/Ban`, automod ban approval                                                                                                                         |
+| Kick Members                                               | `/Kick`                                                                                                                                              |
+| Timeout Members                                            | `/Mute`, `/Automod release`                                                                                                                          |
+| Manage Messages in the current channel                     | `/Purge-User`; also required for `/Ban`, `/Kick`, and `/Mute` message cleanup, and for `/Post-Gate approve\|reject` in the review channel            |
 
 Recognized moderator capabilities for management commands are **Kick Members**, **Ban Members**, **Timeout Members**, or effective **Manage Messages** in the current channel. The server owner and members with **Manage Server** also qualify.
 
 `/Get-Info` remains available under that recognized-moderator policy. Giving Irminsul **Ban Members** improves non-member results by allowing it to confirm bans and show the stored ban reason; without that permission, the report explicitly says a ban could not be ruled out.
 
-`/AuditLog` configuration and `/Exclude-Channel` use the recognized-moderator policy shown above. Enabling, moving, or disabling the audit log and adding or removing an exclusion still require a separate one-time code sent exclusively to **Enka#4961**. `/AuditLog status` and `/Test-AuditLog` are read-only and remain immediate.
+`/AuditLog` configuration, `/Exclude-Channel`, and `/Post-Gate` configuration all use the recognized-moderator policy shown above. Enabling, moving, or disabling any of them still requires a separate one-time code sent exclusively to **Enka#4961**. `/AuditLog status`, `/Test-AuditLog`, `/Post-Gate status`, and reviewing a held post with `/Post-Gate approve|reject` are read-only or immediately reversible and never require that approval.
 
 `/Report-Spam` is member-accessible, but Irminsul itself must have freshly verified **Manage Messages** in the source channel. This lets it remove the sensitive invocation before parsing or recording the report.
 

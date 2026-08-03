@@ -351,6 +351,13 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ## 📝 Changelog
 
+### v2.4.0
+
+- Added `/Post-Gate`, an Enka-approved first-post review queue that holds a link or attachment from a new account, a newly joined member, or a first-time poster, instead of leaving it visible unreviewed
+- A held message is deleted and posted to a review channel for a single moderator's ✅/❌ decision; approving reposts it attributed to the author, rejecting discards it and raises the author's automod strike level, and unreviewed holds expire after 7 days
+- Fixed bulk message deletes never showing preserved attachment evidence, added an attachment count to edited-message records, and replaced the single generic "not preserved" reason with the actual cause (disabled, untrusted URL, over the size cap, failed download, or a local save error)
+- Fixed the daily privacy exclusion digest never firing for a bot that restarts more often than once a day; it now persists each server's last-posted time and polls hourly instead of resetting a fixed 24-hour timer on every boot
+
 ### v2.3.0
 
 - Expanded `/Get-Info` into a tiered lookup for current, departed, banned, never-joined, invisible, and deleted accounts, with ID-derived creation dates, ban reasons, platform flags, and named cached mutual servers

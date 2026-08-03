@@ -14,6 +14,7 @@ The bot persists data needed to avoid duplicate announcements and resume configu
 - audit destinations and server-setting baselines;
 - Enka-approved channel exclusions in `channel_exclusions.json`;
 - automod modes, cases, approvals, strikes, and reversible actions;
+- the post gate's mode, review channel, and pending/resolved held-post queue;
 - bounded spam-report correlation metadata without member-supplied reasons; and
 - protected-message records needed to restore deleted audit entries.
 
@@ -24,6 +25,10 @@ When audit logging is active, server messages are journaled so later edit and de
 The archive is operational evidence. Restrict host access, include it in your community's retention policy, and avoid copying it into public bug reports.
 
 An approved `/Exclude-Channel` request purges that channel's existing archive entries and prevents new message content from entering the archive. Removing an exclusion affects only future messages; purged content is not restored.
+
+## First-post gate queue
+
+A message held by `/Post-Gate` (see [First-post gate](/HoYoFetch/moderation/post-gate/)) is removed from its original channel and its content and any captured attachment evidence are retained in the held-post queue pending a moderator decision. Approving reposts the content publicly; rejecting or letting the hold expire after 7 days discards the content and its evidence. Privacy-excluded channels are never gated, since the gate would otherwise capture content that exclusion is meant to withhold.
 
 ## Attachments
 

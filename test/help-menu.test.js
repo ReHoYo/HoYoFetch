@@ -28,7 +28,7 @@ test("help menu opens on page one and seeds both navigation reactions", async ()
   const { menu, requests, sent } = makeHarness();
   await menu.open({ authorId: "USER123", channelId: "CHANNEL123" });
 
-  assert.match(sent[0].data.embeds[0].title, /\(1\/2\)/);
+  assert.match(sent[0].data.embeds[0].title, /\(1\/3\)/);
   assert.deepEqual(
     requests.map(({ method }) => method),
     ["PUT", "PUT"]
@@ -65,7 +65,7 @@ test("only the invoker can turn pages and navigation wraps", async () => {
     emoji_id: HELP_NEXT_EMOJI,
   });
   assert.equal(requests[0].method, "PATCH");
-  assert.match(requests[0].body.embeds[0].title, /\(2\/2\)/);
+  assert.match(requests[0].body.embeds[0].title, /\(2\/3\)/);
   assert.equal(requests[1].method, "DELETE");
   assert.match(requests[1].path, /user_id=USER123$/);
 
@@ -75,5 +75,13 @@ test("only the invoker can turn pages and navigation wraps", async () => {
     user_id: "USER123",
     emoji_id: HELP_NEXT_EMOJI,
   });
-  assert.match(requests[2].body.embeds[0].title, /\(1\/2\)/);
+  assert.match(requests[2].body.embeds[0].title, /\(3\/3\)/);
+
+  await menu.handleRawEvent({
+    type: "MessageReact",
+    id: "HELP123",
+    user_id: "USER123",
+    emoji_id: HELP_NEXT_EMOJI,
+  });
+  assert.match(requests[4].body.embeds[0].title, /\(1\/3\)/);
 });

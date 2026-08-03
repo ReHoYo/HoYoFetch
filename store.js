@@ -34,6 +34,9 @@ const AUTOMOD_STRIKES_PATH = join(DATA_DIR, "automod_strikes.json");
 const MODERATION_ACTIONS_PATH = join(DATA_DIR, "moderation_actions.json");
 const SPAM_REPORTS_PATH = join(DATA_DIR, "spam_reports.json");
 const CHANNEL_EXCLUSIONS_PATH = join(DATA_DIR, "channel_exclusions.json");
+const POST_GATE_PATH = join(DATA_DIR, "post_gate.json");
+const POST_GATE_QUEUE_PATH = join(DATA_DIR, "post_gate_queue.json");
+const PRIVACY_DIGEST_PATH = join(DATA_DIR, "privacy_digest.json");
 
 // ── Helpers ────────────────────────────────────────
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -937,4 +940,151 @@ export function pruneModerationActions(now = Date.now()) {
     }
   }
   if (changed) persistModerationActions();
+}
+
+// ═══════════════════════════════════════════════════
+//  Post gate — held first-post review queue (post-gate.js)
+// ═══════════════════════════════════════════════════
+
+export const POST_GATE_MODES = new Set(["off", "hold"]);
+const MAX_HELD_POSTS = 1_000;
+
+let postGateConfigs = readJSON(POST_GATE_PATH, {});
+let postGateQueue = readJSON(POST_GATE_QUEUE_PATH, {});
+
+function normalisePostGateConfig(value = {}) {
+  return {
+    mode: POST_GATE_MODES.has(value.mode) ? value.mode : "off",
+    reviewChannelId:
+      typeof value.reviewChannelId === "string" ? value.reviewChannelId : null,
+    updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : null,
+  };
+}
+
+export function getPostGateConfig(serverId) {
+  return normalisePostGateConfig(postGateConfigs[serverId]);
+}
+
+export function setPostGateConfig(serverId, patch = {}) {
+  const previous = getPostGateConfig(serverId);
+  const next = normalisePostGateConfig({
+    ...previous,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  });
+  postGateConfigs[serverId] = next;
+  writeJSON(POST_GATE_PATH, postGateConfigs);
+  return { previous, current: next };
+}
+
+function persistPostGateQueue() {
+  writeJSON(POST_GATE_QUEUE_PATH, postGateQueue);
+}
+
+export function createHeldPost(record) {
+  postGateQueue[record.queueId] = structuredClone(record);
+  const excess = Object.keys(postGateQueue).length - MAX_HELD_POSTS;
+  if (excess > 0) {
+    const oldest = Object.values(postGateQueue)
+      .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
+      .slice(0, excess);
+    for (const entry of oldest) delete postGateQueue[entry.queueId];
+  }
+  persistPostGateQueue();
+  return structuredClone(postGateQueue[record.queueId]);
+}
+
+export function getHeldPost(queueId) {
+  const record = postGateQueue[queueId];
+  return record ? structuredClone(record) : null;
+}
+
+export function updateHeldPost(queueId, patch = {}) {
+  const record = postGateQueue[queueId];
+  if (!record) return null;
+  postGateQueue[queueId] = { ...record, ...structuredClone(patch) };
+  persistPostGateQueue();
+  return structuredClone(postGateQueue[queueId]);
+}
+
+export function findHeldPostByReviewMessage(reviewMessageId) {
+  const record = Object.values(postGateQueue).find(
+    (entry) => entry.reviewMessageId === reviewMessageId
+  );
+  return record ? structuredClone(record) : null;
+}
+
+export function getPendingHeldPosts(serverId) {
+  return Object.values(postGateQueue)
+    .filter(
+      (entry) => entry.serverId === serverId && entry.status === "pending"
+    )
+    .map((entry) => structuredClone(entry));
+}
+
+const RESOLVED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Return the pending entries whose review window has elapsed, without
+ * mutating them — the caller (post-gate.js) owns sending the expiry notice
+ * and evidence cleanup, then reports the outcome back via updateHeldPost.
+ */
+export function getExpiredPendingPosts(now = Date.now()) {
+  return Object.values(postGateQueue)
+    .filter(
+      (record) =>
+        record.status === "pending" &&
+        Number.isFinite(record.expiresAt) &&
+        record.expiresAt <= now
+    )
+    .map((record) => structuredClone(record));
+}
+
+/**
+ * Drop resolved entries once they've sat resolved past the retention
+ * window. Returns evidence paths belonging to removed entries so the caller
+ * can free the underlying evidence bytes.
+ * @param {number} now
+ * @return {string[]}
+ */
+export function prunePostGateQueue(now = Date.now()) {
+  const evidencePaths = [];
+  let changed = false;
+  for (const [queueId, record] of Object.entries(postGateQueue)) {
+    const resolvedLongAgo =
+      record.status !== "pending" &&
+      Number.isFinite(record.reviewedAt) &&
+      now - record.reviewedAt > RESOLVED_RETENTION_MS;
+    if (resolvedLongAgo) {
+      for (const attachment of record.attachments ?? []) {
+        if (typeof attachment?.evidencePath === "string") {
+          evidencePaths.push(attachment.evidencePath);
+        }
+      }
+      delete postGateQueue[queueId];
+      changed = true;
+    }
+  }
+  if (changed) persistPostGateQueue();
+  return evidencePaths;
+}
+
+// ═══════════════════════════════════════════════════
+//  Privacy exclusion digest state (channel-exclusion.js)
+// ═══════════════════════════════════════════════════
+
+let privacyDigestState = readJSON(PRIVACY_DIGEST_PATH, {});
+
+export function getPrivacyDigestState(serverId) {
+  const record = privacyDigestState[serverId];
+  return {
+    lastPostedAt: Number.isFinite(record?.lastPostedAt)
+      ? record.lastPostedAt
+      : null,
+  };
+}
+
+export function setPrivacyDigestState(serverId, lastPostedAt) {
+  privacyDigestState[serverId] = { lastPostedAt };
+  writeJSON(PRIVACY_DIGEST_PATH, privacyDigestState);
 }

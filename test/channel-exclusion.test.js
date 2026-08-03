@@ -25,8 +25,10 @@ const OTHER_ID = "01HHHHHHHHHHHHHHHHHHHHHHHH";
 
 function makeStore() {
   const exclusions = new Map();
+  const digestState = new Map();
   return {
     exclusions,
+    digestState,
     getAuditLogChannel: () => AUDIT_ID,
     isChannelExcluded: (channelId) => exclusions.has(channelId),
     getExcludedChannels: (serverId) =>
@@ -44,6 +46,12 @@ function makeStore() {
       exclusions.delete(channelId);
       return record;
     },
+    getPrivacyDigestState(serverId) {
+      return { lastPostedAt: digestState.get(serverId) ?? null };
+    },
+    setPrivacyDigestState(serverId, lastPostedAt) {
+      digestState.set(serverId, lastPostedAt);
+    },
   };
 }
 
@@ -53,6 +61,7 @@ function makeHarness({
   clock = 1_800_000_000_000,
   approverUserId,
   archivedEvidence = [],
+  sendProtectedFails = false,
 } = {}) {
   let current = clock;
   const store = makeStore();
@@ -62,6 +71,7 @@ function makeHarness({
   const requests = [];
   const purgedChannels = [];
   const removedEvidence = [];
+  const intervalCallbacks = [];
   const channels = new Map([
     [
       SOURCE_ID,
@@ -123,6 +133,7 @@ function makeHarness({
       return { _id: `RESPONSE${++nextMessage}` };
     },
     sendProtected: async (channelId, payload) => {
+      if (sendProtectedFails) throw new Error("send failed");
       protectedLogs.push({ channelId, payload });
       return { _id: `PROTECTED${++nextMessage}` };
     },
@@ -141,7 +152,10 @@ function makeHarness({
       return true;
     },
     scheduleTimeout: () => ({ unref() {} }),
-    scheduleInterval: () => ({ unref() {} }),
+    scheduleInterval: (fn) => {
+      intervalCallbacks.push(fn);
+      return { unref() {} };
+    },
     logger: { log() {}, warn() {} },
   });
 
@@ -154,6 +168,7 @@ function makeHarness({
     requests,
     purgedChannels,
     removedEvidence,
+    intervalCallbacks,
     advance(ms) {
       current += ms;
     },
@@ -381,4 +396,108 @@ test("removing an exclusion requires a fresh challenge", async () => {
   );
   assert.equal(removed, true);
   assert.equal(harness.store.isChannelExcluded(TARGET_ID), false);
+});
+
+test("the privacy digest posts a server whose window is overdue and records the timestamp", async () => {
+  const clock = 1_800_000_000_000;
+  const harness = makeHarness({ clock });
+  harness.store.addChannelExclusion({
+    channelId: TARGET_ID,
+    serverId: SERVER_ID,
+    excludedAt: clock,
+    requestedBy: MOD_ID,
+    approvedBy: APPROVER_ID,
+    requestId: "CE1",
+  });
+
+  await harness.coordinator.postDigest();
+
+  assert.equal(harness.protectedLogs.length, 1);
+  assert.equal(
+    harness.protectedLogs[0].payload.embeds[0].title,
+    "🔐 Daily Privacy Exclusion Digest"
+  );
+  assert.equal(harness.store.digestState.get(SERVER_ID), clock);
+});
+
+test("the privacy digest skips a server whose persisted timestamp is still recent — the restart case that broke it", async () => {
+  const clock = 1_800_000_000_000;
+  const harness = makeHarness({ clock });
+  harness.store.addChannelExclusion({
+    channelId: TARGET_ID,
+    serverId: SERVER_ID,
+    excludedAt: clock,
+    requestedBy: MOD_ID,
+    approvedBy: APPROVER_ID,
+    requestId: "CE1",
+  });
+  // Simulate a bot that restarted a minute ago: startDigest used to reset a
+  // fixed 24h setInterval from zero on every boot, so a bot restarting more
+  // often than daily never reached the first tick. Persisted state fixes
+  // this — a recent post is honored across a restart instead of resetting.
+  harness.store.setPrivacyDigestState(SERVER_ID, clock - 60_000);
+
+  await harness.coordinator.postDigest();
+
+  assert.equal(harness.protectedLogs.length, 0);
+  assert.equal(harness.store.digestState.get(SERVER_ID), clock - 60_000);
+});
+
+test("the privacy digest posts once its window has elapsed", async () => {
+  const clock = 1_800_000_000_000;
+  const harness = makeHarness({ clock });
+  harness.store.addChannelExclusion({
+    channelId: TARGET_ID,
+    serverId: SERVER_ID,
+    excludedAt: clock,
+    requestedBy: MOD_ID,
+    approvedBy: APPROVER_ID,
+    requestId: "CE1",
+  });
+  harness.store.setPrivacyDigestState(SERVER_ID, clock - 25 * 60 * 60 * 1_000);
+
+  await harness.coordinator.postDigest();
+
+  assert.equal(harness.protectedLogs.length, 1);
+  assert.equal(harness.store.digestState.get(SERVER_ID), clock);
+});
+
+test("a failed digest send does not record a timestamp, so it retries next tick", async () => {
+  const clock = 1_800_000_000_000;
+  const harness = makeHarness({ clock, sendProtectedFails: true });
+  harness.store.addChannelExclusion({
+    channelId: TARGET_ID,
+    serverId: SERVER_ID,
+    excludedAt: clock,
+    requestedBy: MOD_ID,
+    approvedBy: APPROVER_ID,
+    requestId: "CE1",
+  });
+
+  await harness.coordinator.postDigest();
+
+  assert.equal(harness.protectedLogs.length, 0);
+  assert.equal(harness.store.digestState.has(SERVER_ID), false);
+});
+
+test("startDigest ticks immediately, installs an hourly poll, and is idempotent", async () => {
+  const harness = makeHarness();
+  harness.store.addChannelExclusion({
+    channelId: TARGET_ID,
+    serverId: SERVER_ID,
+    excludedAt: 1_800_000_000_000,
+    requestedBy: MOD_ID,
+    approvedBy: APPROVER_ID,
+    requestId: "CE1",
+  });
+
+  harness.coordinator.startDigest();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(harness.protectedLogs.length, 1);
+  assert.equal(harness.intervalCallbacks.length, 1);
+
+  harness.coordinator.startDigest();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(harness.protectedLogs.length, 1);
+  assert.equal(harness.intervalCallbacks.length, 1);
 });

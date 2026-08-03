@@ -263,6 +263,30 @@ export const COMMAND_CATALOG = Object.freeze([
     ],
   },
   {
+    id: "post-gate",
+    section: COMMAND_SECTIONS.SETUP,
+    route: "post-gate",
+    access: "fetch_manager",
+    syntax: "/Post-Gate [action]",
+    summary:
+      "Hold a new or first-time poster's first link or attachment for review, after approval from Enka#4961.",
+    help: "Enka-approved first-post review queue _(admins/mods only)_",
+    permission:
+      "Server owner, Manage Server, or a recognized moderation capability; Enka#4961 must approve changes",
+    examples: [
+      "/Post-Gate status",
+      "/Post-Gate here",
+      "/Post-Gate #new-member-review",
+      "/Post-Gate off",
+      "/Post-Gate confirm 123456",
+    ],
+    notes: [
+      "Turning the gate on, moving its review channel, and turning it off each require a fresh one-time code sent to Enka#4961.",
+      "Holds trigger only when the message contains a link or an attachment, from an account created under 7 days ago, a member who joined under 24 hours ago, or a member with no other archived message in this server.",
+      "Recognized moderators are always exempt, and privacy-excluded channels are never gated.",
+    ],
+  },
+  {
     id: "restart",
     section: COMMAND_SECTIONS.SETUP,
     route: "restart",
@@ -369,6 +393,27 @@ export const COMMAND_CATALOG = Object.freeze([
       "For accounts cached in another mutual server, the report names up to three of those servers to authorized moderators.",
       "Signals are heuristics for a moderator to look at, not proof an account is a bot.",
       "Messages sent counts only what the archive observed while audit logging was active; deleted and purged messages are excluded.",
+    ],
+  },
+  {
+    id: "post-gate-review",
+    section: COMMAND_SECTIONS.MODERATION,
+    route: "post-gate approve",
+    routeAliases: ["post-gate reject"],
+    access: "manage_messages",
+    syntax: "/Post-Gate approve QUEUE_ID",
+    summary:
+      "Repost a held first post, or discard it and increase the author's automod strike level.",
+    help: "React ✅/❌ on the held-post review card, or use `/Post-Gate approve|reject QUEUE_ID` _(Manage Messages)_",
+    permission: "Manage Messages in the review channel",
+    examples: [
+      "/Post-Gate approve PGABCDEF01234567",
+      "/Post-Gate reject PGABCDEF01234567",
+    ],
+    notes: [
+      "Approving reposts the held content as Irminsul, attributed to the original author.",
+      "Rejecting discards the held content and increases the author's automod strike level; it does not apply a timeout by itself.",
+      "Unreviewed holds expire and are discarded after 7 days.",
     ],
   },
   {

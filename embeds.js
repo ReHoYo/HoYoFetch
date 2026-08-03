@@ -95,22 +95,26 @@ function commandList(commands) {
 /**
  * Build the paginated help reference. Stoat has no interaction buttons, so
  * callers can attach ◀️/▶️ reactions and replace the embed in place.
+ *
+ * Split by section rather than one page per few sections — Member and Setup
+ * used to share a page, but the catalog has grown past a single 2,000-char
+ * embed description, so each section now gets its own page. help-menu.js's
+ * navigation is page-count-agnostic, so this scales without further changes.
  */
 export function buildHelpEmbeds(prefix) {
-  const utilityCommands = [
-    ...getHelpCommandTuples(COMMAND_SECTIONS.MEMBER, prefix),
-    ...getHelpCommandTuples(COMMAND_SECTIONS.SETUP, prefix),
-  ];
+  const memberCommands = getHelpCommandTuples(COMMAND_SECTIONS.MEMBER, prefix);
+  const setupCommands = getHelpCommandTuples(COMMAND_SECTIONS.SETUP, prefix);
   const moderationCommands = getHelpCommandTuples(
     COMMAND_SECTIONS.MODERATION,
     prefix
   );
+  const total = 3;
 
   return [
     {
-      title: "📖 Irminsul Help — Codes, Safety & Setup (1/2)",
+      title: `📖 Irminsul Help — Codes & Games (1/${total})`,
       description:
-        commandList(utilityCommands) +
+        commandList(memberCommands) +
         "\n\n_Use ▶️. Commands ignore case._\n" +
         `_Full reference: [Irminsul Docs](${DOCS_URL})_\n` +
         "_Sources: [HoYo](https://hoyo-codes.seria.moe), [HI3](https://api.ennead.cc), [Game8: NTE + WuWa](https://game8.co)_",
@@ -118,7 +122,16 @@ export function buildHelpEmbeds(prefix) {
       icon_url: HELP_ICON,
     },
     {
-      title: "🛡️ Irminsul Help — Moderation (2/2)",
+      title: `⚙️ Irminsul Help — Safety & Setup (2/${total})`,
+      description:
+        "🔒 **Admin/mod-only commands:** regular members cannot use the commands on this page.\n\n" +
+        commandList(setupCommands) +
+        "\n\n_Use ◀️/▶️ to move between pages._",
+      colour: "#3498DB",
+      icon_url: HELP_ICON,
+    },
+    {
+      title: `🛡️ Irminsul Help — Moderation (3/${total})`,
       description:
         "🔒 **Moderator-only commands:** regular members cannot use the commands on this page. Each action requires the matching moderation permission shown below.\n\n" +
         "**Before taking a manual action:** configure an audit channel with `/AuditLog here`. Ban, kick, mute, purge, and release require exactly one member/ID plus a mandatory `reason:` (maximum 300 characters).\n\n" +
@@ -235,6 +248,7 @@ export function buildAuditBulkDeleteEmbed({
   channelId,
   count = 0,
   entries = [],
+  attachmentLines = [],
   suspects,
 } = {}) {
   const shown = entries.slice(0, 5);
@@ -245,6 +259,8 @@ export function buildAuditBulkDeleteEmbed({
     "",
     ...shown,
   ];
+  if (attachmentLines.length)
+    lines.push("", "**Attachments:**", ...attachmentLines);
   if (suspects) {
     lines.push(
       "",
@@ -259,17 +275,20 @@ export function buildAuditMessageEditEmbed({
   channelId,
   before,
   after,
+  attachmentCount = 0,
 } = {}) {
-  return buildAuditEmbed(
-    "✏️ Message Edited",
-    [
-      `**Author:** ${author}`,
-      `**Channel:** <#${channelId}>`,
-      `**Before:** ${auditText(before, 800, "*content unavailable — message predates the archive*")}`,
-      `**After:** ${auditText(after, 800, "*(no text)*")}`,
-    ],
-    "#F1C40F"
-  );
+  const lines = [
+    `**Author:** ${author}`,
+    `**Channel:** <#${channelId}>`,
+    `**Before:** ${auditText(before, 800, "*content unavailable — message predates the archive*")}`,
+    `**After:** ${auditText(after, 800, "*(no text)*")}`,
+  ];
+  if (attachmentCount > 0) {
+    lines.push(
+      `**Attachments:** ${attachmentCount} unchanged file${attachmentCount === 1 ? "" : "s"} on this message (edits cannot change attachments)`
+    );
+  }
+  return buildAuditEmbed("✏️ Message Edited", lines, "#F1C40F");
 }
 
 export function buildAuditMemberEmbed({

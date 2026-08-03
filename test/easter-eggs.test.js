@@ -46,11 +46,14 @@ test("easter egg commands map to the expected bundled images", async () => {
 test("easter egg commands stay hidden from help and the README", async () => {
   const helpEmbeds = buildHelpEmbeds("/");
   const publicHelp = JSON.stringify(helpEmbeds).toLowerCase();
-  assert.equal(helpEmbeds.length, 2);
+  assert.equal(helpEmbeds.length, 3);
   for (const helpEmbed of helpEmbeds) {
     assert.ok(helpEmbed.description.length <= 2_000);
   }
-  assert.match(helpEmbeds[1].description, /moderator-only commands/i);
+  assert.match(
+    helpEmbeds[helpEmbeds.length - 1].description,
+    /moderator-only commands/i
+  );
   const readme = (
     await readFile(new URL("../README.md", import.meta.url), "utf8")
   ).toLowerCase();

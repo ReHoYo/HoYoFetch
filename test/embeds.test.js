@@ -25,9 +25,9 @@ test("WuWa code embeds include reward emoji, in-game steps, and the correct sour
 });
 
 test("in-chat help attributes both Game8 code sources", () => {
-  const [help] = buildHelpEmbeds("/");
+  const [memberPage, setupPage] = buildHelpEmbeds("/");
 
-  assert.match(help.description, /Game8: NTE \+ WuWa/);
-  assert.match(help.description, /\/FetchWuWa/);
-  assert.match(help.description, /\/EnableFetchNTEWuWa/);
+  assert.match(memberPage.description, /Game8: NTE \+ WuWa/);
+  assert.match(memberPage.description, /\/FetchWuWa/);
+  assert.match(setupPage.description, /\/EnableFetchNTEWuWa/);
 });

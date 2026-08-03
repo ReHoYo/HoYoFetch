@@ -21,7 +21,6 @@ const {
   hydrateAuditMemberCache,
   initAuditLog,
   parseChannelArg,
-  snapshotMessage,
   truncate,
 } = await import("../auditlog.js");
 const { disableAuditLog, enableAuditLog } = await import("../store.js");
@@ -41,22 +40,6 @@ test("bounded message cache evicts FIFO and refreshes existing keys", () => {
   cache.set("three", { content: "third" });
   assert.deepEqual([...cache.keys()], ["one", "three"]);
   assert.equal(cache.get("one").content, "updated");
-
-  const snapshot = snapshotMessage(
-    {
-      id: "MESSAGE",
-      channelId: CHANNEL_ID,
-      authorId: "AUTHOR",
-      author: { username: "Alice" },
-      content: "hello",
-      attachments: [{ filename: "proof.png", size: 1_024 }],
-    },
-    { id: CHANNEL_ID, serverId: "SERVER" }
-  );
-  assert.equal(snapshot.authorLabel, "@Alice");
-  assert.deepEqual(snapshot.attachments, [
-    { filename: "proof.png", size: 1_024 },
-  ]);
 });
 
 test("diffFields omits no-ops and reports selected changes", () => {
@@ -403,6 +386,98 @@ async function waitForSend(sent, count = 1, timeoutMs = 1_000) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
+
+test("bulk delete preserves attachment evidence up to a per-event cap", async () => {
+  const serverId = "BULKATTACH_SERVER";
+  const sourceChannelId = "BULKATTACH_SOURCE";
+  const auditChannelId = "BULKATTACH_AUDIT";
+
+  const rawListeners = [];
+  const listeners = new Map();
+  const client = {
+    user: { id: "BOT1" },
+    users: new Map(),
+    servers: new Map(),
+    channels: new Map([
+      [sourceChannelId, { id: sourceChannelId, serverId, type: "TextChannel" }],
+    ]),
+    configuration: { features: { autumn: { url: "https://autumn.test" } } },
+    authenticationHeader: ["X-Bot-Token", "secret"],
+    events: {
+      on(name, listener) {
+        if (name === "event") rawListeners.push(listener);
+      },
+    },
+    on(name, listener) {
+      const existing = listeners.get(name) ?? [];
+      existing.push(listener);
+      listeners.set(name, existing);
+    },
+    emit(name, ...args) {
+      for (const listener of listeners.get(name) ?? []) listener(...args);
+    },
+    emitRaw(event) {
+      for (const listener of rawListeners) listener(event);
+    },
+  };
+
+  enableAuditLog(serverId, auditChannelId);
+  const sent = [];
+  let uploadCount = 0;
+  initAuditLog(client, {
+    sendProtected: async (chId, payload) => {
+      sent.push({ chId, payload });
+      return { _id: `SENT${sent.length}` };
+    },
+    request: async () => ({ ok: false, status: 404, data: undefined }),
+    fetchImpl: async (url, options) => {
+      if (options?.method === "POST") {
+        uploadCount += 1;
+        return { ok: true, json: async () => ({ id: `NEWATT${uploadCount}` }) };
+      }
+      return {
+        ok: true,
+        arrayBuffer: async () => new TextEncoder().encode("fake-bytes").buffer,
+      };
+    },
+  });
+
+  const MESSAGE_COUNT = 12;
+  const ids = [];
+  for (let i = 1; i <= MESSAGE_COUNT; i++) {
+    const id = `BULKMSG${i}`;
+    ids.push(id);
+    client.emit("messageCreate", {
+      id,
+      channelId: sourceChannelId,
+      authorId: "SPAMMER1",
+      content: "",
+      attachments: [
+        {
+          id: `ATT${i}`,
+          filename: `proof${i}.png`,
+          size: 500,
+          contentType: "image/png",
+          url: `https://autumn.test/attachments/ATT${i}`,
+        },
+      ],
+    });
+  }
+  // messageCreate's handler is async but emit() doesn't await it, so give
+  // evidence capture a few turns to finish before the bulk delete fires.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  client.emitRaw({ type: "BulkMessageDelete", channel: sourceChannelId, ids });
+  await waitForSend(sent, 1);
+
+  const { payload } = sent[0];
+  const description = payload.embeds[0].description;
+  assert.match(description, /\*\*Attachments:\*\*/);
+  assert.equal(payload.attachments.length, 10);
+  assert.match(description, /re-upload limit was already reached/);
+
+  disableAuditLog(serverId);
+});
 
 test("the enriched join log carries account details and flips to review on signals", async () => {
   const client = new Client();
