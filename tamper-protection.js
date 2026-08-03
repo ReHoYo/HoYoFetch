@@ -41,6 +41,24 @@ function channelIdFrom(channel) {
   return typeof channel === "string" ? channel : channel?.id;
 }
 
+export function buildMediaSafeRestorationPayload(payload) {
+  if (!payload?.attachments?.length) return null;
+  const restored = structuredClone(payload);
+  delete restored.attachments;
+  const notice =
+    "⚠️ This protected record originally carried Stoat-hosted media. " +
+    "Stoat removed those files with the deleted message; Irminsul keeps no VPS copy.";
+  if (restored.embeds?.length) {
+    const first = restored.embeds[0];
+    // Put the permanent media-loss notice first so buildRestoredEmbed's
+    // length bounding can never truncate it away on a full-size embed.
+    first.description = `${notice}\n\n${first.description || ""}`.trim();
+  } else {
+    restored.content = `${notice}\n\n${restored.content || ""}`.trim();
+  }
+  return restored;
+}
+
 /**
  * Build and bind one tamper-protection runtime.
  *
@@ -108,6 +126,7 @@ export function createTamperProtection(
     const outbound = structuredClone(payload);
     if (outbound.embeds?.length && !outbound.content) outbound.content = " ";
     const trackedPayload = structuredClone(outbound);
+    const restorationPayload = buildMediaSafeRestorationPayload(outbound);
     const result = await send(channelId, outbound);
 
     if (!isSafeId(result?._id)) {
@@ -121,7 +140,8 @@ export function createTamperProtection(
     const record = store.addProtectedMessage(
       channelId,
       result._id,
-      trackedPayload
+      trackedPayload,
+      restorationPayload
     );
     logger.log(`🔒  Tracking protected message ${logLabel(record)}`);
     return result;
@@ -185,18 +205,21 @@ export function createTamperProtection(
     if (floorRemaining > 0) await sleep(floorRemaining);
 
     const restorationCount = record.restorations + 1;
-    const payload = structuredClone(record.payload);
+    const mediaWasAttached = Boolean(record.payload?.attachments?.length);
+    const payload = structuredClone(
+      record.restorationPayload ?? record.payload
+    );
     if (payload.embeds?.length) {
       payload.embeds = [
-        buildRestoredEmbed(record.payload.embeds[0], restorationCount),
-        ...record.payload.embeds.slice(1),
+        buildRestoredEmbed(payload.embeds[0], restorationCount),
+        ...payload.embeds.slice(1),
       ];
       // Records created by the first tamper-protection release predate wire
       // payload canonicalisation and may not include this required field.
       if (!payload.content) payload.content = " ";
     } else if (payload.content) {
       payload.content =
-        `${record.payload.content}\n\n` + buildTamperNotice(restorationCount);
+        `${payload.content}\n\n` + buildTamperNotice(restorationCount);
     }
 
     const response = await request(
@@ -214,6 +237,7 @@ export function createTamperProtection(
         lastVerifiedAt: restoredAt,
         failures: 0,
         nextAttemptAt: 0,
+        mediaLost: record.mediaLost || mediaWasAttached,
       });
       logger.log(
         `🔒  Restored protected message ${logLabel(updated)} ` +

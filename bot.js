@@ -133,6 +133,7 @@ const channelExclusion = createChannelExclusion(client, {
   request: apiRequest,
   prefix: CONFIG.prefix,
   approvalGate,
+  runIntentionalDelete: tamperProtection.runIntentionalDelete,
 });
 const postGate = createPostGate(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
@@ -140,6 +141,7 @@ const postGate = createPostGate(client, {
   request: apiRequest,
   prefix: CONFIG.prefix,
   approvalGate,
+  runIntentionalDelete: tamperProtection.runIntentionalDelete,
 });
 client.on("messageCreate", (message) => {
   postGate

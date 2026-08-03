@@ -25,14 +25,14 @@ import {
   ENKA_APPROVER_USER_ID,
 } from "./approval-gate.js";
 import {
-  buildAttachmentDescriptors,
+  copyArchivedAttachments,
+  finaliseArchiveDescriptors,
   humanReadableSize,
-  resolveAttachmentEvidence,
+  prepareAttachmentCopies,
 } from "./attachment-evidence.js";
 import { AUTOMOD_LIMITS, nextStrikeLevel } from "./automod.js";
 import { parseChannelArg } from "./auditlog.js";
 import { buildAuditEmbed, buildStatusEmbed } from "./embeds.js";
-import { deleteEvidence } from "./evidence-store.js";
 import { countArchivedMessages } from "./message-archive.js";
 import { deriveAccountCreatedAt } from "./user-info.js";
 import {
@@ -127,7 +127,7 @@ export function createPostGate(
     codeFactory,
     approverUserId,
     approvalGate,
-    removeEvidence = deleteEvidence,
+    runIntentionalDelete,
     scheduleTimeout = setTimeout,
     scheduleInterval = setInterval,
   } = {}
@@ -626,9 +626,9 @@ export function createPostGate(
 
   function describeHeldAttachment(att) {
     const sizeLabel = humanReadableSize(att.size);
-    return att.evidencePath
-      ? `- \`${att.filename}\` (${sizeLabel}) — captured`
-      : `- \`${att.filename}\` (${sizeLabel}) — not captured (${att.skipReason ?? "unknown"})`;
+    return att.archiveAttachmentId
+      ? `- \`${att.filename}\` (${sizeLabel}) — Stoat-hosted below`
+      : `- \`${att.filename}\` (${sizeLabel}) — not archived (${att.skipReason ?? "unknown"})`;
   }
 
   function buildHoldReviewEmbed(record) {
@@ -679,11 +679,12 @@ export function createPostGate(
     resolveDecision
   ) {
     const messageId = message.id ?? message._id;
-    const attachments = await buildAttachmentDescriptors(
+    const prepared = await prepareAttachmentCopies(
       client,
-      messageId,
       message.attachments,
-      { fetchImpl }
+      {
+        fetchImpl,
+      }
     );
 
     const deleted = await request(
@@ -707,7 +708,8 @@ export function createPostGate(
       userId: message.authorId,
       messageId,
       content: message.content ?? "",
-      attachments,
+      attachments: prepared.descriptors,
+      reviewChannelId: config.reviewChannelId,
       reviewMessageId: null,
       status: "pending",
       createdAt,
@@ -716,11 +718,20 @@ export function createPostGate(
 
     const posted = await sendProtected(config.reviewChannelId, {
       embeds: [buildHoldReviewEmbed(record)],
+      ...(prepared.uploadIds.length ? { attachments: prepared.uploadIds } : {}),
     });
+    const finalAttachments = finaliseArchiveDescriptors(
+      prepared.descriptors,
+      posted
+    );
     if (isSafeId(posted?._id)) {
-      store.updateHeldPost(record.queueId, { reviewMessageId: posted._id });
+      store.updateHeldPost(record.queueId, {
+        reviewMessageId: posted._id,
+        attachments: finalAttachments,
+      });
       await seedReviewReactions(config.reviewChannelId, posted._id);
     } else {
+      store.updateHeldPost(record.queueId, { attachments: finalAttachments });
       logger.warn?.(
         `post-gate: could not post review card for queue=${auditAlias(record.queueId)}`
       );
@@ -832,6 +843,20 @@ export function createPostGate(
     );
   }
 
+  async function deleteReviewCard(record) {
+    if (!isSafeId(record.reviewMessageId)) return true;
+    const operation = async () => {
+      const response = await request(
+        "DELETE",
+        `/channels/${record.reviewChannelId ?? store.getPostGateConfig(record.serverId).reviewChannelId}/messages/${record.reviewMessageId}`
+      );
+      return Boolean(response.ok);
+    };
+    return typeof runIntentionalDelete === "function"
+      ? runIntentionalDelete(record.reviewMessageId, operation)
+      : operation();
+  }
+
   async function approve(queueId, moderatorId) {
     const record = store.getHeldPost(queueId);
     if (!record) return { outcome: "missing" };
@@ -842,11 +867,17 @@ export function createPostGate(
       return { outcome: "unauthorized" };
     }
 
-    const { ids: preservedAttachmentIds } = await resolveAttachmentEvidence(
-      client,
-      { attachments: record.attachments },
-      { fetchImpl }
-    );
+    let preservedAttachmentIds;
+    try {
+      preservedAttachmentIds = await copyArchivedAttachments(
+        client,
+        record.attachments,
+        { fetchImpl }
+      );
+    } catch (error) {
+      logFailure("held attachments unavailable", error);
+      return { outcome: "attachments_unavailable" };
+    }
 
     const attribution = `**Reposted for ${actorLabel(record.userId)} after moderator review:**`;
     const content = record.content
@@ -864,10 +895,13 @@ export function createPostGate(
       logFailure("repost failed", error);
       return { outcome: "repost_failed" };
     }
-
-    for (const attachment of record.attachments) {
-      if (attachment.evidencePath) removeEvidence(attachment.evidencePath);
+    if (!isSafeId(posted?._id)) {
+      logger.warn?.("post-gate: repost returned no trackable message id");
+      return { outcome: "repost_failed" };
     }
+
+    const reviewDeleted = await deleteReviewCard(record);
+    if (!reviewDeleted) logger.warn?.("post-gate: review card cleanup failed");
     store.updateHeldPost(queueId, {
       status: "approved",
       reviewedBy: moderatorId,
@@ -890,9 +924,8 @@ export function createPostGate(
       return { outcome: "unauthorized" };
     }
 
-    for (const attachment of record.attachments) {
-      if (attachment.evidencePath) removeEvidence(attachment.evidencePath);
-    }
+    const reviewDeleted = await deleteReviewCard(record);
+    if (!reviewDeleted) logger.warn?.("post-gate: review card cleanup failed");
 
     const current = now();
     const stored = store.getAutomodStrike(record.serverId, record.userId);
@@ -1015,6 +1048,8 @@ export function createPostGate(
           "Fresh permission verification did not confirm Manage Messages.",
         repost_failed:
           "Approval was authorized, but Irminsul could not repost the content.",
+        attachments_unavailable:
+          "Approval was not completed because every held attachment could not be copied from Stoat. The queue remains pending for rejection or another review attempt.",
       };
       await respond(
         channelIdFrom(message),
@@ -1049,9 +1084,9 @@ export function createPostGate(
   async function expireOverdue() {
     const current = now();
     for (const record of store.getExpiredPendingPosts(current)) {
-      for (const attachment of record.attachments ?? []) {
-        if (attachment.evidencePath) removeEvidence(attachment.evidencePath);
-      }
+      const reviewDeleted = await deleteReviewCard(record);
+      if (!reviewDeleted)
+        logger.warn?.("post-gate: review card cleanup failed");
       store.updateHeldPost(record.queueId, {
         status: "expired",
         reviewedAt: current,
@@ -1072,7 +1107,7 @@ export function createPostGate(
   async function maintainQueue() {
     try {
       await expireOverdue();
-      store.prunePostGateQueue(now()).forEach((path) => removeEvidence(path));
+      store.prunePostGateQueue(now());
     } catch (error) {
       logFailure("queue maintenance failed", error);
     }

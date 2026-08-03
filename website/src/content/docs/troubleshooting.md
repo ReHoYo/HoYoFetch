@@ -54,14 +54,17 @@ The bot must be able to send messages and embeds in the selected channel.
 
 The message was sent before audit logging was enabled, while Irminsul was offline, or after its archived copy aged out. Stoat only sends the ID during deletion, so content not observed earlier cannot be reconstructed.
 
-## Attachment evidence was not preserved
+## An attachment was not archived in Logger
 
-Check the `/Test-AuditLog` evidence report and operator configuration:
+Check the `/Test-AuditLog` attachment-mode and queue report:
 
-- evidence may be disabled with a zero budget;
+- archiving may be disabled with `AUDITLOG_EVIDENCE_MAX_MB=0`;
 - the attachment may exceed the per-file cap;
-- the oldest evidence may have been evicted when the total budget filled; or
-- the download may have failed before the original message was deleted.
+- its URL may not be a recognized Stoat CDN URL;
+- the download, Stoat upload, or Logger send may have failed; or
+- a burst may have filled the bounded 50-message archive queue.
+
+Irminsul does not retain failed media on disk for retry. If an archive card itself was deleted, its restored metadata states that Stoat removed the media.
 
 ## A server setting change appears later
 

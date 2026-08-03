@@ -1,7 +1,3 @@
-// Separate process/file (node:test isolates by file) so the
-// AUDITLOG_EVIDENCE_BUDGET_MB=0 env var is fixed before evidence-store.js's
-// module-level budget const is computed at import time — see
-// test/evidence-store.test.js for the same constraint on that module.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
@@ -9,36 +5,30 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 process.env.HOYOFETCH_DATA_DIR = mkdtempSync(
-  join(tmpdir(), "hoyofetch-attachment-evidence-disabled-test-")
+  join(tmpdir(), "hoyofetch-disabled-")
 );
-process.env.AUDITLOG_EVIDENCE_BUDGET_MB = "0";
+process.env.AUDITLOG_EVIDENCE_MAX_MB = "0";
 
-const { buildAttachmentDescriptors, SKIP_REASONS } =
+const { prepareAttachmentCopies, SKIP_REASONS } =
   await import("../attachment-evidence.js");
 
-test("evidence capture disabled (budget=0) is reported as evidence_disabled", async () => {
-  const client = {
-    configuration: { features: { autumn: { url: "https://autumn.test" } } },
-  };
-  const [descriptor] = await buildAttachmentDescriptors(
-    client,
-    "MSGDISABLED",
+test("a zero per-file cap disables Stoat attachment archiving", async () => {
+  const result = await prepareAttachmentCopies(
+    { configuration: { features: { autumn: { url: "https://autumn.test" } } } },
     [
       {
         id: "ATT1",
         filename: "proof.png",
-        size: 500,
+        size: 5,
         contentType: "image/png",
         url: "https://autumn.test/attachments/ATT1",
       },
     ],
-    {
-      fetchImpl: async () => ({
-        ok: true,
-        arrayBuffer: async () => new TextEncoder().encode("bytes").buffer,
-      }),
-    }
+    { fetchImpl: async () => assert.fail("disabled capture must not fetch") }
   );
-  assert.equal(descriptor.skipReason, SKIP_REASONS.EVIDENCE_DISABLED);
-  assert.equal(descriptor.evidencePath, null);
+  assert.equal(
+    result.descriptors[0].skipReason,
+    SKIP_REASONS.EVIDENCE_DISABLED
+  );
+  assert.deepEqual(result.uploadIds, []);
 });

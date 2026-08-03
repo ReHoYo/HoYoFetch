@@ -347,15 +347,24 @@ function persistProtectedMessages() {
  *
  * @param {string} channelId
  * @param {string} messageId
- * @param {{content?: string, embeds?: object[]}} payload — pristine payload, no tamper notice
+ * @param {{content?: string, embeds?: object[], attachments?: string[]}} payload
+ *   pristine payload, no tamper notice
+ * @param {Object|null} restorationPayload payload safe to resend after media deletion
  * @return {Object} the created record
  */
-export function addProtectedMessage(channelId, messageId, payload) {
+export function addProtectedMessage(
+  channelId,
+  messageId,
+  payload,
+  restorationPayload = null
+) {
   const record = {
     recordId: messageId,
     channelId,
     messageId,
     payload,
+    restorationPayload,
+    mediaLost: false,
     restorations: 0,
     createdAt: Date.now(),
     lastVerifiedAt: Date.now(),
@@ -377,6 +386,11 @@ export function addProtectedMessage(channelId, messageId, payload) {
 export function getProtectedMessageByMessageId(messageId) {
   const recordId = messageIdIndex.get(messageId);
   return recordId ? protectedMessages[recordId] : undefined;
+}
+
+/** Look up a protected record by its stable original id. */
+export function getProtectedMessageByRecordId(recordId) {
+  return protectedMessages[recordId];
 }
 
 /**
@@ -952,6 +966,28 @@ const MAX_HELD_POSTS = 1_000;
 let postGateConfigs = readJSON(POST_GATE_PATH, {});
 let postGateQueue = readJSON(POST_GATE_QUEUE_PATH, {});
 
+let migratedLegacyHeldAttachments = false;
+for (const record of Object.values(postGateQueue)) {
+  if (!Array.isArray(record?.attachments)) continue;
+  record.attachments = record.attachments.map((attachment) => {
+    if (typeof attachment?.evidencePath !== "string") return attachment;
+    migratedLegacyHeldAttachments = true;
+    const metadata = { ...attachment };
+    delete metadata.evidencePath;
+    delete metadata.url;
+    return {
+      ...metadata,
+      archiveAttachmentId: null,
+      archiveUrl: null,
+      archiveRecordId: null,
+      skipReason: "legacy_purged",
+    };
+  });
+}
+if (migratedLegacyHeldAttachments) {
+  writeJSON(POST_GATE_QUEUE_PATH, postGateQueue);
+}
+
 function normalisePostGateConfig(value = {}) {
   return {
     mode: POST_GATE_MODES.has(value.mode) ? value.mode : "off",
@@ -1027,7 +1063,7 @@ const RESOLVED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 /**
  * Return the pending entries whose review window has elapsed, without
  * mutating them — the caller (post-gate.js) owns sending the expiry notice
- * and evidence cleanup, then reports the outcome back via updateHeldPost.
+ * and review-card cleanup, then reports the outcome back via updateHeldPost.
  */
 export function getExpiredPendingPosts(now = Date.now()) {
   return Object.values(postGateQueue)
@@ -1042,8 +1078,8 @@ export function getExpiredPendingPosts(now = Date.now()) {
 
 /**
  * Drop resolved entries once they've sat resolved past the retention
- * window. Returns evidence paths belonging to removed entries so the caller
- * can free the underlying evidence bytes.
+ * window. Legacy evidence paths are no longer acted on; callers retain the
+ * array return for compatibility with stores written by older releases.
  * @param {number} now
  * @return {string[]}
  */

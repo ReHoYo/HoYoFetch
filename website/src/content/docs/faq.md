@@ -31,8 +31,8 @@ Several design choices keep that path short:
   are sent to all subscribed channels instead of refetching the same source for
   every server.
 - **Bounded background work.** Scraped sources can use a short cache, while
-  archive compaction, retention, evidence cleanup, and settings reconciliation
-  run on bounded schedules rather than expanding the live-event path.
+  archive compaction, the two-worker attachment queue, retention, and settings
+  reconciliation stay bounded rather than expanding without limit.
 
 The result is a typical audit flow of:
 
@@ -42,7 +42,7 @@ gateway event → local context lookup → build embed → ordered send queue
 
 :::note[Near-instant, not zero-latency]
 Delivery still depends on the network and Stoat's API. Events that need
-attachment recovery, fresh permission or member verification, or extra API
+attachment mirroring, fresh permission or member verification, or extra API
 context may take longer. Changes made while Irminsul is offline—as well as
 invites and webhooks that lack usable live gateway events—are found by periodic
 reconciliation rather than posted instantly.

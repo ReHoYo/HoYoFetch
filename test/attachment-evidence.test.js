@@ -1,20 +1,21 @@
-// Tests for the shared attachment descriptor + evidence-capture helpers used
-// by both auditlog.js and post-gate.js: each distinct skip reason, the
-// legacy plain-count archive shape, and the re-upload-cap accounting.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-process.env.HOYOFETCH_DATA_DIR = mkdtempSync(
-  join(tmpdir(), "hoyofetch-attachment-evidence-test-")
-);
+const dataDir = mkdtempSync(join(tmpdir(), "hoyofetch-attachment-stoat-"));
+process.env.HOYOFETCH_DATA_DIR = dataDir;
 
 const {
-  buildAttachmentDescriptors,
+  copyArchivedAttachments,
+  createAttachmentArchiveQueue,
+  finaliseArchiveDescriptors,
   humanReadableSize,
-  resolveAttachmentEvidence,
+  metadataOnlyDescriptors,
+  normaliseAttachmentDescriptors,
+  prepareAttachmentCopies,
+  resolveAttachmentArchive,
   SKIP_REASONS,
 } = await import("../attachment-evidence.js");
 
@@ -23,10 +24,32 @@ const client = {
   authenticationHeader: ["X-Bot-Token", "secret"],
 };
 
-function okDownload() {
+function source(overrides = {}) {
   return {
-    ok: true,
-    arrayBuffer: async () => new TextEncoder().encode("bytes").buffer,
+    id: "ATT1",
+    filename: "proof.png",
+    size: 5,
+    contentType: "image/png",
+    url: "https://autumn.test/attachments/ATT1",
+    ...overrides,
+  };
+}
+
+function transferFetch({ uploadFails = false, downloadFails = false } = {}) {
+  let uploads = 0;
+  return async (_url, options) => {
+    if (options?.method === "POST") {
+      uploads += 1;
+      return uploadFails
+        ? { ok: false, status: 503 }
+        : { ok: true, json: async () => ({ id: `COPY${uploads}` }) };
+    }
+    return downloadFails
+      ? { ok: false, status: 404 }
+      : {
+          ok: true,
+          arrayBuffer: async () => new TextEncoder().encode("bytes").buffer,
+        };
   };
 }
 
@@ -34,204 +57,147 @@ test("humanReadableSize formats across unit boundaries", () => {
   assert.equal(humanReadableSize(0), "0 B");
   assert.equal(humanReadableSize(512), "512 B");
   assert.equal(humanReadableSize(2_048), "2.0 KB");
-  assert.equal(humanReadableSize(50 * 1024 * 1024), "50 MB");
 });
 
-test("untrusted attachment URLs are recorded as untrusted_url", async () => {
-  const [descriptor] = await buildAttachmentDescriptors(
-    client,
-    "MSGUNTRUSTED",
-    [
-      {
-        id: "ATT1",
-        filename: "proof.png",
-        size: 500,
-        contentType: "image/png",
-        url: "https://evil.example/proof.png",
-      },
-    ],
-    { fetchImpl: okDownload }
-  );
-  assert.equal(descriptor.skipReason, SKIP_REASONS.UNTRUSTED_URL);
-  assert.equal(descriptor.evidencePath, null);
-});
-
-test("oversized or zero-byte attachments are recorded as too_large", async () => {
-  const [tooBig] = await buildAttachmentDescriptors(
-    client,
-    "MSGBIG",
-    [
-      {
-        id: "ATT2",
-        filename: "huge.bin",
-        size: 100 * 1024 * 1024, // over the default 20MB per-file cap
-        contentType: "application/octet-stream",
-        url: "https://autumn.test/attachments/ATT2",
-      },
-    ],
-    { fetchImpl: okDownload }
-  );
-  assert.equal(tooBig.skipReason, SKIP_REASONS.TOO_LARGE);
-
-  const [zeroSize] = await buildAttachmentDescriptors(
-    client,
-    "MSGZERO",
-    [
-      {
-        id: "ATT3",
-        filename: "empty.bin",
-        size: 0,
-        contentType: "application/octet-stream",
-        url: "https://autumn.test/attachments/ATT3",
-      },
-    ],
-    { fetchImpl: okDownload }
-  );
-  assert.equal(zeroSize.skipReason, SKIP_REASONS.TOO_LARGE);
-});
-
-test("a failed or oversized download is recorded as download_failed", async () => {
-  const [notOk] = await buildAttachmentDescriptors(
-    client,
-    "MSGDOWNFAIL",
-    [
-      {
-        id: "ATT4",
-        filename: "proof.png",
-        size: 500,
-        contentType: "image/png",
-        url: "https://autumn.test/attachments/ATT4",
-      },
-    ],
-    { fetchImpl: async () => ({ ok: false }) }
-  );
-  assert.equal(notOk.skipReason, SKIP_REASONS.DOWNLOAD_FAILED);
-});
-
-test("a message id that fails the evidence store's safety pattern is recorded as capture_error", async () => {
-  const [descriptor] = await buildAttachmentDescriptors(
-    client,
-    "not-a-safe-id", // hyphens fail evidence-store.js's SAFE_ID_PATTERN
-    [
-      {
-        id: "ATT5",
-        filename: "proof.png",
-        size: 500,
-        contentType: "image/png",
-        url: "https://autumn.test/attachments/ATT5",
-      },
-    ],
-    { fetchImpl: okDownload }
-  );
-  assert.equal(descriptor.skipReason, SKIP_REASONS.CAPTURE_ERROR);
-  assert.equal(descriptor.evidencePath, null);
-});
-
-test("a qualifying attachment is captured and later re-uploaded on resolve", async () => {
-  const [descriptor] = await buildAttachmentDescriptors(
-    client,
-    "MSGOK",
-    [
-      {
-        id: "ATT6",
-        filename: "proof.png",
-        size: 500,
-        contentType: "image/png",
-        url: "https://autumn.test/attachments/ATT6",
-      },
-    ],
-    { fetchImpl: okDownload }
-  );
-  assert.equal(descriptor.skipReason, null);
-  assert.ok(descriptor.evidencePath);
-
-  const { lines, ids } = await resolveAttachmentEvidence(
-    client,
-    { attachments: [descriptor] },
-    {
-      fetchImpl: async (url, options) => {
-        if (options?.method === "POST") {
-          return { ok: true, json: async () => ({ id: "REUPLOADED1" }) };
-        }
-        return okDownload();
-      },
-    }
-  );
-  assert.equal(ids.length, 1);
-  assert.equal(ids[0], "REUPLOADED1");
-  assert.match(lines[0], /✅ `proof\.png`.*preserved, attached above/);
-});
-
-test("resolveAttachmentEvidence honours a maxReuploads cap", async () => {
-  const descriptors = [];
-  for (let i = 0; i < 3; i++) {
-    const [descriptor] = await buildAttachmentDescriptors(
-      client,
-      `MSGCAP${i}`,
-      [
-        {
-          id: `ATTCAP${i}`,
-          filename: `proof${i}.png`,
-          size: 500,
-          contentType: "image/png",
-          url: `https://autumn.test/attachments/ATTCAP${i}`,
-        },
-      ],
-      { fetchImpl: okDownload }
-    );
-    descriptors.push(descriptor);
-  }
-
-  let uploadCount = 0;
-  const { lines, ids } = await resolveAttachmentEvidence(
-    client,
-    { attachments: descriptors },
-    {
-      fetchImpl: async (url, options) => {
-        if (options?.method === "POST") {
-          uploadCount += 1;
-          return {
-            ok: true,
-            json: async () => ({ id: `REUPLOADED_${uploadCount}` }),
-          };
-        }
-        return okDownload();
-      },
-      maxReuploads: 2,
-    }
-  );
-  assert.equal(ids.length, 2);
-  assert.match(lines[2], /re-upload limit was already reached/);
-});
-
-test("legacy plain-count archive entries render one summary line", async () => {
-  const { lines, ids } = await resolveAttachmentEvidence(client, {
-    attachments: 3,
+test("qualifying attachments are copied to Stoat without creating evidence files", async () => {
+  const result = await prepareAttachmentCopies(client, [source()], {
+    fetchImpl: transferFetch(),
   });
-  assert.equal(ids.length, 0);
-  assert.equal(lines.length, 1);
-  assert.match(
-    lines[0],
-    /3 attachments — recorded before evidence capture existed/
-  );
-
-  const singular = await resolveAttachmentEvidence(client, { attachments: 1 });
-  assert.match(singular.lines[0], /1 attachment —/);
-
-  const none = await resolveAttachmentEvidence(client, { attachments: 0 });
-  assert.equal(none.lines.length, 0);
+  assert.deepEqual(result.uploadIds, ["COPY1"]);
+  assert.equal(result.descriptors[0].archiveAttachmentId, "COPY1");
+  assert.match(result.descriptors[0].archiveUrl, /COPY1/);
+  assert.equal(existsSync(join(dataDir, "evidence")), false);
 });
 
-test("a missing entry or empty attachment list produces no lines", async () => {
-  assert.deepEqual(await resolveAttachmentEvidence(client, null), {
-    lines: [],
-    ids: [],
+test("untrusted, oversized, download, and upload failures stay metadata-only", async () => {
+  const untrusted = await prepareAttachmentCopies(
+    client,
+    [source({ url: "https://evil.example/file" })],
+    { fetchImpl: transferFetch() }
+  );
+  assert.equal(untrusted.descriptors[0].skipReason, SKIP_REASONS.UNTRUSTED_URL);
+
+  const oversized = await prepareAttachmentCopies(
+    client,
+    [source({ size: 100 * 1024 * 1024 })],
+    { fetchImpl: transferFetch() }
+  );
+  assert.equal(oversized.descriptors[0].skipReason, SKIP_REASONS.TOO_LARGE);
+
+  const download = await prepareAttachmentCopies(client, [source()], {
+    fetchImpl: transferFetch({ downloadFails: true }),
   });
+  assert.equal(
+    download.descriptors[0].skipReason,
+    SKIP_REASONS.DOWNLOAD_FAILED
+  );
+
+  const upload = await prepareAttachmentCopies(client, [source()], {
+    fetchImpl: transferFetch({ uploadFails: true }),
+  });
+  assert.equal(upload.descriptors[0].skipReason, SKIP_REASONS.UPLOAD_FAILED);
+});
+
+test("a source message can archive qualifying media while visibly retaining failed metadata", async () => {
+  const result = await prepareAttachmentCopies(
+    client,
+    [
+      source(),
+      source({ id: "ATT2", filename: "large.mov", size: 100 * 1024 * 1024 }),
+    ],
+    { fetchImpl: transferFetch() }
+  );
+  assert.deepEqual(result.uploadIds, ["COPY1"]);
+  assert.equal(result.descriptors[0].archiveAttachmentId, "COPY1");
+  assert.equal(result.descriptors[1].archiveAttachmentId, null);
+  assert.equal(result.descriptors[1].skipReason, SKIP_REASONS.TOO_LARGE);
+});
+
+test("Logger send success binds a stable protected record and failure drops upload ids", async () => {
+  const prepared = await prepareAttachmentCopies(client, [source()], {
+    fetchImpl: transferFetch(),
+  });
+  const archived = finaliseArchiveDescriptors(prepared.descriptors, {
+    _id: "LOGGER1",
+  });
+  assert.equal(archived[0].archiveRecordId, "LOGGER1");
+
+  const failed = finaliseArchiveDescriptors(prepared.descriptors, undefined);
+  assert.equal(failed[0].archiveAttachmentId, null);
+  assert.equal(failed[0].skipReason, SKIP_REASONS.LOGGER_SEND_FAILED);
+});
+
+test("delete descriptions resolve the current Logger message and media-loss state", () => {
+  const attachment = {
+    ...source(),
+    archiveAttachmentId: "COPY1",
+    archiveUrl: "https://autumn.test/attachments/COPY1/proof.png",
+    archiveRecordId: "LOGGER1",
+    skipReason: null,
+  };
+  const live = resolveAttachmentArchive(
+    { attachments: [attachment] },
+    { getProtectedRecord: () => ({ messageId: "LOGGER2", mediaLost: false }) }
+  );
+  assert.deepEqual(live.replyMessageIds, ["LOGGER2"]);
+  assert.match(live.lines[0], /archived in Logger record/);
+
+  const lost = resolveAttachmentArchive(
+    { attachments: [attachment] },
+    { getProtectedRecord: () => ({ messageId: "LOGGER3", mediaLost: true }) }
+  );
+  assert.match(lost.lines[0], /removed the media/);
+});
+
+test("approved held attachments are copied atomically through RAM", async () => {
+  const descriptors = [
+    {
+      ...source(),
+      archiveAttachmentId: "COPY1",
+      archiveUrl: "https://autumn.test/attachments/COPY1/proof.png",
+      archiveRecordId: "REVIEW1",
+      skipReason: null,
+    },
+  ];
   assert.deepEqual(
-    await resolveAttachmentEvidence(client, { attachments: [] }),
-    {
-      lines: [],
-      ids: [],
-    }
+    await copyArchivedAttachments(client, descriptors, {
+      fetchImpl: transferFetch(),
+    }),
+    ["COPY1"]
   );
+  await assert.rejects(
+    copyArchivedAttachments(
+      client,
+      metadataOnlyDescriptors(descriptors, SKIP_REASONS.MEDIA_LOST),
+      { fetchImpl: transferFetch() }
+    ),
+    /unavailable/
+  );
+});
+
+test("legacy evidence paths normalize as purged and numeric journals remain readable", () => {
+  const [legacy] = normaliseAttachmentDescriptors([
+    { ...source(), evidencePath: "/data/evidence/old.png" },
+  ]);
+  assert.equal(legacy.skipReason, SKIP_REASONS.LEGACY_PURGED);
+  const numeric = resolveAttachmentArchive({ attachments: 3 });
+  assert.match(numeric.lines[0], /3 attachments/);
+});
+
+test("archive queue enforces concurrency and pending capacity", async () => {
+  const queue = createAttachmentArchiveQueue({ concurrency: 1, maxPending: 2 });
+  let release;
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  const first = queue.run(() => blocked);
+  const second = queue.run(async () => "second");
+  const third = queue.run(async () => "third");
+  const fourth = await queue.run(async () => "fourth");
+  assert.equal(fourth.accepted, false);
+  release("first");
+  assert.equal((await first).value, "first");
+  assert.equal((await second).value, "second");
+  assert.equal((await third).value, "third");
+  assert.equal(queue.stats().rejected, 1);
 });

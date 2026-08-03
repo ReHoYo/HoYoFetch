@@ -43,6 +43,12 @@ function loadEnv() {
 }
 loadEnv();
 
+if (process.env.AUDITLOG_EVIDENCE_BUDGET_MB) {
+  console.warn(
+    "⚠️  AUDITLOG_EVIDENCE_BUDGET_MB is obsolete: attachment bytes are now Stoat-hosted and never retained on disk."
+  );
+}
+
 // ── Exported config ────────────────────────────────
 const rawInterval = parseInt(process.env.FETCH_INTERVAL || "60", 10);
 const fetchIntervalMinutes =

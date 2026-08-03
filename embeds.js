@@ -335,8 +335,8 @@ export function buildAuditLogEnabledEmbed(
     : "Audit logging is now **active** in this channel.";
 
   const evidenceBullet = isEvidenceEnabled()
-    ? `- Attachments up to **${Math.round(perFileCapBytes() / (1024 * 1024))} MB** are downloaded and kept as evidence when their message is deleted, so the file itself — not just a link — shows up in the delete log. Evidence and message content are both kept for **1 year**.`
-    : "- Message content is recorded from this moment on and kept for **1 year**, so deletes/edits show the original text even after I restart. Attachment evidence capture is currently **disabled**.";
+    ? `- Attachments up to **${Math.round(perFileCapBytes() / (1024 * 1024))} MB** are copied immediately into this Logger on Stoat. Irminsul keeps only their metadata on the VPS; later delete records reference the Stoat archive card.`
+    : "- Message content is recorded from this moment on and kept for **1 year**, so deletes/edits show the original text even after I restart. Stoat attachment archiving is currently **disabled**.";
 
   return {
     title: "✅ Audit Log Enabled",
