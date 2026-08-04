@@ -60,6 +60,65 @@ const ACTOR_UNAVAILABLE_LINE =
 const memberSnapshots = new Map();
 const ignoredSystemMessages = createMessageCache(5_000);
 
+// Member joins and leaves reach us from two sources each (see the raw member
+// dispatcher below), so every departure/arrival is claimed exactly once here.
+const loggedMemberEvents = createMessageCache(5_000);
+// How long the raw join path waits for the hydrated listener to claim a join.
+// The hydrated event carries a real ServerMember (join date, roles), so it is
+// worth a short delay to prefer it — but revolt.js can drop it entirely.
+const RAW_JOIN_FALLBACK_DELAY_MS = 1_000;
+// A claim only has to outlive the gap between the two sources. It must expire:
+// keying on server+user forever would silently swallow the second departure of
+// anyone who leaves, rejoins, and leaves again.
+const MEMBER_EVENT_CLAIM_TTL_MS = 30_000;
+
+// Counters behind /AuditLog test and /Server-Info. Member events are the only
+// audit path that can fail with nothing to show for it — the gateway may never
+// deliver them, or a payload guard may discard them — so what we saw on the
+// wire is tracked separately from what we actually posted.
+const memberEventStats = {
+  lastJoinSeenAt: null,
+  lastJoinPostedAt: null,
+  lastLeaveSeenAt: null,
+  lastLeavePostedAt: null,
+  joinsDropped: 0,
+  leavesDropped: 0,
+  lastDropReason: null,
+};
+
+function memberEventKey(kind, serverId, userId) {
+  return `${kind}:${serverId}:${userId}`;
+}
+
+/**
+ * Claim one member event for one of its two sources. Returns false when the
+ * other source already posted it.
+ */
+export function claimMemberEvent(kind, serverId, userId, now = Date.now()) {
+  const key = memberEventKey(kind, serverId, userId);
+  const claimedAt = loggedMemberEvents.get(key);
+  if (claimedAt && now - claimedAt < MEMBER_EVENT_CLAIM_TTL_MS) return false;
+  loggedMemberEvents.set(key, now);
+  return true;
+}
+
+/**
+ * Record a member event that arrived but produced no audit record. Reserved for
+ * causes worth investigating — the bot's own arrivals/departures and servers
+ * without audit logging are expected, and counting those would bury a real
+ * malformed-payload drop in noise.
+ */
+function noteMemberDrop(kind, reason) {
+  if (kind === "join") memberEventStats.joinsDropped++;
+  else memberEventStats.leavesDropped++;
+  memberEventStats.lastDropReason = `${kind}:${reason}`;
+  debugLog(`member ${kind}: dropped (${reason})`);
+}
+
+function skipMemberEvent(kind, reason) {
+  debugLog(`member ${kind}: skipped (${reason})`);
+}
+
 // Set by initAuditLog so runAuditLogTest can reuse the real send pipeline.
 let sendRef = null;
 let settingsMonitorRef = null;
@@ -166,6 +225,7 @@ export function runAuditLogTest(serverId) {
       `**Per-file archive cap:** ${humanReadableSize(status.evidencePerFileCapBytes)}`,
       `**Archive queue:** ${archiveQueue.active} active, ${archiveQueue.queued} waiting, ${archiveQueue.failed} failed, ${archiveQueue.rejected} rejected`,
       `**Capture failures since startup:** ${captureFailureCount}`,
+      ...formatMemberEventDiagnostics(status.memberEvents),
     ],
     "#3498DB"
   );
@@ -186,8 +246,20 @@ export function getAuditDiagnostics(serverId) {
     consecutiveFailures: failureCounts.get(serverId) ?? 0,
     queuePending: pending,
     queueLimit: MAX_PENDING_SENDS,
+    memberEvents: { ...memberEventStats },
     settings: settingsMonitorRef?.status(serverId) ?? null,
   };
+}
+
+/** Render the member-event counters as one human-readable audit line. */
+export function formatMemberEventDiagnostics(stats) {
+  const seen = (value) =>
+    value ? new Date(value).toUTCString() : "never observed";
+  return [
+    `**Member joins:** seen ${seen(stats.lastJoinSeenAt)}, posted ${seen(stats.lastJoinPostedAt)}, ${stats.joinsDropped} dropped`,
+    `**Member leaves:** seen ${seen(stats.lastLeaveSeenAt)}, posted ${seen(stats.lastLeavePostedAt)}, ${stats.leavesDropped} dropped`,
+    `**Last member-event drop:** ${stats.lastDropReason ?? "none"}`,
+  ];
 }
 
 // ── Formatting helpers ─────────────────────────────
@@ -237,6 +309,23 @@ export function parseChannelArg(value) {
   const mention = trimmed.match(CHANNEL_MENTION_PATTERN);
   if (mention) return mention[1];
   return CHANNEL_ID_PATTERN.test(trimmed) ? trimmed : null;
+}
+
+/**
+ * Pull the server and user out of a raw ServerMemberJoin/ServerMemberLeave
+ * payload. revolt.js v7 expects a flat `{id: serverId, user: userId}`, but the
+ * composite `{id: {server, user}}` and snake-cased `user_id` shapes also appear
+ * on the wire. A member event that matches none of them used to vanish without
+ * a trace, so read every shape and let the caller account for the misses.
+ *
+ * @return {{serverId: string|null, userId: string|null}}
+ */
+export function memberIdsFromRawEvent(event) {
+  const asId = (value) => (typeof value === "string" && value ? value : null);
+  return {
+    serverId: asId(event?.id?.server ?? event?.server ?? event?.id),
+    userId: asId(event?.user ?? event?.user_id ?? event?.id?.user),
+  };
 }
 
 /**
@@ -637,6 +726,8 @@ export function initAuditLog(
         await handleRawMessageUpdate(client, send, event);
       } else if (event.type === "BulkMessageDelete") {
         await handleRawBulkDelete(client, send, event);
+      } else if (event.type === "ServerMemberJoin") {
+        await handleRawMemberJoin(client, send, event);
       } else if (event.type === "ServerMemberLeave") {
         await handleRawMemberLeave(client, send, event);
       }
@@ -807,10 +898,14 @@ export function initAuditLog(
   }
 
   async function handleRawMemberLeave(client, send, event) {
-    const serverId = event.id;
-    const userId = event.user;
-    if (!serverId || !userId || isSelf(userId)) return;
-    if (!isAuditLogEnabled(serverId)) return;
+    memberEventStats.lastLeaveSeenAt = Date.now();
+    const { serverId, userId } = memberIdsFromRawEvent(event);
+    if (!serverId) return noteMemberDrop("leave", "no_server_id");
+    if (!userId) return noteMemberDrop("leave", "no_user_id");
+    if (isSelf(userId)) return skipMemberEvent("leave", "self");
+    if (!isAuditLogEnabled(serverId))
+      return skipMemberEvent("leave", "audit_disabled");
+    if (!claimMemberEvent("leave", serverId, userId)) return;
 
     const reason = typeof event.reason === "string" ? event.reason : null;
     let title = "📤 Member Left or Was Removed";
@@ -847,6 +942,7 @@ export function initAuditLog(
       );
     }
 
+    memberEventStats.lastLeavePostedAt = Date.now();
     emitAudit(
       send,
       serverId,
@@ -857,6 +953,57 @@ export function initAuditLog(
         colour,
       })
     );
+  }
+
+  /**
+   * Build and queue the join embed. Shared by the hydrated listener and the
+   * raw-event fallback so both render identically; `member` is null when the
+   * raw path fires for an account revolt.js never cached.
+   */
+  function postMemberJoin(serverId, userId, member) {
+    if (!claimMemberEvent("join", serverId, userId)) return false;
+    const now = Date.now();
+    const record = collectUserInfo(client, { serverId, userId, member });
+    const signals = evaluateBotSignals(record, now);
+    memberEventStats.lastJoinPostedAt = now;
+    emitAudit(
+      send,
+      serverId,
+      buildAuditEmbed(
+        signals.length ? "📥 Member Joined — review" : "📥 Member Joined",
+        buildUserInfoLines(record, signals, { now }),
+        signals.length ? "#E67E22" : "#2ECC71"
+      )
+    );
+    return true;
+  }
+
+  // revolt.js only emits its hydrated serverMemberJoin after `await
+  // client.users.fetch(...)` succeeds (eagerFetching defaults on), and skips it
+  // outright for any account already in the member cache. Either way the join
+  // is lost with nothing but an unhandled rejection to show for it. The raw
+  // stream has neither gate, so it backstops the hydrated listener — delayed
+  // briefly so the richer hydrated record wins whenever it does arrive.
+  async function handleRawMemberJoin(client, send, event) {
+    memberEventStats.lastJoinSeenAt = Date.now();
+    const { serverId, userId } = memberIdsFromRawEvent(event);
+    if (!serverId) return noteMemberDrop("join", "no_server_id");
+    if (!userId) return noteMemberDrop("join", "no_user_id");
+    if (isSelf(userId)) return skipMemberEvent("join", "self");
+    if (!isAuditLogEnabled(serverId))
+      return skipMemberEvent("join", "audit_disabled");
+
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, RAW_JOIN_FALLBACK_DELAY_MS);
+      timer?.unref?.();
+    });
+
+    const member =
+      client.serverMembers?.getByKey?.({ server: serverId, user: userId }) ??
+      null;
+    if (postMemberJoin(serverId, userId, member)) {
+      debugLog(`member join ${userId}: logged from the raw gateway stream`);
+    }
   }
 
   // Settings changes are handled from raw gateway events plus persisted REST
@@ -876,44 +1023,86 @@ export function initAuditLog(
   });
 
   // ── Members ─────────────────────────────────────
+  // These hydrated listeners are the preferred source — they carry a real
+  // ServerMember — but the raw dispatcher above backstops both join and leave.
+  // Each body is wrapped: revolt.js emits them from inside an un-awaited async
+  // handler, so a bare throw here surfaces only as an unhandled rejection.
+  function guarded(label, handler) {
+    return (...args) => {
+      try {
+        handler(...args);
+      } catch (error) {
+        console.error(
+          `auditlog: ${label} handler failed:`,
+          safeErrorSummary(error)
+        );
+      }
+    };
+  }
+
   // Cache-only: a join flood must never trigger a REST call per member, so
   // this never fetches the profile (bio/banner) that /Get-Info can afford.
-  client.on("serverMemberJoin", (member) => {
-    const serverId = member.id.server;
-    const userId = member.id.user;
-    const now = Date.now();
-    const record = collectUserInfo(client, { serverId, userId, member });
-    const signals = evaluateBotSignals(record, now);
-    const embed = buildAuditEmbed(
-      signals.length ? "📥 Member Joined — review" : "📥 Member Joined",
-      buildUserInfoLines(record, signals, { now }),
-      signals.length ? "#E67E22" : "#2ECC71"
-    );
-    emitAudit(send, serverId, embed);
-  });
+  client.on(
+    "serverMemberJoin",
+    guarded("member join", (member) => {
+      const serverId = member?.id?.server;
+      const userId = member?.id?.user;
+      if (!serverId || !userId || isSelf(userId)) return;
+      memberEventStats.lastJoinSeenAt = Date.now();
+      if (!isAuditLogEnabled(serverId))
+        return skipMemberEvent("join", "audit_disabled");
+      postMemberJoin(serverId, userId, member);
+    })
+  );
 
-  client.on("userUpdate", (user, previousUser) => {
-    emitUserIdentityUpdates(client, user, previousUser, (serverId, embed) =>
-      emitAudit(send, serverId, embed)
-    );
-  });
+  // revolt.js only emits this for members it had cached, so the raw dispatcher
+  // remains the primary leave path; both claim through the same dedupe cache.
+  client.on(
+    "serverMemberLeave",
+    guarded("member leave", (member) => {
+      const serverId = member?.id?.server;
+      const userId = member?.id?.user;
+      if (!serverId || !userId) return;
+      handleRawMemberLeave(client, send, {
+        id: serverId,
+        user: userId,
+      }).catch((error) =>
+        console.error(
+          "auditlog: member leave fallback failed:",
+          safeErrorSummary(error)
+        )
+      );
+    })
+  );
 
-  client.on("serverMemberUpdate", (member, previousMember) => {
-    const serverId = member.id.server;
-    const userId = member.id.user;
-    if (isSelf(userId)) return;
+  client.on(
+    "userUpdate",
+    guarded("user update", (user, previousUser) => {
+      emitUserIdentityUpdates(client, user, previousUser, (serverId, embed) =>
+        emitAudit(send, serverId, embed)
+      );
+    })
+  );
 
-    const sections = buildMemberUpdateAuditSections(
-      client,
-      member,
-      previousMember
-    );
+  client.on(
+    "serverMemberUpdate",
+    guarded("member update", (member, previousMember) => {
+      const serverId = member.id.server;
+      const userId = member.id.user;
+      if (isSelf(userId)) return;
 
-    for (const section of sections) {
-      const embed = auditSectionEmbed(client, userId, section);
-      emitAudit(send, serverId, embed);
-    }
-  });
+      const sections = buildMemberUpdateAuditSections(
+        client,
+        member,
+        previousMember
+      );
+
+      for (const section of sections) {
+        const embed = auditSectionEmbed(client, userId, section);
+        emitAudit(send, serverId, embed);
+      }
+    })
+  );
 
   return {
     ...settingsMonitorRef,

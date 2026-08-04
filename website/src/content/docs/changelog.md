@@ -3,6 +3,16 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Version 2.4.2
+
+### Reliable member join and leave records
+
+- Member joins and departures are now read from the raw gateway stream in addition to the Stoat library's own events. Previously a join was lost whenever the library's account lookup failed before it announced the event, and a departure was lost whenever its payload did not match the exact shape the library expected — in both cases silently, with nothing posted and nothing reported.
+- Each arrival and departure is still recorded exactly once no matter which source delivered it.
+- `/Test-AuditLog` and `/Server-Info` now report member joins and leaves separately, distinguishing what arrived on the wire from what was posted, with a running count of discarded events and the most recent reason.
+- Member, identity, and nickname listeners now report their own failures instead of surfacing as an untraceable console error.
+- An account Irminsul has never cached is reported with an **unknown** avatar rather than being flagged for review as a default-avatar account.
+
 ## Version 2.4.1
 
 ### Native pre-join bans

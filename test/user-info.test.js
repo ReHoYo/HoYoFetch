@@ -79,10 +79,13 @@ test("collectUserInfo tolerates an unknown user without throwing", () => {
   });
   assert.equal(record.username, null);
   assert.equal(record.accountCreatedAt, null);
-  assert.equal(record.hasCustomAvatar, false);
-  assert.deepEqual(evaluateBotSignals(record, NOW), [
-    "Using the default avatar",
-  ]);
+  // No cached user and no lookup means the avatar is unknown, not absent —
+  // otherwise every join the gateway delivers uncached is flagged for review.
+  assert.equal(record.hasCustomAvatar, null);
+  assert.deepEqual(evaluateBotSignals(record, NOW), []);
+  assert.ok(
+    buildUserInfoLines(record, [], { now: NOW }).includes("**Avatar:** unknown")
+  );
 });
 
 test("derives creation time from a ULID but not a malformed id", () => {
