@@ -323,17 +323,18 @@ export const COMMAND_CATALOG = Object.freeze([
     section: COMMAND_SECTIONS.MODERATION,
     route: "ban",
     access: "ban",
-    syntax: "/Ban @member <reason>",
+    syntax: "/Ban <@member|account ID> <reason>",
     summary:
-      "Confirm and ban a member, then choose a message-cleanup window by reaction.",
-    help: "Confirm with ✅, then pick a cleanup window (1h–1y) by reaction. The 10-minute ↩️ undo only unbans _(Ban Members; cleanup also needs Manage Messages)_",
+      "Confirm and ban a current, departed, or never-joined account, then choose a message-cleanup window by reaction.",
+    help: "Ban a current or never-joined account by mention or raw ID after ✅ confirmation, then pick a cleanup window (1h–1y). The 10-minute ↩️ undo only unbans _(Ban Members; cleanup also needs Manage Messages)_",
     permission: "Ban Members; Manage Messages is also required for cleanup",
     examples: [
       "/Ban @member for spamming and stuff",
-      "/Ban @member 7d raid cleanup",
+      "/Ban 01ABCDEFGHJKMNPQRSTVWXYZ12 for coordinating a raid",
     ],
     notes: [
-      "Write the reason in plain words; the member, an optional window, and the reason may appear in any order.",
+      "Write the reason in plain words; the account, an optional window, and the reason may appear in any order.",
+      "Stoat's native ban endpoint accepts raw account IDs, so the target does not need to be a current or former server member.",
       "Nothing happens until the moderator who ran the command reacts ✅ to the confirmation naming the target and reason.",
       "Undo unbans the account but cannot restore server membership or deleted messages.",
     ],
