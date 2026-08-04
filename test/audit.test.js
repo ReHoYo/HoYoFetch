@@ -13,13 +13,16 @@ process.env.HOYOFETCH_DATA_DIR = mkdtempSync(
 const {
   buildMemberUpdateAuditSections,
   buildUserIdentityAuditSections,
+  claimMemberEvent,
   computeSuspects,
   createMessageCache,
   diffFields,
   emitUserIdentityUpdates,
   formatSuspects,
+  getAuditDiagnostics,
   hydrateAuditMemberCache,
   initAuditLog,
+  memberIdsFromRawEvent,
   parseChannelArg,
   truncate,
 } = await import("../auditlog.js");
@@ -565,4 +568,305 @@ test("the enriched join log carries account details and flips to review on signa
   assert.match(flaggedEmbed.description, /Using the default avatar/);
 
   disableAuditLog(serverId);
+});
+
+// ── Member joins and leaves ─────────────────────────
+// Both paths reach the audit channel from two independent sources (the raw
+// gateway stream and revolt.js's hydrated listener), because either one can
+// silently swallow the event. These cover the raw source, the fallbacks, the
+// dedupe between them, and the drop accounting that makes a miss visible.
+
+function createMemberEventClient() {
+  const rawListeners = [];
+  const listeners = new Map();
+  return {
+    user: { id: "BOT1" },
+    users: new Map(),
+    servers: new Map(),
+    channels: new Map(),
+    events: {
+      on(name, listener) {
+        if (name === "event") rawListeners.push(listener);
+      },
+    },
+    on(name, listener) {
+      const existing = listeners.get(name) ?? [];
+      existing.push(listener);
+      listeners.set(name, existing);
+    },
+    emit(name, ...args) {
+      for (const listener of listeners.get(name) ?? []) listener(...args);
+    },
+    emitRaw(event) {
+      return Promise.all(rawListeners.map((listener) => listener(event)));
+    },
+  };
+}
+
+function attachMemberAudit(client) {
+  const sent = [];
+  initAuditLog(client, {
+    sendProtected: async (chId, payload) => {
+      sent.push({ chId, payload });
+      return { _id: `SENT${sent.length}` };
+    },
+    request: async () => ({ ok: false, status: 404, data: undefined }),
+  });
+  return sent;
+}
+
+test("member ids are read from every ServerMemberLeave payload shape", () => {
+  assert.deepEqual(memberIdsFromRawEvent({ id: "SRV", user: "USR" }), {
+    serverId: "SRV",
+    userId: "USR",
+  });
+  assert.deepEqual(
+    memberIdsFromRawEvent({ id: { server: "SRV", user: "USR" } }),
+    { serverId: "SRV", userId: "USR" }
+  );
+  assert.deepEqual(memberIdsFromRawEvent({ server: "SRV", user_id: "USR" }), {
+    serverId: "SRV",
+    userId: "USR",
+  });
+  assert.deepEqual(memberIdsFromRawEvent({ type: "ServerMemberLeave" }), {
+    serverId: null,
+    userId: null,
+  });
+});
+
+test("a raw departure is logged with the verdict the server reported", async () => {
+  const client = createMemberEventClient();
+  const serverId = "LEAVE_SERVER";
+  enableAuditLog(serverId, "LEAVE_LOG_CHANNEL");
+  const sent = attachMemberAudit(client);
+
+  await client.emitRaw({
+    type: "ServerMemberLeave",
+    id: serverId,
+    user: "LEAVER1",
+    reason: "Leave",
+  });
+  await client.emitRaw({
+    type: "ServerMemberLeave",
+    id: serverId,
+    user: "LEAVER2",
+    reason: "Kick",
+  });
+  await client.emitRaw({
+    type: "ServerMemberLeave",
+    id: serverId,
+    user: "LEAVER3",
+  });
+  await waitForSend(sent, 3);
+
+  assert.equal(sent[0].payload.embeds[0].title, "📤 Member Left");
+  assert.equal(sent[1].payload.embeds[0].title, "🥾 Member Kicked");
+  assert.equal(
+    sent[2].payload.embeds[0].title,
+    "📤 Member Left or Was Removed"
+  );
+  assert.match(
+    sent[2].payload.embeds[0].description,
+    /reason not provided by server/
+  );
+  assert.equal(sent[0].chId, "LEAVE_LOG_CHANNEL");
+
+  disableAuditLog(serverId);
+});
+
+test("a departure carrying the composite id shape still logs", async () => {
+  const client = createMemberEventClient();
+  const serverId = "LEAVESHAPE_SERVER";
+  enableAuditLog(serverId, "LEAVESHAPE_CHANNEL");
+  const sent = attachMemberAudit(client);
+
+  await client.emitRaw({
+    type: "ServerMemberLeave",
+    id: { server: serverId, user: "SHAPELEAVER" },
+    reason: "Leave",
+  });
+  await waitForSend(sent, 1);
+
+  assert.equal(sent[0].payload.embeds[0].title, "📤 Member Left");
+  assert.match(sent[0].payload.embeds[0].description, /SHAPELEAVER/);
+
+  disableAuditLog(serverId);
+});
+
+test("dropped departures are counted instead of vanishing", async () => {
+  const client = createMemberEventClient();
+  const serverId = "LEAVEDROP_SERVER";
+  enableAuditLog(serverId, "LEAVEDROP_CHANNEL");
+  const sent = attachMemberAudit(client);
+
+  const before = getAuditDiagnostics(serverId).memberEvents.leavesDropped;
+
+  // Unreadable payload — the failure the counter exists to surface.
+  await client.emitRaw({ type: "ServerMemberLeave", id: serverId });
+  await client.emitRaw({ type: "ServerMemberLeave", user: "NOSERVER" });
+  // Expected non-events: the bot's own departure and an unaudited server must
+  // not count, or a real malformed-payload drop is buried in the noise.
+  await client.emitRaw({
+    type: "ServerMemberLeave",
+    id: serverId,
+    user: "BOT1",
+  });
+  await client.emitRaw({
+    type: "ServerMemberLeave",
+    id: "NEVER_ENABLED_SERVER",
+    user: "SOMEONE",
+  });
+
+  const after = getAuditDiagnostics(serverId).memberEvents;
+  assert.equal(sent.length, 0);
+  assert.equal(after.leavesDropped - before, 2);
+  assert.equal(after.lastDropReason, "leave:no_server_id");
+  assert.ok(after.lastLeaveSeenAt);
+
+  disableAuditLog(serverId);
+});
+
+test("the raw stream logs a join revolt.js never emitted", async () => {
+  const client = createMemberEventClient();
+  const serverId = "RAWJOIN_SERVER";
+  const userId = "01HZY3M6Q8V7N2K4J5T9W0XABE";
+  enableAuditLog(serverId, "RAWJOIN_CHANNEL");
+  const sent = attachMemberAudit(client);
+
+  client.users.set(userId, {
+    id: userId,
+    username: "RawJoiner",
+    avatar: { _id: "FILE1", tag: "avatars" },
+  });
+
+  // No client.emit("serverMemberJoin") — this is the case where revolt.js
+  // dropped the hydrated event because users.fetch() rejected.
+  await client.emitRaw({
+    type: "ServerMemberJoin",
+    id: serverId,
+    user: userId,
+  });
+  await waitForSend(sent, 1, 3_000);
+
+  assert.equal(sent[0].payload.embeds[0].title, "📥 Member Joined");
+  assert.match(sent[0].payload.embeds[0].description, /@RawJoiner/);
+  assert.ok(getAuditDiagnostics(serverId).memberEvents.lastJoinPostedAt);
+
+  disableAuditLog(serverId);
+});
+
+test("a join delivered by both sources is logged exactly once", async () => {
+  const client = createMemberEventClient();
+  const serverId = "DEDUPEJOIN_SERVER";
+  const userId = "01HZY3M6Q8V7N2K4J5T9W0XABF";
+  enableAuditLog(serverId, "DEDUPEJOIN_CHANNEL");
+  const sent = attachMemberAudit(client);
+
+  client.users.set(userId, {
+    id: userId,
+    username: "DoubleJoiner",
+    avatar: { _id: "FILE1", tag: "avatars" },
+  });
+
+  client.emit("serverMemberJoin", {
+    id: { server: serverId, user: userId },
+    joinedAt: new Date(),
+    roles: [],
+  });
+  await waitForSend(sent, 1);
+  await client.emitRaw({
+    type: "ServerMemberJoin",
+    id: serverId,
+    user: userId,
+  });
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].payload.embeds[0].title, "📥 Member Joined");
+
+  disableAuditLog(serverId);
+});
+
+test("a departure delivered by both sources is logged exactly once", async () => {
+  const client = createMemberEventClient();
+  const serverId = "DEDUPELEAVE_SERVER";
+  enableAuditLog(serverId, "DEDUPELEAVE_CHANNEL");
+  const sent = attachMemberAudit(client);
+
+  await client.emitRaw({
+    type: "ServerMemberLeave",
+    id: serverId,
+    user: "DOUBLELEAVER",
+    reason: "Leave",
+  });
+  await waitForSend(sent, 1);
+  client.emit("serverMemberLeave", {
+    id: { server: serverId, user: "DOUBLELEAVER" },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(sent.length, 1);
+
+  disableAuditLog(serverId);
+});
+
+test("a throwing member listener is reported instead of lost", async () => {
+  const client = createMemberEventClient();
+  const serverId = "GUARD_SERVER";
+  enableAuditLog(serverId, "GUARD_CHANNEL");
+  attachMemberAudit(client);
+
+  const errors = [];
+  const originalError = console.error;
+  console.error = (...args) => errors.push(args.join(" "));
+  try {
+    // A member object with no id at all is the shape that used to throw
+    // straight past revolt.js into an unhandled rejection.
+    assert.doesNotThrow(() => client.emit("serverMemberUpdate", null, {}));
+  } finally {
+    console.error = originalError;
+  }
+
+  assert.ok(
+    errors.some((line) => line.includes("member update handler failed"))
+  );
+
+  disableAuditLog(serverId);
+});
+
+test("the same departure delivered twice in a row is deduped", async () => {
+  const client = createMemberEventClient();
+  const serverId = "REJOIN_SERVER";
+  const userId = "REVOLVING_MEMBER";
+  enableAuditLog(serverId, "REJOIN_CHANNEL");
+  const sent = attachMemberAudit(client);
+
+  const leave = () =>
+    client.emitRaw({
+      type: "ServerMemberLeave",
+      id: serverId,
+      user: userId,
+      reason: "Leave",
+    });
+
+  await leave();
+  await waitForSend(sent, 1);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await leave();
+
+  assert.equal(sent.length, 1, "the same departure redelivered is deduped");
+
+  disableAuditLog(serverId);
+});
+
+test("a member event claim expires so a rejoin is not deduped away", () => {
+  const key = ["leave", "TTL_SERVER", "TTL_MEMBER"];
+  const at = 1_000_000;
+
+  assert.equal(claimMemberEvent(...key, at), true);
+  // The second source for the same departure, moments later.
+  assert.equal(claimMemberEvent(...key, at + 500), false);
+  // A genuinely separate departure after the member rejoined. Keying on
+  // server+user with no expiry would swallow this one.
+  assert.equal(claimMemberEvent(...key, at + 60_000), true);
+  assert.equal(claimMemberEvent(...key, at + 60_500), false);
 });

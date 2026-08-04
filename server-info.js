@@ -106,6 +106,7 @@ export function buildServerInfoEmbed(client, serverId, overrides = {}) {
     "**Features · this server**",
     `**Auto-fetch:** ${fetchSummary(fetchChannels)}`,
     `**Audit log:** ${featureChannel(audit.enabled, audit.channelId)} · ${auditHealth(audit)}`,
+    `**Member events:** ${memberEventHealth(audit.memberEvents)}`,
     `**Settings monitor:** ${settingsHealth(audit.settings)}`,
     `**Automod:** ${modeChannel(automod.mode, automod.logChannelId)} · quorum ${integer(automod.quorum)}`,
     `**Post-gate:** ${modeChannel(postGate.mode, postGate.reviewChannelId)}`,
@@ -237,6 +238,21 @@ function auditHealth(audit) {
   const failures = integer(audit.consecutiveFailures);
   const queue = `${integer(audit.queuePending)}/${integer(audit.queueLimit)}`;
   return `${failures ? `${failures} recent failure(s)` : "delivery healthy"}; installation queue ${queue}`;
+}
+
+// Joins and leaves are the one audit path that can fail with nothing posted
+// and nothing logged, so report arrivals separately from deliveries: "seen"
+// with no "posted" means the gateway is delivering and something here is
+// discarding them; neither means the events are not reaching us at all.
+function memberEventHealth(stats) {
+  if (!stats) return "unavailable";
+  const seen = (value) => (value ? "seen" : "never seen");
+  const dropped = integer(stats.joinsDropped) + integer(stats.leavesDropped);
+  return (
+    `joins ${seen(stats.lastJoinSeenAt)}/${stats.lastJoinPostedAt ? "posted" : "never posted"} · ` +
+    `leaves ${seen(stats.lastLeaveSeenAt)}/${stats.lastLeavePostedAt ? "posted" : "never posted"}` +
+    `${dropped ? ` · ${dropped} dropped (${bounded(stats.lastDropReason ?? "unknown", 32)})` : ""}`
+  );
 }
 
 function settingsHealth(settings) {

@@ -95,6 +95,15 @@ function diagnostics(overrides = {}) {
       consecutiveFailures: 0,
       queuePending: 1,
       queueLimit: 50,
+      memberEvents: {
+        lastJoinSeenAt: NOW - DAY,
+        lastJoinPostedAt: null,
+        lastLeaveSeenAt: NOW - DAY,
+        lastLeavePostedAt: NOW - DAY,
+        joinsDropped: 2,
+        leavesDropped: 0,
+        lastDropReason: "join:audit_disabled",
+      },
       settings: {
         baselineReady: true,
         webhookFailures: 0,
@@ -124,6 +133,12 @@ test("renders scoped archive, feature, runtime, and safe host diagnostics", () =
   assert.doesNotMatch(embed.description, /wuwa/);
   assert.match(embed.description, /Audit log:\*\* on in <#auditA>/);
   assert.match(embed.description, /installation queue 1\/50/);
+  // Joins arriving but never posting is the exact shape of a silent member
+  // audit failure, so it has to be legible at a glance.
+  assert.match(
+    embed.description,
+    /Member events:\*\* joins seen\/never posted · leaves seen\/posted · 2 dropped \(join:audit_disabled\)/
+  );
   assert.match(
     embed.description,
     /Automod:\*\* enforce in <#automodA> · quorum 2/

@@ -354,6 +354,14 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ## 📝 Changelog
 
+### v2.4.2
+
+- Fixed member joins and leaves silently never reaching the audit channel; both are now read from the raw gateway stream as well as the Stoat library's own events, which drop a join whose account lookup fails and a departure whose payload does not match the expected shape
+- Each join and departure is still recorded exactly once regardless of which source delivered it
+- `/Test-AuditLog` and `/Server-Info` now report joins and leaves separately, distinguishing what arrived on the wire from what was posted, plus a running count of discarded events and the most recent reason
+- Member, identity, and nickname listeners now report their own failures instead of surfacing as an untraceable console error
+- An account Irminsul has never cached is reported with an unknown avatar instead of being flagged for review as a default-avatar account
+
 ### v2.4.1
 
 - Extended `/Ban` to use Stoat's native raw-account-ID support for current, departed, and never-joined accounts; no pending-ban list or join-event workaround is required

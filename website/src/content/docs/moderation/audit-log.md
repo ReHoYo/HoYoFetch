@@ -79,6 +79,18 @@ A join record no longer stops at a username. It carries every account and member
 
 A join titled **📥 Member Joined — review** has at least one signal; a plain **📥 Member Joined** does not. Signals are heuristics for a moderator to weigh, not proof that an account is a bot. The join record never fetches the account's bio or banner — it works entirely from data Irminsul already has cached, so a join surge cannot turn into a burst of extra API calls. See [Account checks](/HoYoFetch/moderation/account-checks/) for the same detail on demand via `/Get-Info`.
 
+When the account is not in Irminsul's cache, its avatar is reported as **unknown** rather than counted as a default avatar, so an uncached join is not flagged for review on that basis alone.
+
+## Confirming member events are arriving
+
+Joins and departures are the only audit records that can fail with nothing posted and nothing to show for it — the Stoat library discards a join whose account lookup fails, and an unrecognized departure payload used to be discarded outright. Irminsul now reads both from the raw gateway stream as well, so a record is posted even when the library drops its own event, and each arrival is logged exactly once regardless of which source delivered it.
+
+Both `/AuditLog test` and `/Server-Info` report what was seen on the wire separately from what was posted:
+
+- **seen but never posted** — the events are reaching Irminsul and something is discarding them. The accompanying drop reason names the cause.
+- **never seen** — Stoat is not delivering member events to this bot at all, which is a permission or server-side issue rather than a configuration one.
+- **dropped** — a running count, with the most recent reason.
+
 ## Recovering message content
 
 Delete events contain only a message ID. While audit logging is active, Irminsul records server messages to a local journal retained for 1 year and capped at 1,000,000 messages by default. This lets later edit and delete records include the content that the bot observed.
