@@ -993,10 +993,12 @@ export function initAuditLog(
     if (!isAuditLogEnabled(serverId))
       return skipMemberEvent("join", "audit_disabled");
 
-    await new Promise((resolve) => {
-      const timer = setTimeout(resolve, RAW_JOIN_FALLBACK_DELAY_MS);
-      timer?.unref?.();
-    });
+    // Deliberately not unref'd, unlike the long-lived intervals elsewhere in
+    // this file: a pending join is waiting on this timer, so letting the
+    // process exit before it fires would drop the very record it guards.
+    await new Promise((resolve) =>
+      setTimeout(resolve, RAW_JOIN_FALLBACK_DELAY_MS)
+    );
 
     const member =
       client.serverMembers?.getByKey?.({ server: serverId, user: userId }) ??
