@@ -5,6 +5,12 @@ description: Major public Irminsul capabilities and documentation milestones.
 
 ## Version 2.4.1
 
+### Native pre-join bans
+
+- Extended `/Ban` to accept a raw Stoat account ID for current, departed, or never-joined accounts. Irminsul now sends the ID directly to Stoat's native ban endpoint instead of requiring a current server membership.
+- Preserved moderator confirmation, fresh Ban Members checks, protected records, message cleanup for departed accounts, and the ten-minute unban reaction. `/Kick`, `/Mute`, and `/Automod release` remain current-member-only.
+- No pending-ban file or join-event workaround is used; Stoat owns and enforces the ban immediately.
+
 ### Stoat-hosted attachment archive
 
 - Replaced the persistent VPS attachment cache with immediate RAM-only copies into protected Stoat Logger cards. The local journal now keeps filenames, sizes, Stoat URLs, and protected record IDs but never attachment bytes.
