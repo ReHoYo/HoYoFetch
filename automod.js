@@ -3,6 +3,7 @@
 import { randomBytes } from "crypto";
 import { parseChannelArg } from "./auditlog.js";
 import { buildStatusEmbed } from "./embeds.js";
+import { DEFAULT_POLICY, policyFor } from "./moderation-policy.js";
 import {
   createAutomodCase,
   findActiveAutomodCase,
@@ -10,6 +11,7 @@ import {
   getAutomodCase,
   getAutomodConfig,
   getAutomodStrike,
+  getModerationLevel,
   isChannelExcluded,
   pruneAutomodCases,
   setAutomodConfig,
@@ -62,6 +64,7 @@ const DEFAULT_STORE = Object.freeze({
   getAutomodCase,
   getAutomodConfig,
   getAutomodStrike,
+  getModerationLevel,
   isChannelExcluded,
   pruneAutomodCases,
   setAutomodConfig,
@@ -130,7 +133,7 @@ export class AntiRaidDetector {
     this.joinStates = new Map();
   }
 
-  recordJoin(serverId, userId) {
+  recordJoin(serverId, userId, policy = DEFAULT_POLICY) {
     const now = this.now();
     let state = this.joinStates.get(serverId);
     if (!state) {
@@ -150,11 +153,8 @@ export class AntiRaidDetector {
     }
 
     let raidActivated = false;
-    if (
-      state.raidUntil <= now &&
-      state.joins.length >= AUTOMOD_LIMITS.joinSurgeCount
-    ) {
-      state.raidUntil = now + AUTOMOD_LIMITS.raidModeMs;
+    if (state.raidUntil <= now && state.joins.length >= policy.joinSurgeCount) {
+      state.raidUntil = now + policy.raidModeMs;
       raidActivated = true;
     }
     if (state.raidUntil > now) {
@@ -182,6 +182,7 @@ export class AntiRaidDetector {
     mentionIds = [],
     accountCreatedAt,
     joinedAt,
+    policy = DEFAULT_POLICY,
   }) {
     const now = this.now();
     const key = `${serverId}:${userId}`;
@@ -217,8 +218,8 @@ export class AntiRaidDetector {
     const joinedDuringRaid =
       (raidState?.joinedDuringRaid.get(userId) ?? 0) > now;
     const recentIdentity =
-      isRecent(asTime(accountCreatedAt), now, AUTOMOD_LIMITS.recentAccountMs) ||
-      isRecent(asTime(joinedAt), now, AUTOMOD_LIMITS.recentMemberMs);
+      isRecent(asTime(accountCreatedAt), now, policy.recentAccountMs) ||
+      isRecent(asTime(joinedAt), now, policy.recentMemberMs);
 
     const signals = {
       rapidBurst: rapid.length >= AUTOMOD_LIMITS.rapidMessages,
@@ -239,8 +240,11 @@ export class AntiRaidDetector {
       (signals.recentIdentity ? 1 : 0) +
       (signals.joinedDuringRaid ? 1 : 0);
 
+    // The behavioural signal stays mandatory at every level: raising the
+    // moderation level lowers how much corroboration one signal needs, but
+    // identity alone can still never trigger containment.
     return {
-      triggered: behaviourSignal && score >= 2,
+      triggered: behaviourSignal && score >= policy.scoreThreshold,
       score,
       signals,
       messages: history.map((entry) => ({
@@ -673,6 +677,7 @@ export function createAutomod(
       mentionIds: message.mentionIds,
       accountCreatedAt: message.author?.createdAt,
       joinedAt: message.member?.joinedAt,
+      policy: policyFor(store.getModerationLevel(serverId)),
     });
     if (result.triggered) await openCase(message, result, config);
   }
@@ -683,13 +688,14 @@ export function createAutomod(
     if (!isSafeId(serverId) || !isSafeId(userId) || member.user?.bot) return;
     const config = store.getAutomodConfig(serverId);
     if (config.mode === "off" || !isSafeId(config.logChannelId)) return;
-    const result = detector.recordJoin(serverId, userId);
+    const policy = policyFor(store.getModerationLevel(serverId));
+    const result = detector.recordJoin(serverId, userId, policy);
     if (!result.raidActivated) return;
     await postProtected(
       config.logChannelId,
       buildStatusEmbed(
         "🚨 Automod Raid Mode Activated",
-        `${result.joinCount} members joined within 60 seconds. Heightened risk weighting is active for 10 minutes. **No member was punished by the join surge alone.**`,
+        `${result.joinCount} members joined within 60 seconds. Heightened risk weighting is active for ${policy.raidModeMs / 60_000} minutes at moderation level ${policy.level}. **No member was punished by the join surge alone.**`,
         "#E67E22"
       )
     );

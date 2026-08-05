@@ -13,9 +13,11 @@ import {
   getAutomodConfig,
   getEnabledChannels,
   getExcludedChannels,
+  getModerationLevel,
   getPostGateConfig,
 } from "./store.js";
 import { getAuditDiagnostics } from "./auditlog.js";
+import { MODERATION_LEVEL_POLICIES } from "./moderation-policy.js";
 
 const require = createRequire(import.meta.url);
 const APP_VERSION = require("./package.json").version;
@@ -31,6 +33,7 @@ const DEFAULT_DEPS = Object.freeze({
   enabledChannels: getEnabledChannels,
   excludedChannels: getExcludedChannels,
   automodConfig: getAutomodConfig,
+  moderationLevel: getModerationLevel,
   postGateConfig: getPostGateConfig,
   auditDiagnostics: getAuditDiagnostics,
   systemMetrics: collectSystemMetrics,
@@ -84,6 +87,7 @@ export function buildServerInfoEmbed(client, serverId, overrides = {}) {
   const audit = safeProbe(() => deps.auditDiagnostics(serverId)) ?? {};
   const automod = safeProbe(() => deps.automodConfig(serverId)) ?? {};
   const postGate = safeProbe(() => deps.postGateConfig(serverId)) ?? {};
+  const level = safeProbe(() => deps.moderationLevel(serverId)) ?? {};
   const excluded = safeProbe(() => deps.excludedChannels(serverId)) ?? [];
   const enabled = safeProbe(() => deps.enabledChannels()) ?? [];
   const fetchChannels = enabled.filter(
@@ -104,6 +108,7 @@ export function buildServerInfoEmbed(client, serverId, overrides = {}) {
     `**Policy:** ${integer(policy.retentionMonths)} months · ${formatInteger(policy.maxMessages)} message installation cap`,
     "",
     "**Features · this server**",
+    `**Moderation level:** ${moderationLevelSummary(level)}`,
     `**Auto-fetch:** ${fetchSummary(fetchChannels)}`,
     `**Audit log:** ${featureChannel(audit.enabled, audit.channelId)} · ${auditHealth(audit)}`,
     `**Member events:** ${memberEventHealth(audit.memberEvents)}`,
@@ -232,6 +237,14 @@ function modeChannel(mode = "off", channelId) {
   return mode !== "off" && channelId
     ? `${label} in <#${bounded(channelId, 40)}>`
     : label;
+}
+
+function moderationLevelSummary(level) {
+  const policy = MODERATION_LEVEL_POLICIES[level?.level];
+  if (!policy) return "unavailable";
+  return policy.restrictSubTenure
+    ? `${policy.level} — ${policy.name} · tenure ${integer(level.tenureDays)}d`
+    : `${policy.level} — ${policy.name}`;
 }
 
 function auditHealth(audit) {
