@@ -89,6 +89,7 @@ function diagnostics(overrides = {}) {
       quorum: 2,
     }),
     postGateConfig: () => ({ mode: "monitor", reviewChannelId: "reviewA" }),
+    moderationLevel: () => ({ level: 3, tenureDays: 14 }),
     auditDiagnostics: () => ({
       enabled: true,
       channelId: "auditA",
@@ -143,6 +144,11 @@ test("renders scoped archive, feature, runtime, and safe host diagnostics", () =
     embed.description,
     /Automod:\*\* enforce in <#automodA> · quorum 2/
   );
+  // The tenure threshold only means anything at level 3, so it is shown there.
+  assert.match(
+    embed.description,
+    /Moderation level:\*\* 3 — Lockdown · tenure 14d/
+  );
   assert.match(embed.description, /Privacy exclusions:\*\* 1 channel/);
   assert.match(embed.description, /HoYoFetch 9\.8\.7/);
   assert.match(embed.description, /bot 1d 1h · VPS 10d 10h/);
@@ -166,6 +172,7 @@ test("uses explicit unavailable fallbacks when cached data or probes fail", () =
       excludedChannels: fail,
       automodConfig: fail,
       postGateConfig: fail,
+      moderationLevel: fail,
       auditDiagnostics: fail,
       systemMetrics: fail,
     })

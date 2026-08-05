@@ -322,6 +322,34 @@ test("reversible moderation actions support message lookup and expiry", () => {
   assert.equal(store.getModerationAction("MDACTION1"), null);
 });
 
+test("moderation level defaults to standard and clamps out-of-range values", () => {
+  assert.deepEqual(store.getModerationLevel("server-level"), {
+    level: 1,
+    tenureDays: 7,
+    updatedAt: null,
+    updatedBy: null,
+  });
+
+  store.setModerationLevel("server-level", { level: 3, updatedBy: "admin-1" });
+  const raised = store.getModerationLevel("server-level");
+  assert.equal(raised.level, 3);
+  assert.equal(raised.updatedBy, "admin-1");
+  assert.ok(raised.updatedAt);
+
+  // An unrecognised level must fall back to 1, never up into lockdown.
+  store.setModerationLevel("server-level", { level: 9 });
+  assert.equal(store.getModerationLevel("server-level").level, 1);
+
+  store.setModerationLevel("server-level", { tenureDays: 500 });
+  assert.equal(store.getModerationLevel("server-level").tenureDays, 30);
+  store.setModerationLevel("server-level", { tenureDays: 0 });
+  assert.equal(store.getModerationLevel("server-level").tenureDays, 1);
+
+  assert.doesNotThrow(() =>
+    JSON.parse(readFileSync(join(dataDir, "moderation_level.json"), "utf-8"))
+  );
+});
+
 test("post-gate configuration defaults off and persists mode + review channel", () => {
   assert.deepEqual(store.getPostGateConfig("server-postgate"), {
     mode: "off",

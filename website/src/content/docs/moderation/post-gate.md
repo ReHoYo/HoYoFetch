@@ -14,10 +14,10 @@ A message is deleted and queued for review only when **all** of the following ar
 - The server's post gate is in `hold` mode with a configured review channel.
 - The channel is not privacy-excluded via `/Exclude-Channel` — excluded channels retain nothing, so the gate never touches them.
 - The author is not a recognized moderator. This is checked with the same fresh permission verification `/Automod` uses, and fails closed: if the check itself is unavailable, nothing is held.
-- The message contains a link **or** at least one attachment.
+- The message contains a link **or** at least one attachment. At [moderation level](/moderation/levels/) 2 and above this condition is dropped — every message from a new account is held.
 - The author is, by locally cached or archived evidence, **new**:
-  - the account was created less than 7 days ago, or
-  - the author joined this server less than 24 hours ago, or
+  - the account was created less than 7 days ago (30 days at level 2 and above), or
+  - the author joined this server less than 24 hours ago (7 days at level 2 and above), or
   - the author has no other message Irminsul has archived in this server.
 
 Obfuscated links (spaced-out domains, homoglyphs, URL shorteners disguised as plain text) are not detected — the pattern matches ordinary `https://`, `www.`, and bare common-TLD links only.
@@ -56,12 +56,16 @@ Every held message posts a review card to the configured channel with the author
 /Post-Gate reject QUEUE_ID
 ```
 
-**Approve** downloads every held attachment from the Stoat review card into RAM, creates fresh one-use Stoat uploads, and reposts the complete content as Irminsul, attributed to the original author, in the original channel. If any attachment is unavailable, approval fails without a partial or text-only repost and the queue remains pending. After success, the review card is intentionally deleted and untracked.
+**Approve** clears the **author**, not the content. It deletes the review card and resets the author's automod strike to zero, so a member caught by the gate is not left carrying an escalation they did not earn. The held content is **not** reposted — the author is free to post it again themselves.
+
+:::caution[Approving no longer reposts]
+Earlier versions re-uploaded every held attachment and republished the message as Irminsul, attributed to the original author. During a troll wave that turned the review queue into a delivery mechanism: a moderator's "this account is fine" also relaunched whatever the account had posted. Approval now only clears the account. The archived copy stays on the review card as the evidence record until the card is deleted.
+:::
 
 **Reject** deletes the review card and its Stoat media, discards the held content, and increases the author's automod strike level by one (capped at 4) — the same ladder `/Automod` escalates on repeated triggers. Rejection does **not** apply a timeout by itself; it only means the _next_ automod trigger for that account escalates faster.
 
 An unreviewed hold expires after **7 days**: the review card and its Stoat media are deleted, the queued content is discarded with no strike, and a notice is posted to the review channel.
 
-:::note[Reversible by design]
-A held post never leaves the server permanently without a decision — it is either reposted, discarded with a recorded strike, or discarded after 7 days of no response. This is why review only needs one moderator instead of the two-approval quorum `/Automod` requires for a permanent ban.
+:::note[One moderator is enough]
+Neither outcome is permanent for the account: approval clears its strike, rejection only moves it one rung up a ladder that resets after 14 quiet days, and an ignored hold expires on its own. This is why review needs one moderator instead of the two-approval quorum `/Automod` requires for a permanent ban.
 :::
