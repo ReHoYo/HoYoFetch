@@ -119,6 +119,7 @@ function makeHarness({
   attachmentDownloadFails = false,
   attachmentUploadFails = false,
   moderationLevel = 1,
+  onMessageDeleted = () => {},
 } = {}) {
   let current = clock;
   const store = makeStore({ moderationLevel });
@@ -216,7 +217,14 @@ function makeHarness({
       method === "DELETE" &&
       /^\/channels\/[^/]+\/messages\/[^/]+$/.test(path)
     ) {
-      deletedMessageIds.push(path.split("/").pop());
+      const deletedId = path.split("/").pop();
+      deletedMessageIds.push(deletedId);
+      // Mirrors revolt.js: the server's MessageDelete gateway event (fired in
+      // response to our own DELETE) clears the client's message collection,
+      // so any live-getter reads off the Message object after this point see
+      // undefined. Tests that pass a volatile message use this to simulate
+      // that race deterministically.
+      onMessageDeleted(deletedId);
       return { ok: true, status: 200 };
     }
     if (method === "PUT" && path.includes("/reactions/")) {
@@ -316,6 +324,46 @@ function newAccountMessage({
   };
 }
 
+// Reproduces revolt.js's live-getter Message shape: authorId/content/
+// attachments read from a mutable backing store, exactly like
+// `Collection#getUnderlyingObject`. Calling `evict()` empties that store,
+// simulating the client's MessageDelete handler wiping the collection entry
+// after the bot's own DELETE request. A test wires `evict` to the harness's
+// `onMessageDeleted` hook to reproduce the race deterministically.
+function volatileAccountMessage({
+  id,
+  authorId = NEW_USER_ID,
+  channelId = SOURCE_CHANNEL_ID,
+  content = "",
+  attachments = [],
+  createdAt = new Date(1_800_000_000_000 - 60_000),
+  joinedAt = new Date(1_800_000_000_000 - 60_000),
+} = {}) {
+  let backing = { authorId, content, attachments };
+  return {
+    id,
+    channelId,
+    serverId: SERVER_ID,
+    server: { id: SERVER_ID },
+    author: { createdAt },
+    member: { joinedAt },
+    get authorId() {
+      return backing.authorId;
+    },
+    get content() {
+      // Matches revolt.js's own `?? ""` fallback on the content getter, so
+      // post-eviction content reads back as "" rather than undefined.
+      return backing.content ?? "";
+    },
+    get attachments() {
+      return backing.attachments;
+    },
+    evict() {
+      backing = {};
+    },
+  };
+}
+
 async function enableHold(harness) {
   harness.store.setPostGateConfig(SERVER_ID, {
     mode: "hold",
@@ -344,6 +392,36 @@ test("holds a first-post link from a brand-new account", async () => {
   const [record] = [...harness.store.queue.values()];
   assert.equal(record.status, "pending");
   assert.equal(record.userId, NEW_USER_ID);
+});
+
+test("captures author id and content even when the deletion clears the live message object first", async () => {
+  // Regression test for the "Author: <@undefined>" bug: revolt.js Message
+  // fields are live getters, and the client clears its collection entry in
+  // response to the server's MessageDelete event fired by our own DELETE.
+  // `onMessageDeleted` simulates that race landing as early as possible —
+  // right when the DELETE call resolves, before the queue record is built.
+  const harness = makeHarness({
+    onMessageDeleted: (deletedId) => {
+      if (deletedId === "MSGVOLATILE1") volatileMessage.evict();
+    },
+  });
+  await enableHold(harness);
+
+  const volatileMessage = volatileAccountMessage({
+    id: "MSGVOLATILE1",
+    content: "check out https://evil.example/free-nitro",
+  });
+  await harness.postGate.handleMessage(volatileMessage);
+
+  assert.deepEqual(harness.deletedMessageIds, ["MSGVOLATILE1"]);
+  const [record] = [...harness.store.queue.values()];
+  assert.equal(record.userId, NEW_USER_ID);
+  assert.equal(record.content, "check out https://evil.example/free-nitro");
+
+  const embed = harness.protectedLogs[0].payload.embeds[0];
+  const embedText = JSON.stringify(embed);
+  assert.match(embedText, new RegExp(`<@${NEW_USER_ID}>`));
+  assert.doesNotMatch(embedText, /undefined/);
 });
 
 test("holds a first-post attachment from a brand-new account", async () => {
@@ -696,6 +774,45 @@ test("rejecting a held post discards it and increases the automod strike level",
     ["reject", second.queueId]
   );
   assert.equal(harness.store.getAutomodStrike(SERVER_ID, NEW_USER_ID).level, 2);
+});
+
+test("rejecting a legacy queue entry with no recorded author id resolves it without striking a phantom user", async () => {
+  // Simulates an entry created before the authorId-snapshot fix landed:
+  // JSON.stringify drops `undefined`, so a broken entry on disk simply has
+  // no userId key at all.
+  const harness = makeHarness();
+  await enableHold(harness);
+  harness.store.queue.set("PGDLEGACY1", {
+    queueId: "PGDLEGACY1",
+    serverId: SERVER_ID,
+    channelId: SOURCE_CHANNEL_ID,
+    messageId: "MSGLEGACY1",
+    content: "",
+    attachments: [],
+    reviewChannelId: REVIEW_CHANNEL_ID,
+    reviewMessageId: null,
+    status: "pending",
+    createdAt: 1_800_000_000_000,
+    expiresAt: 1_800_000_000_000 + 7 * 24 * 60 * 60 * 1_000,
+  });
+
+  const result = await harness.postGate.handleCommand(
+    {
+      server: { id: SERVER_ID },
+      channelId: REVIEW_CHANNEL_ID,
+      authorId: MOD_USER_ID,
+    },
+    ["reject", "PGDLEGACY1"]
+  );
+
+  assert.equal(result.outcome, "rejected");
+  assert.equal(result.strikeLevel, null);
+  assert.equal(harness.store.getHeldPost("PGDLEGACY1").status, "rejected");
+  assert.equal(harness.store.strikes.has(`${SERVER_ID}:undefined`), false);
+  assert.equal(harness.store.strikes.size, 0);
+
+  const outcomeEmbed = harness.protectedLogs.at(-1).payload.embeds[0];
+  assert.doesNotMatch(JSON.stringify(outcomeEmbed), /undefined/);
 });
 
 test("an unreviewed held post expires after 7 days with no strike", async () => {

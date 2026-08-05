@@ -165,6 +165,7 @@ export function createPostGate(
   }
 
   function actorLabel(userId) {
+    if (!isSafeId(userId)) return "*(unknown — author id not recorded)*";
     const username = client.users?.get?.(userId)?.username;
     return username ? `@${username} (<@${userId}>)` : `<@${userId}>`;
   }
@@ -679,18 +680,14 @@ export function createPostGate(
   async function holdMessage(
     serverId,
     channelId,
-    message,
+    held,
     config,
     resolveDecision
   ) {
-    const messageId = message.id ?? message._id;
-    const prepared = await prepareAttachmentCopies(
-      client,
-      message.attachments,
-      {
-        fetchImpl,
-      }
-    );
+    const messageId = held.id;
+    const prepared = await prepareAttachmentCopies(client, held.attachments, {
+      fetchImpl,
+    });
 
     const deleted = await request(
       "DELETE",
@@ -710,9 +707,9 @@ export function createPostGate(
       queueId: queueIdFactory(),
       serverId,
       channelId,
-      userId: message.authorId,
+      userId: held.authorId,
       messageId,
-      content: message.content ?? "",
+      content: held.content,
       attachments: prepared.descriptors,
       reviewChannelId: config.reviewChannelId,
       reviewMessageId: null,
@@ -742,7 +739,7 @@ export function createPostGate(
       );
     }
     logger.log?.(
-      `🛑  post-gate held queue=${auditAlias(record.queueId)} actor=${auditAlias(message.authorId)} server=${auditAlias(serverId)}`
+      `🛑  post-gate held queue=${auditAlias(record.queueId)} actor=${auditAlias(held.authorId)} server=${auditAlias(serverId)}`
     );
   }
 
@@ -778,6 +775,18 @@ export function createPostGate(
     // running (and racing the archive) on every message.
     if (!isFirstPostCandidate(serverId, authorId, message, policy)) return;
 
+    // revolt.js Message fields are live getters into the client's message
+    // collection. holdMessage deletes the message before it needs these
+    // values, and our own DELETE triggers a MessageDelete gateway event that
+    // clears that collection entry — so anything read off `message` after
+    // that point can come back undefined. Snapshot now, before any await.
+    const held = {
+      id: messageId,
+      authorId,
+      content: message.content ?? "",
+      attachments: message.attachments ?? [],
+    };
+
     let resolveDecision;
     const decision = new Promise((resolve) => {
       resolveDecision = resolve;
@@ -803,7 +812,7 @@ export function createPostGate(
         return;
       }
 
-      await holdMessage(serverId, channelId, message, config, resolveDecision);
+      await holdMessage(serverId, channelId, held, config, resolveDecision);
     } catch (error) {
       logFailure("hold decision failed", error);
       resolveDecision(false);
@@ -818,7 +827,7 @@ export function createPostGate(
     record,
     outcome,
     moderatorId,
-    { strikeCleared = false } = {}
+    { strikeCleared = false, strikeSkipped = false } = {}
   ) {
     const title =
       outcome === "approved"
@@ -827,7 +836,7 @@ export function createPostGate(
     const description =
       outcome === "approved"
         ? `${actorLabel(record.userId)} was cleared${strikeCleared ? " and their automod strike was reset" : ""}. The content was **not** reposted to ${channelLabel(record.channelId)} — they can post it again themselves.`
-        : `The held content from ${actorLabel(record.userId)} was discarded and their automod strike level was increased.`;
+        : `The held content from ${actorLabel(record.userId)} was discarded${strikeSkipped ? " (no automod strike was recorded — the original author's id was not captured)" : " and their automod strike level was increased"}.`;
     await sendAccountability(
       record.serverId,
       title,
@@ -889,9 +898,11 @@ export function createPostGate(
     // the evidence record.
     const reviewDeleted = await deleteReviewCard(record);
     if (!reviewDeleted) logger.warn?.("post-gate: review card cleanup failed");
-    const strikeCleared = Boolean(
-      store.clearAutomodStrike(record.serverId, record.userId)
-    );
+    // Legacy queue entries from before the authorId-snapshot fix may have no
+    // userId recorded — never touch the strike store under a phantom key.
+    const strikeCleared =
+      isSafeId(record.userId) &&
+      Boolean(store.clearAutomodStrike(record.serverId, record.userId));
     store.updateHeldPost(queueId, {
       status: "approved",
       reviewedBy: moderatorId,
@@ -920,22 +931,30 @@ export function createPostGate(
     if (!reviewDeleted) logger.warn?.("post-gate: review card cleanup failed");
 
     const current = now();
-    const stored = store.getAutomodStrike(record.serverId, record.userId);
-    const level = nextStrikeLevel(stored, current);
-    store.setAutomodStrike(record.serverId, record.userId, {
-      level,
-      lastContainedAt: current,
-      timeoutUntil: stored?.timeoutUntil ?? null,
-    });
+    // Legacy queue entries from before the authorId-snapshot fix may have no
+    // userId recorded — never strike a phantom "serverId:undefined" user.
+    const strikeSkipped = !isSafeId(record.userId);
+    let level = null;
+    if (!strikeSkipped) {
+      const stored = store.getAutomodStrike(record.serverId, record.userId);
+      level = nextStrikeLevel(stored, current);
+      store.setAutomodStrike(record.serverId, record.userId, {
+        level,
+        lastContainedAt: current,
+        timeoutUntil: stored?.timeoutUntil ?? null,
+      });
+    }
 
     store.updateHeldPost(queueId, {
       status: "rejected",
       reviewedBy: moderatorId,
       reviewedAt: current,
     });
-    await notifyReviewOutcome(record, "rejected", moderatorId);
+    await notifyReviewOutcome(record, "rejected", moderatorId, {
+      strikeSkipped,
+    });
     logger.log?.(
-      `🛑  post-gate rejected queue=${auditAlias(queueId)} moderator=${auditAlias(moderatorId)} strike=${level}`
+      `🛑  post-gate rejected queue=${auditAlias(queueId)} moderator=${auditAlias(moderatorId)} strike=${level ?? "skipped"}`
     );
     return { outcome: "rejected", strikeLevel: level };
   }
