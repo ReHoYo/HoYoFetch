@@ -179,6 +179,19 @@ test("every privileged command and alias uses manager access", () => {
       COMMAND_ACCESS.FETCH_MANAGER
     );
   }
+  for (const command of [
+    "level",
+    "level status",
+    "level 1",
+    "level 2",
+    "level 3 confirm",
+    "level tenure 14",
+  ]) {
+    assert.equal(
+      getCommandAccess(command, GAME_COMMANDS),
+      COMMAND_ACCESS.FETCH_MANAGER
+    );
+  }
   assert.equal(
     getCommandAccess("automod approve AM123", GAME_COMMANDS),
     COMMAND_ACCESS.BAN_APPROVER

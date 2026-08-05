@@ -7,7 +7,7 @@ description: Major public Irminsul capabilities and documentation milestones.
 
 ### Moderation levels
 
-- Added `/Level 1|2|3`, a single dial for the whole server's moderation posture, requiring server owner or Manage Server. Every server starts at level 1, which is the behavior that existed before this release, and `/Level 1` stands everything back down.
+- Added `/Level 1|2|3`, a single dial for the whole server's moderation posture, using the same capability-based moderator policy as `/Automod` and `/Post-Gate` (owner, Manage Server, or a recognized moderation capability). Every server starts at level 1, which is the behavior that existed before this release, and `/Level 1` stands everything back down.
 - **Level 2** holds every message from a new account instead of only links and attachments, widens "new account" from 7 days to 30 and "new member" from 24 hours to 7 days, lets automod act on a single behavioral signal, and trips raid mode at 3 joins in 60 seconds for 30 minutes.
 - **Level 3** adds two enforcement actions: every new join is kicked on sight, and members who joined less than the tenure threshold ago (default 7 days, adjustable with `/Level tenure <1-30>`) have their messages deleted and their automod strike raised.
 - A behavioral signal remains mandatory at every level. Being new, or joining during a raid, still only adds weight to observed behavior and can never trigger containment on its own.
