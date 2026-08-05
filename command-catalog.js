@@ -454,7 +454,7 @@ export const COMMAND_CATALOG = Object.freeze([
     ],
     notes: [
       "Level 1 is the default: links and attachments from new or first-time posters are held for review.",
-      "Level 2 holds every message from a new account, widens the new-account window to 30 days, and lets automod trip on a single behavioural signal.",
+      "Level 2 widens the new-account window to 30 days and lets automod trip on a single behavioural signal; it still only holds links and attachments, same as level 1.",
       "Level 3 additionally kicks every new join and deletes messages from members below the tenure threshold; bots and verified moderators are exempt from the kick.",
       "Level 3 requires the literal word `confirm` and an automod log channel, so every automatic kick is recorded.",
     ],
