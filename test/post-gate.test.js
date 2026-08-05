@@ -506,7 +506,12 @@ test("exempts a recognized moderator even on a brand-new account", async () => {
   assert.equal(harness.store.queue.size, 0);
 });
 
-test("moderation level 2 holds a plain-text first post with no link or attachment", async () => {
+test("moderation level 2 still ignores a plain-text first post with no link or attachment", async () => {
+  // holdEveryMessage was retired at levels 2/3: mods reported that holding
+  // every new-account message (not just links/attachments) chilled new
+  // members and was an unsustainable review burden. All levels now share the
+  // same link/attachment trigger; level 2 tightens who counts as "new" and
+  // automod's trip threshold instead.
   const harness = makeHarness({ moderationLevel: 2 });
   await enableHold(harness);
 
@@ -514,18 +519,8 @@ test("moderation level 2 holds a plain-text first post with no link or attachmen
     newAccountMessage({ id: "MSGLEVEL2", content: "hey everyone" })
   );
 
-  assert.deepEqual(harness.deletedMessageIds, ["MSGLEVEL2"]);
-  const [record] = [...harness.store.queue.values()];
-  assert.equal(record.status, "pending");
-  assert.equal(record.content, "hey everyone");
-  // The archive must skip a message the gate is about to delete, even without
-  // the link/attachment signal that used to be the precondition.
-  assert.equal(
-    await harness.postGate.shouldExcludeMessage(
-      newAccountMessage({ id: "MSGLEVEL2", content: "hey everyone" })
-    ),
-    false
-  );
+  assert.equal(harness.deletedMessageIds.length, 0);
+  assert.equal(harness.store.queue.size, 0);
 });
 
 test("moderation level 2 still exempts an established member", async () => {

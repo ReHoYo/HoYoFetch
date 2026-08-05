@@ -372,10 +372,14 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ## 📝 Changelog
 
+### v2.5.1
+
+- Level 2 and 3 no longer hold every message from a new account — all three levels now hold the same trigger, links and attachments, and rely on the wider new-account window and lower automod threshold to cover text-only abuse instead of queuing every plain-text message for manual review
+
 ### v2.5.0
 
 - Added `/Level 1|2|3`, a server-wide moderation posture that retunes the post gate, automod's trigger threshold, and raid-mode sensitivity in one command _(same capability-based moderator policy as `/Automod` and `/Post-Gate`)_
-- Level 2 holds every message from a new account rather than only links and attachments, widens the new-account window to 30 days, and lets automod act on a single behavioural signal; a behavioural signal remains mandatory at every level, so being new still cannot trigger containment on its own
+- Level 2 widens the new-account window to 30 days and lets automod act on a single behavioural signal; a behavioural signal remains mandatory at every level, so being new still cannot trigger containment on its own
 - Level 3 is lockdown: every new join is kicked on sight, and members who joined less than the tenure threshold ago (default 7 days, `/Level tenure <1-30>`) have their messages deleted and their automod strike raised, at most one strike per 15 minutes
 - Level 3 requires the literal word `confirm` and a configured automod log channel, and never kicks bots, verified moderators, or a joiner whose permission check could not complete
 - `/Post-Gate approve` no longer reposts the held content; it clears the author and resets their automod strike instead, so approving an account during a wave cannot republish what it posted

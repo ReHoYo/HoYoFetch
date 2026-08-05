@@ -22,6 +22,14 @@ const DAY = 24 * HOUR;
  * requirement rather than replacing it. One signal is enough at level 2, but
  * identity alone (a new account, a raid-window join) still cannot trigger
  * containment at any level — nobody is punished merely for being new.
+ *
+ * `holdEveryMessage` used to be true at levels 2 and 3, queuing every plain
+ * text message from a new account for manual approval. Mods reported that
+ * this both chilled new members (who'd give up before anyone reviewed their
+ * "hi everyone") and became an unsustainable review burden. All three levels
+ * now hold the same trigger — links and attachments — and lean on the wider
+ * account/member windows plus the lower automod score threshold to cover
+ * text-only abuse instead of a blanket queue.
  */
 export const MODERATION_LEVEL_POLICIES = Object.freeze({
   1: Object.freeze({
@@ -42,8 +50,8 @@ export const MODERATION_LEVEL_POLICIES = Object.freeze({
     level: 2,
     name: "Heightened",
     summary:
-      "Every message from a new account is held, the new-account window widens, and automod trips on a single behavioural signal.",
-    holdEveryMessage: true,
+      "Links and attachments from new accounts are held, the new-account window widens, and automod trips on a single behavioural signal.",
+    holdEveryMessage: false,
     recentAccountMs: 30 * DAY,
     recentMemberMs: 7 * DAY,
     scoreThreshold: 1,
@@ -57,7 +65,7 @@ export const MODERATION_LEVEL_POLICIES = Object.freeze({
     name: "Lockdown",
     summary:
       "Everything in level 2, plus every new join is kicked and members below the tenure threshold cannot post.",
-    holdEveryMessage: true,
+    holdEveryMessage: false,
     recentAccountMs: 30 * DAY,
     recentMemberMs: 7 * DAY,
     scoreThreshold: 1,

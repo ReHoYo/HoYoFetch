@@ -768,8 +768,9 @@ export function createPostGate(
     if (config.mode !== "hold" || !isSafeId(config.reviewChannelId)) return;
     if (channelId === config.reviewChannelId) return;
     if (store.isChannelExcluded(channelId)) return;
-    // Level 1 only holds links and attachments; from level 2 up, every
-    // message from a new account is held.
+    // All levels hold only links and attachments; levels 2/3 widen who
+    // counts as "new" and lower automod's trip threshold instead of
+    // holding plain text.
     const policy = policyFor(store.getModerationLevel(serverId));
     if (!policy.holdEveryMessage && !hasLinkOrAttachment(message)) return;
     // The first-post signal is only meaningful for a message actually
@@ -1114,9 +1115,9 @@ export function createPostGate(
 
   async function shouldExcludeMessage(message) {
     const messageId = message?.id ?? message?._id;
-    // Mirrors handleMessage's own eligibility check: at level 2 and up a
-    // plain-text message can be held too, and the archive must not record a
-    // message this module is about to delete.
+    // Mirrors handleMessage's own eligibility check: only links/attachments
+    // are ever held, and the archive must not record a message this module
+    // is about to delete.
     const serverId = serverIdFrom(message);
     const policy = isSafeId(serverId)
       ? policyFor(store.getModerationLevel(serverId))

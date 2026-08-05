@@ -3,6 +3,13 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Version 2.5.1
+
+### Level 2/3 no longer hold plain text
+
+- Levels 2 and 3 dropped `holdEveryMessage`: they now hold the same trigger as level 1 — links and attachments — instead of queuing every message a new account posts. Moderators reported that holding plain-text greetings both discouraged new members from sticking around and made the review queue unsustainable to keep up with.
+- The wider "new account"/"new member" windows, the lower automod score threshold, and (at level 3) kick-on-join and tenure-gated posting are unchanged, so levels 2 and 3 are still meaningfully stricter than level 1. Text-only abuse from a new account is now covered by automod's behavioral scoring rather than by manual review of every message.
+
 ## Version 2.5.0
 
 ### Moderation levels

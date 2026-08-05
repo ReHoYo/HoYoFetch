@@ -223,7 +223,8 @@ test("each level is strictly stricter than the one below it", () => {
     (level) => MODERATION_LEVEL_POLICIES[level]
   );
   assert.equal(one.holdEveryMessage, false);
-  assert.equal(two.holdEveryMessage, true);
+  assert.equal(two.holdEveryMessage, false);
+  assert.equal(three.holdEveryMessage, false);
   assert.ok(two.recentAccountMs > one.recentAccountMs);
   assert.ok(two.scoreThreshold < one.scoreThreshold);
   assert.ok(two.joinSurgeCount < one.joinSurgeCount);
