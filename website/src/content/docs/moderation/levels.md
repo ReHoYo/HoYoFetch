@@ -15,7 +15,7 @@ Every other moderation feature in Irminsul is tuned for ordinary conditions. Whe
 /Level tenure 14
 ```
 
-`/Level` requires **server owner or Manage Server**. Level changes are recorded in the automod log channel.
+`/Level` uses the same capability-based moderator policy as `/Automod` and `/Post-Gate`: the server owner, **Manage Server**, or a recognized moderation capability (**Kick Members**, **Ban Members**, **Timeout Members**, or effective **Manage Messages** in the current channel). Level changes are recorded in the automod log channel.
 
 ## What each level does
 

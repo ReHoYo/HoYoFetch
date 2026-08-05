@@ -438,12 +438,13 @@ export const COMMAND_CATALOG = Object.freeze([
     id: "level",
     section: COMMAND_SECTIONS.MODERATION,
     route: "level",
-    access: "admin",
+    access: "fetch_manager",
     syntax: "/Level [status|1|2|3 confirm|tenure <days>]",
     summary:
       "Set the server-wide moderation posture from standard to lockdown.",
-    help: "Dial the whole server's protection up or down. Level 3 kicks every new join _(Manage Server)_",
-    permission: "Server owner or Manage Server",
+    help: "Dial the whole server's protection up or down. Level 3 kicks every new join _(admins/mods only)_",
+    permission:
+      "Server owner, Manage Server, or a recognized moderation capability",
     examples: [
       "/Level status",
       "/Level 2",
