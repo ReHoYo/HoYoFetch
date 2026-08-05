@@ -66,7 +66,7 @@ export function getCommandAccess(body, commandGameMap = {}) {
     return COMMAND_ACCESS.FETCH_MANAGER;
   }
   if (body === "level" || body.startsWith("level ")) {
-    return COMMAND_ACCESS.ADMIN;
+    return COMMAND_ACCESS.FETCH_MANAGER;
   }
   const baseCommand = body.split(/\s+/, 1)[0];
   if (COMMAND_ACCESS_BY_ROUTE[baseCommand]) {
