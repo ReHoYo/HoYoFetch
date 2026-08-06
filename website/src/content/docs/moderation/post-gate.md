@@ -68,6 +68,19 @@ After the review channel is configured, any recognized moderator may inspect or 
 | 3     | Bypassed to prevent queue floods                           | Removed                    | Silently deleted             | No                                                         | Immediate after permission checks            |
 | 4     | Bypassed to prevent queue floods                           | Removed                    | Silently deleted             | Yes, when the message reaches Irminsul through an override | `/Level 4 confirm`, then ✅ within 2 minutes |
 
+### Which level should moderators use?
+
+Use the lowest level that fits the incident, then downgrade when the risk has passed:
+
+| Level                      | Recommended situation                                                                             | What members experience                                                                                   | Important limitation                                                                                        |
+| -------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **1 — Routine**            | Normal day-to-day operation                                                                       | Normal conversation continues; qualifying link/media posts from new or first-time members wait for review | Text-only posts are not held                                                                                |
+| **2 — Elevated**           | A small suspected bot raid or credible warning                                                    | Currently the same enforcement as Level 1                                                                 | Level 2 records an intentionally elevated posture but does not yet tighten thresholds or block more content |
+| **3 — Raid lockdown**      | A large or active raid where stopping message volume matters more than uninterrupted conversation | The default role cannot send; non-exempt messages that bypass the lock are silently deleted               | Authors are not automatically banned                                                                        |
+| **4 — Emergency lockdown** | The most severe raid, when bypass attempts should be removed from the server                      | Level 3's lockdown remains active; non-exempt authors who post through an override are also banned        | Irminsul cannot ban an ordinary blocked sender because Stoat creates no message event identifying them      |
+
+Levels 1–2 are preventative review modes. They catch common link and media bot spam while keeping ordinary chat available, but they do not guarantee that every bot or text-only abuse attempt is blocked. Levels 3–4 are disruptive server-wide incident controls and should be reserved for an active raid. Level 4 is not a stronger permission barrier than Level 3; its additional action is the automatic ban applied when a message slips through an explicit permission override.
+
 ### Levels 3–4 lockdown
 
 - Irminsul removes **Send Messages** from the server default role. Trusted staff and bot roles need an explicit Send Messages grant to remain active.
