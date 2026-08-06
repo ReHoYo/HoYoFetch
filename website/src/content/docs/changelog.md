@@ -3,7 +3,7 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
-## Unreleased
+## Version 3.0.0
 
 ### Server moderation levels
 
@@ -12,6 +12,7 @@ description: Major public Irminsul capabilities and documentation milestones.
 - Persisted permission-lock ownership so downgrades restore only the Send Messages bit Irminsul removed; startup, server-update, and periodic reconciliation repair drift.
 - Lockdown messages bypass review, automod, commands, attachment copies, and message archives to prevent queue floods.
 - Renamed the separate per-member automod timeout ladder publicly to strike stages while preserving its existing persisted data.
+- Consolidated the four strike stages into one canonical table and shortened the repeated post-gate explanation.
 
 ## Version 2.5.1
 
@@ -50,12 +51,6 @@ description: Major public Irminsul capabilities and documentation milestones.
 
 ## Version 2.4.1
 
-### Native pre-join bans
-
-- Extended `/Ban` to accept a raw Stoat account ID for current, departed, or never-joined accounts. Irminsul now sends the ID directly to Stoat's native ban endpoint instead of requiring a current server membership.
-- Preserved moderator confirmation, fresh Ban Members checks, protected records, message cleanup for departed accounts, and the ten-minute unban reaction. `/Kick`, `/Mute`, and `/Automod release` remain current-member-only.
-- No pending-ban file or join-event workaround is used; Stoat owns and enforces the ban immediately.
-
 ### Stoat-hosted attachment archive
 
 - Replaced the persistent VPS attachment cache with immediate RAM-only copies into protected Stoat Logger cards. The local journal now keeps filenames, sizes, Stoat URLs, and protected record IDs but never attachment bytes.
@@ -65,10 +60,6 @@ description: Major public Irminsul capabilities and documentation milestones.
 - Retired `AUDITLOG_EVIDENCE_BUDGET_MB`; `AUDITLOG_EVIDENCE_MAX_MB=0` is now the metadata-only opt-out.
 
 ## Version 2.4.0
-
-### Server diagnostics
-
-- Added `/Server-Info` for recognized administrators and moderators, combining cached server inventory, server-scoped archive coverage, configured safety features, audit health, process uptime, and safe aggregate VPS metrics without making live Stoat requests or exposing host identifiers and paths.
 
 ### First-post gate
 

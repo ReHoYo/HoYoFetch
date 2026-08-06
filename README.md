@@ -373,7 +373,7 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ## 📝 Changelog
 
-### Next
+### v3.0.0
 
 - Replaced the short-lived threshold/kick-based `/Level 1|2|3` posture with Post Gate-backed Levels 1–4: Levels 1–2 review qualifying links/media, Level 3 locks default-role sending with deletion fallback, and reaction-confirmed Level 4 also bans slipped-message authors
 - Hardened Levels 1–2 against common link obfuscation using bounded Unicode, whitespace, protocol, punctuation, domain, and IP normalization while retaining the original post for review
@@ -400,7 +400,6 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ### v2.4.1
 
-- Extended `/Ban` to use Stoat's native raw-account-ID support for current, departed, and never-joined accounts; no pending-ban list or join-event workaround is required
 - Replaced the persistent VPS attachment cache with immediate RAM-only copies into protected Stoat Logger cards; the local journal keeps filenames, sizes, Stoat URLs, and protected record IDs but never attachment bytes
 - Delete/edit records reference the existing Logger card, bulk deletes reply to at most five cards without re-uploading media, and a bounded two-worker 50-message archive queue reports precise transfer failure reasons
 - Moved first-post attachment storage to the Stoat review card; approval, rejection, and expiry remove the review card on completion, and metadata-only tamper restoration plus legacy `data/evidence/` cleanup were added

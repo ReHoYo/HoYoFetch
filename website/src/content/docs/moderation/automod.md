@@ -34,26 +34,16 @@ Five joins within 60 seconds activate heightened weighting for ten minutes and c
 
 ## Containment strike stages
 
-Successful enforcement advances a persistent ladder:
+Automod detections and rejected [held first posts](/HoYoFetch/moderation/post-gate/) advance the same persistent level. Their immediate effects differ:
 
-| Stage | Containment duration |
-| ----- | -------------------- |
-| 1     | 10 minutes           |
-| 2     | 1 hour               |
-| 3     | 24 hours             |
-| 4     | 7 days               |
+| Stored stage after the event | Direct automod trigger                                            | Post-gate rejection                   | Next direct automod trigger |
+| ---------------------------- | ----------------------------------------------------------------- | ------------------------------------- | --------------------------- |
+| Stage 1                      | 10-minute timeout in enforce mode; projected only in monitor mode | No timeout                            | Stage 2 (1 hour)            |
+| Stage 2                      | 1-hour timeout in enforce mode; projected only in monitor mode    | No timeout                            | Stage 3 (24 hours)          |
+| Stage 3                      | 24-hour timeout in enforce mode; projected only in monitor mode   | No timeout                            | Stage 4 (7 days)            |
+| Stage 4                      | 7-day timeout in enforce mode; projected only in monitor mode     | No timeout; remains capped at stage 4 | Stage 4 (7 days)            |
 
-Further triggers remain capped at seven days. The ladder resets after 14 quiet days. Activity while the same timeout is active extends containment without creating another strike or approval prompt.
-
-### Post-gate rejections share these stages
-
-A moderator's rejection of a [held first post](/HoYoFetch/moderation/post-gate/) advances this same
-stored stage but does not apply the stage's timeout. For example, the first held-post rejection
-stores stage 1 with no timeout; a later, separate automod trigger advances to stage 2 and projects
-or applies a one-hour timeout, depending on whether the server is in monitor or enforce mode.
-
-Approval of a held post, an unreviewed hold expiring after seven days, and the act of holding a post
-do not change the stage. A rejection refreshes the same 14-day quiet-reset clock used by automod.
+The first stage-advancing event after a reset reaches stage 1 and refreshes the 14-day quiet-reset clock. Approval, expiry, and the act of holding a post do not change the stage. Activity while the same timeout is active extends containment without advancing the stage or opening another approval prompt.
 
 ## Permanent bans require people
 
