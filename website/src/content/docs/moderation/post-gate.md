@@ -56,12 +56,48 @@ Every held message posts a review card to the configured channel with the author
 /Post-Gate reject QUEUE_ID
 ```
 
-**Approve** downloads every held attachment from the Stoat review card into RAM, creates fresh one-use Stoat uploads, and reposts the complete content as Irminsul, attributed to the original author, in the original channel. If any attachment is unavailable, approval fails without a partial or text-only repost and the queue remains pending. After success, the review card is intentionally deleted and untracked.
+The hold itself does **not** count as an automod strike. Its effect depends on how the review ends:
 
-**Reject** deletes the review card and its Stoat media, discards the held content, and increases the author's automod strike level by one (capped at 4) — the same ladder `/Automod` escalates on repeated triggers. Rejection does **not** apply a timeout by itself; it only means the _next_ automod trigger for that account escalates faster.
+| Review outcome         | Original channel                                                      | Automod level                                                        | Queue and review card                                             |
+| ---------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Approve                | Complete content is reposted by Irminsul and attributed to the author | No change                                                            | Marked approved; review card is deleted                           |
+| Reject                 | Content stays discarded                                               | Advances one level, up to level 4; no timeout is applied immediately | Marked rejected; review card is deleted                           |
+| No decision for 7 days | Content stays discarded                                               | No change                                                            | Marked expired; review card is deleted and an expiry notice posts |
+| Approval cannot repost | Nothing is reposted; no partial or text-only fallback is sent         | No change                                                            | Remains pending for another approval attempt or rejection         |
+
+### Approve
+
+Approval downloads every held attachment from the Stoat review card into RAM, creates fresh
+one-use Stoat uploads, and reposts the complete content as Irminsul, attributed to the original
+author, in the original channel. If any attachment is unavailable, approval fails without a
+partial or text-only repost and the queue remains pending. After success, the review card is
+intentionally deleted and untracked.
+
+### Reject and the automod ladder
+
+Rejection deletes the review card and its Stoat media, discards the held content, and advances the
+author's shared automod level:
+
+| Stored level after rejection | Timeout on that rejection | Timeout projected for the next separate automod trigger |
+| ---------------------------- | ------------------------- | ------------------------------------------------------- |
+| Level 1                      | None                      | Level 2 — 1 hour                                        |
+| Level 2                      | None                      | Level 3 — 24 hours                                      |
+| Level 3                      | None                      | Level 4 — 7 days                                        |
+| Level 4                      | None                      | Level 4 — 7 days                                        |
+
+The first rejection after no recent history stores level 1. Another rejection within 14 days
+stores level 2, and so on to the level-4 cap. Each rejection refreshes that 14-day quiet-reset
+clock. Rejection never times the author out and never opens a permanent-ban vote by itself; a later
+automod detection must independently reach its normal score threshold. If it does, it advances
+from the stored level and applies the corresponding containment duration.
+
+### Expiry
 
 An unreviewed hold expires after **7 days**: the review card and its Stoat media are deleted, the queued content is discarded with no strike, and a notice is posted to the review channel.
 
 :::note[Reversible by design]
-A held post never leaves the server permanently without a decision — it is either reposted, discarded with a recorded strike, or discarded after 7 days of no response. This is why review only needs one moderator instead of the two-approval quorum `/Automod` requires for a permanent ban.
+A held post never remains visible while awaiting review. Its retained copy is either reposted,
+discarded with a recorded strike, or discarded after 7 days without a decision. Review needs only
+one moderator because approval restores content and rejection only changes future escalation; it
+does not apply a timeout or permanent ban itself.
 :::

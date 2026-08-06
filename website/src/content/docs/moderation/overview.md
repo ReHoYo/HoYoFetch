@@ -7,7 +7,7 @@ Irminsul moderation is designed around exact permission checks, explicit reasons
 
 Member safety reports use the same protected-record destination but are not moderation actions. A report can raise a staff-review priority when several independent members report the same account, but it never changes the target's account or server state.
 
-Anti-abuse coverage is layered: automod reacts to _behavior_ (message bursts, floods, join surges) that needs several messages to show itself, while the [first-post gate](/HoYoFetch/moderation/post-gate/) reacts to _one_ message — a link or attachment as a new or first-time poster's opening move — before behavioral signals have a chance to accumulate.
+Anti-abuse coverage is layered: automod reacts to _behavior_ (message bursts, floods, join surges) that needs several messages to show itself, while the [first-post gate](/HoYoFetch/moderation/post-gate/) reacts to _one_ message — a link or attachment as a new or first-time poster's opening move — before behavioral signals have a chance to accumulate. Holding a post does not change the author's automod level; rejecting it advances the shared four-level ladder without immediately applying a timeout.
 
 ## Before the first action
 
