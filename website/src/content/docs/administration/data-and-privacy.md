@@ -14,7 +14,7 @@ The bot persists data needed to avoid duplicate announcements and resume configu
 - audit destinations and server-setting baselines;
 - Enka-approved channel exclusions in `channel_exclusions.json`;
 - automod modes, cases, approvals, strikes, and reversible actions;
-- the post gate's mode, review channel, and pending/resolved held-post queue;
+- the post gate's mode, server moderation level, review channel, default-role Send Messages restoration marker, and pending/resolved held-post queue;
 - bounded spam-report correlation metadata without member-supplied reasons; and
 - protected-message records needed to restore deleted audit entries.
 
@@ -28,7 +28,7 @@ An approved `/Exclude-Channel` request purges that channel's existing archive en
 
 ## First-post gate queue
 
-A message held by `/Post-Gate` (see [First-post gate](/HoYoFetch/moderation/post-gate/)) is removed from its original channel. Its text and attachment metadata enter the held-post queue, while copied media is attached to the Stoat review card. Approval copies every attachment through RAM to the repost and then deletes the review card. Rejection or 7-day expiry deletes the review card and its Stoat media. Privacy-excluded channels are never gated.
+A message held at Level 1 or 2 (see [First-post gate](/HoYoFetch/moderation/post-gate/)) is removed from its original channel. Its text and attachment metadata enter the held-post queue, while copied media is attached to the Stoat review card. Approval copies every attachment through RAM to the repost and then deletes the review card. Rejection or 7-day expiry deletes the review card and its Stoat media. Privacy-excluded channels are never queued; Levels 3–4 may still deny messages there without retaining their content.
 
 ## Attachments
 

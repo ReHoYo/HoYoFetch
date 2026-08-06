@@ -3,7 +3,6 @@
 import { randomBytes } from "crypto";
 import { parseChannelArg } from "./auditlog.js";
 import { buildStatusEmbed } from "./embeds.js";
-import { DEFAULT_POLICY, policyFor } from "./moderation-policy.js";
 import {
   createAutomodCase,
   findActiveAutomodCase,
@@ -11,7 +10,6 @@ import {
   getAutomodCase,
   getAutomodConfig,
   getAutomodStrike,
-  getModerationLevel,
   isChannelExcluded,
   pruneAutomodCases,
   setAutomodConfig,
@@ -56,6 +54,13 @@ const MAX_MESSAGES_PER_ACTOR = 40;
 const MAX_JOIN_SERVERS = 1_000;
 const MAX_JOINS_PER_SERVER = 100;
 const MAX_RAID_JOINERS_PER_SERVER = 500;
+const DEFAULT_POLICY = Object.freeze({
+  recentAccountMs: AUTOMOD_LIMITS.recentAccountMs,
+  recentMemberMs: AUTOMOD_LIMITS.recentMemberMs,
+  scoreThreshold: 2,
+  joinSurgeCount: AUTOMOD_LIMITS.joinSurgeCount,
+  raidModeMs: AUTOMOD_LIMITS.raidModeMs,
+});
 
 const DEFAULT_STORE = Object.freeze({
   createAutomodCase,
@@ -64,7 +69,6 @@ const DEFAULT_STORE = Object.freeze({
   getAutomodCase,
   getAutomodConfig,
   getAutomodStrike,
-  getModerationLevel,
   isChannelExcluded,
   pruneAutomodCases,
   setAutomodConfig,
@@ -272,7 +276,7 @@ function createCaseId() {
 
 /**
  * The strike-ladder arithmetic shared by automod's own containment flow and
- * any other module (e.g. post-gate.js) that needs to bump a strike level
+ * any other module (e.g. post-gate.js) that needs to bump a strike stage
  * without applying a timeout of its own.
  */
 export function nextStrikeLevel(stored, now = Date.now()) {
@@ -342,7 +346,7 @@ function formatCaseEmbed({
       `**Target:** <@${userId}>`,
       `**Mode:** ${mode}`,
       `**Score:** ${result.score}`,
-      `**Escalation:** strike ${escalation.level}/4 (${formatDuration(escalation.durationMs)})${mode === "monitor" ? " projected" : ""}`,
+      `**Escalation:** strike stage ${escalation.level}/4 (${formatDuration(escalation.durationMs)})${mode === "monitor" ? " projected" : ""}`,
       `**Signals:** ${activeSignals.join(", ")}`,
       `**Account age:** ${formatAge(accountCreatedAt, now)}`,
       `**Server membership age:** ${formatAge(joinedAt, now)}`,
@@ -377,6 +381,7 @@ export function createAutomod(
     sendProtected,
     request,
     store = DEFAULT_STORE,
+    shouldExcludeMessage = () => false,
     logger = console,
     now = Date.now,
     detector = new AntiRaidDetector({ now }),
@@ -665,6 +670,7 @@ export function createAutomod(
     ) {
       return;
     }
+    if (await shouldExcludeMessage(message)) return;
     const config = store.getAutomodConfig(serverId);
     if (config.mode === "off" || !isSafeId(config.logChannelId)) return;
 
@@ -677,7 +683,6 @@ export function createAutomod(
       mentionIds: message.mentionIds,
       accountCreatedAt: message.author?.createdAt,
       joinedAt: message.member?.joinedAt,
-      policy: policyFor(store.getModerationLevel(serverId)),
     });
     if (result.triggered) await openCase(message, result, config);
   }
@@ -688,14 +693,13 @@ export function createAutomod(
     if (!isSafeId(serverId) || !isSafeId(userId) || member.user?.bot) return;
     const config = store.getAutomodConfig(serverId);
     if (config.mode === "off" || !isSafeId(config.logChannelId)) return;
-    const policy = policyFor(store.getModerationLevel(serverId));
-    const result = detector.recordJoin(serverId, userId, policy);
+    const result = detector.recordJoin(serverId, userId);
     if (!result.raidActivated) return;
     await postProtected(
       config.logChannelId,
       buildStatusEmbed(
         "🚨 Automod Raid Mode Activated",
-        `${result.joinCount} members joined within 60 seconds. Heightened risk weighting is active for ${policy.raidModeMs / 60_000} minutes at moderation level ${policy.level}. **No member was punished by the join surge alone.**`,
+        `${result.joinCount} members joined within 60 seconds. Heightened risk weighting is active for ${AUTOMOD_LIMITS.raidModeMs / 60_000} minutes. **No member was punished by the join surge alone.**`,
         "#E67E22"
       )
     );

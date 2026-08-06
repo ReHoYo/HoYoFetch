@@ -18,7 +18,6 @@ const {
   normalizeAutomodContent,
   redactExcludedEvidence,
 } = await import("../automod.js");
-const { MODERATION_LEVEL_POLICIES } = await import("../moderation-policy.js");
 
 const SERVER_ID = "SERVER123";
 const CHANNEL_ID = "CHANNEL123";
@@ -46,11 +45,7 @@ test("automod redacts excluded-channel excerpts without dropping signals", () =>
   );
 });
 
-function makeMemoryStore({
-  mode = "off",
-  quorum = 2,
-  moderationLevel = 1,
-} = {}) {
+function makeMemoryStore({ mode = "off", quorum = 2 } = {}) {
   const configs = new Map([
     [SERVER_ID, { mode, logChannelId: CHANNEL_ID, quorum, updatedAt: null }],
   ]);
@@ -59,12 +54,6 @@ function makeMemoryStore({
   return {
     configs,
     cases,
-    getModerationLevel: () => ({
-      level: moderationLevel,
-      tenureDays: 7,
-      updatedAt: null,
-      updatedBy: null,
-    }),
     getAutomodConfig(serverId) {
       return (
         configs.get(serverId) ?? {
@@ -141,6 +130,7 @@ function makeHarness({
   failFreshFor = new Set(),
   deleteFails = false,
   timeoutFails = false,
+  shouldExcludeMessage = () => false,
 } = {}) {
   let clock = 1_800_000_000_000;
   let promptCounter = 0;
@@ -243,6 +233,7 @@ function makeHarness({
     },
     request,
     store,
+    shouldExcludeMessage,
     now: () => clock,
     caseIdFactory: () => "AMCASE123",
     attach: false,
@@ -430,75 +421,6 @@ test("five joins activate raid weighting without punishing on join alone", () =>
   assert.equal(oneMessage.triggered, false);
 });
 
-test("a raised moderation level lowers corroboration but still needs a behaviour signal", () => {
-  const heightened = MODERATION_LEVEL_POLICIES[2];
-  let now = 1_800_000_000_000;
-  const detector = new AntiRaidDetector({ now: () => now });
-  let result;
-  for (let index = 0; index < 5; index += 1) {
-    result = detector.recordMessage({
-      serverId: SERVER_ID,
-      userId: TARGET_ID,
-      messageId: `LVL2_${index}`,
-      channelId: CHANNEL_ID,
-      content: `unique ${index}`,
-      // Older than level 2's widened 30-day window, so rapidBurst is the
-      // only signal and the score isolates the threshold change.
-      accountCreatedAt: now - 60 * 24 * 60 * 60 * 1_000,
-      joinedAt: now - 60 * 24 * 60 * 60 * 1_000,
-      policy: heightened,
-    });
-    now += 500;
-  }
-  // A lone rapid burst scores 1: below level 1's threshold of 2, at level 2's
-  // threshold of 1.
-  assert.equal(result.signals.rapidBurst, true);
-  assert.equal(result.signals.recentIdentity, false);
-  assert.equal(result.score, 1);
-  assert.equal(result.triggered, true);
-
-  // Identity alone still cannot trigger at any level.
-  const quiet = new AntiRaidDetector({ now: () => now });
-  const single = quiet.recordMessage({
-    serverId: SERVER_ID,
-    userId: "FRESHUSER123",
-    messageId: "LVL2_SOLO",
-    channelId: CHANNEL_ID,
-    content: "hello",
-    accountCreatedAt: now - 60_000,
-    joinedAt: now - 60_000,
-    policy: heightened,
-  });
-  assert.equal(single.signals.recentIdentity, true);
-  assert.equal(single.triggered, false);
-});
-
-test("a raised moderation level trips raid mode on fewer joins and holds it longer", () => {
-  let now = 1_800_000_000_000;
-  const detector = new AntiRaidDetector({ now: () => now });
-  let join;
-  for (let index = 0; index < 3; index += 1) {
-    join = detector.recordJoin(
-      SERVER_ID,
-      `LVL2JOINER${index}`,
-      MODERATION_LEVEL_POLICIES[2]
-    );
-    now += 1_000;
-  }
-  assert.equal(join.raidActivated, true);
-  assert.equal(join.raidUntil, 1_800_000_000_000 + 2_000 + 30 * 60_000);
-
-  // The same three joins are unremarkable at level 1.
-  let baselineNow = 1_800_000_000_000;
-  const baseline = new AntiRaidDetector({ now: () => baselineNow });
-  let baselineJoin;
-  for (let index = 0; index < 3; index += 1) {
-    baselineJoin = baseline.recordJoin(SERVER_ID, `LVL1JOINER${index}`);
-    baselineNow += 1_000;
-  }
-  assert.equal(baselineJoin.raidActivated, false);
-});
-
 test("monitor mode records a protected case without member mutations", async () => {
   const harness = makeHarness({ mode: "monitor" });
   await harness.sendDuplicates();
@@ -570,6 +492,17 @@ test("permission refresh failures downgrade enforcement to monitor-only", async 
     harness.protectedLogs[0].payload.embeds[0].description,
     /enforcement suppressed/
   );
+});
+
+test("server lockdown exclusions bypass automod detection and case queues", async () => {
+  const harness = makeHarness({
+    mode: "enforce",
+    shouldExcludeMessage: async () => true,
+  });
+  await harness.sendDuplicates();
+  assert.equal(harness.protectedLogs.length, 0);
+  assert.equal(harness.store.cases.size, 0);
+  assert.equal(harness.requests.length, 0);
 });
 
 test("verified moderation staff are exempt from cases", async () => {

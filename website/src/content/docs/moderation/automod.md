@@ -32,11 +32,11 @@ A case opens at two points when at least one message-behavior signal is present:
 
 Five joins within 60 seconds activate heightened weighting for ten minutes and create a warning. A join surge alone never changes a member. Bots, webhooks, the server owner, and verified moderation staff are excluded.
 
-## Containment ladder
+## Containment strike stages
 
 Successful enforcement advances a persistent ladder:
 
-| Level | Containment duration |
+| Stage | Containment duration |
 | ----- | -------------------- |
 | 1     | 10 minutes           |
 | 2     | 1 hour               |
@@ -45,25 +45,27 @@ Successful enforcement advances a persistent ladder:
 
 Further triggers remain capped at seven days. The ladder resets after 14 quiet days. Activity while the same timeout is active extends containment without creating another strike or approval prompt.
 
-### Post-gate rejections share these levels
+### Post-gate rejections share these stages
 
 A moderator's rejection of a [held first post](/HoYoFetch/moderation/post-gate/) advances this same
-stored level but does not apply the level's timeout. For example, the first held-post rejection
-stores level 1 with no timeout; a later, separate automod trigger advances to level 2 and projects
+stored stage but does not apply the stage's timeout. For example, the first held-post rejection
+stores stage 1 with no timeout; a later, separate automod trigger advances to stage 2 and projects
 or applies a one-hour timeout, depending on whether the server is in monitor or enforce mode.
 
 Approval of a held post, an unreviewed hold expiring after seven days, and the act of holding a post
-do not change the level. A rejection refreshes the same 14-day quiet-reset clock used by automod.
+do not change the stage. A rejection refreshes the same 14-day quiet-reset clock used by automod.
 
 ## Permanent bans require people
 
-Permanent bans are never automatic. A contained case opens a separate ten-minute approval window. Production defaults to two distinct authorized staff approvals, using 🔨 or:
+Automod case bans are never automatic. A contained case opens a separate ten-minute approval window. Production defaults to two distinct authorized staff approvals, using 🔨 or:
 
 ```text
 /Automod approve CASE_ID
 ```
 
 Use `/Automod quorum 1` only for a single-moderator sandbox and restore quorum two before production.
+
+This is separate from server-wide `/Level 4`, which is explicitly armed by a moderator and automatically bans non-exempt authors whose messages reach Irminsul through the lockdown permission barrier.
 
 ## Recommended rollout
 

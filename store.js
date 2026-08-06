@@ -958,11 +958,12 @@ export function pruneModerationActions(now = Date.now()) {
 }
 
 // ═══════════════════════════════════════════════════
-//  Moderation level (moderation-level.js)
+//  Legacy moderation posture compatibility
 // ═══════════════════════════════════════════════════
 // { "<serverId>": { level: 1|2|3, tenureDays, updatedAt, updatedBy } }
-// Level 1 is the historical policy, so an absent, unreadable, or out-of-range
-// record has to normalise back to 1 — never up into lockdown.
+// Kept readable so deployments that briefly persisted the retired
+// threshold/kick policy do not lose data during rollback. Runtime enforcement
+// uses the Post Gate configuration below.
 
 export const MODERATION_LEVELS = Object.freeze([1, 2, 3]);
 export const DEFAULT_TENURE_DAYS = 7;
@@ -1008,6 +1009,7 @@ export function setModerationLevel(serverId, patch = {}) {
 // ═══════════════════════════════════════════════════
 
 export const POST_GATE_MODES = new Set(["off", "hold"]);
+export const POST_GATE_LEVELS = new Set([0, 1, 2, 3, 4]);
 const MAX_HELD_POSTS = 1_000;
 
 let postGateConfigs = readJSON(POST_GATE_PATH, {});
@@ -1036,16 +1038,55 @@ if (migratedLegacyHeldAttachments) {
 }
 
 function normalisePostGateConfig(value = {}) {
+  const mode = POST_GATE_MODES.has(value.mode) ? value.mode : "off";
+  const parsedLevel = Number(value.level);
+  const level =
+    mode === "off"
+      ? 0
+      : POST_GATE_LEVELS.has(parsedLevel) && parsedLevel > 0
+        ? parsedLevel
+        : 1;
+  const defaultSendLock =
+    value.defaultSendLock &&
+    typeof value.defaultSendLock === "object" &&
+    typeof value.defaultSendLock.restoreOnUnlock === "boolean"
+      ? {
+          restoreOnUnlock: value.defaultSendLock.restoreOnUnlock,
+          capturedAt:
+            typeof value.defaultSendLock.capturedAt === "string"
+              ? value.defaultSendLock.capturedAt
+              : null,
+        }
+      : null;
   return {
-    mode: POST_GATE_MODES.has(value.mode) ? value.mode : "off",
+    mode,
+    level,
+    defaultSendLock,
     reviewChannelId:
       typeof value.reviewChannelId === "string" ? value.reviewChannelId : null,
     updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : null,
   };
 }
 
+let migratedPostGateConfigs = false;
+for (const [serverId, value] of Object.entries(postGateConfigs)) {
+  const normalised = normalisePostGateConfig(value);
+  if (JSON.stringify(value) !== JSON.stringify(normalised)) {
+    postGateConfigs[serverId] = normalised;
+    migratedPostGateConfigs = true;
+  }
+}
+if (migratedPostGateConfigs) writeJSON(POST_GATE_PATH, postGateConfigs);
+
 export function getPostGateConfig(serverId) {
   return normalisePostGateConfig(postGateConfigs[serverId]);
+}
+
+export function getAllPostGateConfigs() {
+  return Object.entries(postGateConfigs).map(([serverId, value]) => ({
+    serverId,
+    ...normalisePostGateConfig(value),
+  }));
 }
 
 export function setPostGateConfig(serverId, patch = {}) {

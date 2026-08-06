@@ -70,7 +70,6 @@ import { createAuditLogConfiguration } from "./audit-log-configuration.js";
 import { createTamperProtection } from "./tamper-protection.js";
 import { createAutomod } from "./automod.js";
 import { createModeration } from "./moderation.js";
-import { createModerationLevel } from "./moderation-level.js";
 import { createHelpMenu } from "./help-menu.js";
 import { createSpamReporter } from "./spam-report.js";
 import { createChannelExclusion } from "./channel-exclusion.js";
@@ -101,6 +100,7 @@ let restartInProgress = false;
 const commandRateLimiter = new CommandRateLimiter();
 const codeFetchSingleFlight = new SingleFlight();
 const accountLookupProbes = buildLookupProbes(apiRequest);
+let postGate = null;
 const tamperProtection = createTamperProtection(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
   request: apiRequest,
@@ -109,6 +109,8 @@ const automod = createAutomod(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
   sendProtected: tamperProtection.sendProtected,
   request: apiRequest,
+  shouldExcludeMessage: (message) =>
+    postGate?.shouldExcludeMessage(message) ?? false,
 });
 const moderation = createModeration(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
@@ -137,38 +139,13 @@ const channelExclusion = createChannelExclusion(client, {
   approvalGate,
   runIntentionalDelete: tamperProtection.runIntentionalDelete,
 });
-const postGate = createPostGate(client, {
+postGate = createPostGate(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
   sendProtected: tamperProtection.sendProtected,
   request: apiRequest,
   prefix: CONFIG.prefix,
   approvalGate,
   runIntentionalDelete: tamperProtection.runIntentionalDelete,
-});
-const moderationLevel = createModerationLevel(client, {
-  sendProtected: tamperProtection.sendProtected,
-  request: apiRequest,
-  prefix: CONFIG.prefix,
-});
-client.on("messageCreate", (message) => {
-  moderationLevel
-    .handleMessage(message)
-    .catch((error) =>
-      console.error(
-        "moderation-level: message handler failed:",
-        error?.message || error
-      )
-    );
-});
-client.on("serverMemberJoin", (member) => {
-  moderationLevel
-    .handleMemberJoin(member)
-    .catch((error) =>
-      console.error(
-        "moderation-level: join handler failed:",
-        error?.message || error
-      )
-    );
 });
 client.on("messageCreate", (message) => {
   postGate
@@ -238,6 +215,7 @@ client.on("ready", async () => {
 
   approvalGate.resolveApprover();
   channelExclusion.startDigest();
+  await postGate.reconcilePermissionLocks();
   postGate.startQueuePrune();
 
   // Seed known codes on first boot so we don't spam existing codes
@@ -260,9 +238,12 @@ client.on("ready", async () => {
 
 // ── Message handler (command router) ───────────────
 client.on("messageCreate", async (message) => {
-  // Ignore own messages and messages without content
-  if (!message.content) return;
+  // Ignore own messages and messages without content. Lockdown decisions are
+  // awaited first so a denied command cannot race the policy delete and send
+  // a response of its own.
   if (message.authorId === client.user.id) return;
+  if (await postGate.shouldExcludeMessage(message)) return;
+  if (!message.content) return;
 
   const raw = message.content.trim();
 
@@ -457,10 +438,9 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
-    // ── Level [status|1|2|3 confirm|tenure] ────────
+    // ── Level [status|1|2|3|4 confirm] ────────────
     if (cmd === "level") {
-      const embed = await moderationLevel.handleCommand(message, cmdArgs);
-      await safeSend(message.channel, { embeds: [embed] });
+      await postGate.handleLevelCommand(message, cmdArgs);
       return;
     }
 

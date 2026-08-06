@@ -75,7 +75,8 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/AuditLog [status\|here\|#channel\|off\|confirm CODE\|cancel]` | View or request an Enka-approved audit-log configuration change (admins/mods only)                                                |
 | `/Test-AuditLog`                                                | Send a test event through the audit pipeline to verify delivery (admins/mods only; legacy diagnostic alias)                       |
 | `/Exclude-Channel [status\|here\|#channel\|remove #channel]`    | Request Enka-approved message-content privacy exclusions (admins/mods only)                                                       |
-| `/Level [status\|1\|2\|3 confirm\|tenure <days>]`               | Set the server-wide moderation posture from standard to lockdown (admins/mods only)                                               |
+| `/Post-Gate [status\|here\|#channel\|off]`                      | Configure the Enka-approved review channel used by moderation levels (admins/mods only)                                           |
+| `/Level [status\|1\|2\|3\|4 confirm]`                           | Set the server-wide link/media review or lockdown policy (admins/mods only)                                                       |
 | `/Automod status`                                               | Show this server's automod mode, logger, and ban quorum (admins/mods only)                                                        |
 | `/Automod monitor [here\|#channel]`                             | Detect and log cases without changing messages or members (admins/mods only)                                                      |
 | `/Automod enforce [here\|#channel]`                             | Enable temporary containment and staff-approved ban cases (admins/mods only)                                                      |
@@ -177,22 +178,22 @@ Stoat has no username-to-ID search, so a non-member must be looked up by their 2
 
 Signals are heuristics for a moderator to weigh, not proof that an account is a bot.
 
-### Moderation levels
+### Server moderation levels
 
-`/Level` is a single dial for the whole server's posture, and every server starts at **level 1** — the behavior that existed before this command. It uses the same capability-based moderator policy as `/Automod` and `/Post-Gate` (owner, Manage Server, or a recognized moderation capability), and only retunes thresholds those two features already own; raising the level never switches either one on.
+`/Post-Gate here` or `/Post-Gate #channel` first establishes the Enka-approved review destination. Recognized moderators can then use `/Level status` or select a persistent server policy:
 
-|                                    | 1 — Standard                | 2 — Heightened              | 3 — Lockdown                |
-| ---------------------------------- | --------------------------- | --------------------------- | --------------------------- |
-| Post gate holds                    | links and attachments       | every message               | every message               |
-| "New account" / "new member"       | 7d / 24h                    | 30d / 7d                    | 30d / 7d                    |
-| Automod trips at                   | behavior signal + score ≥ 2 | behavior signal + score ≥ 1 | behavior signal + score ≥ 1 |
-| Raid mode                          | 5 joins/60s for 10m         | 3 joins/60s for 30m         | 3 joins/60s for 30m         |
-| New joins                          | observed                    | observed                    | kicked on sight             |
-| Members below the tenure threshold | —                           | —                           | cannot post                 |
+| Level | Policy                                                                            |
+| ----- | --------------------------------------------------------------------------------- |
+| 1     | Hold links and media from new, newly joined, or first-time members for review     |
+| 2     | Same link/media review policy as Level 1                                          |
+| 3     | Remove default-role sending and delete slipped posts without creating queue items |
+| 4     | Apply Level 3 and automatically ban each slipped-message author                   |
 
-A behavior signal stays mandatory at every level: being new, or joining during a raid, only ever adds weight to observed behavior and can never trigger containment on its own.
+Levels 1–2 normalize common link obfuscations before deciding whether to hold a post. This includes inserted spaces or invisible characters, spaced and `hxxp` protocols, Unicode URL punctuation, bracketed dots, bare domains, and IPv4 addresses; the original message is preserved unchanged for moderator review.
 
-Level 3 is the only setting that removes members automatically, so it has two preconditions. `/Level 3` alone refuses and explains what it would do — only `/Level 3 confirm` applies it — and it is refused outright unless `/Automod` has a log channel, since every kick, withheld kick, and restricted message is written there as a protected record. Bots and freshly verified moderators are never kicked, and a joiner whose permission check cannot complete is reported rather than removed. Restricted members have every message deleted but escalate at most one strike per 15 minutes, so a flood cannot walk an account up the ladder in seconds. `/Level 1` stands everything down immediately; kicked accounts are not banned and can rejoin.
+Levels 3–4 clear **Send Messages** from the server default role, then keep reactive deletion as a fallback for messages allowed by explicit channel or role overrides. Irminsul must have **Manage Permissions** plus explicit **View Channel** and **Send Messages** access in the protected review channel so it cannot lock itself out. Staff roles and bots that rely only on the default role are also silenced; give trusted roles explicit sending permission if they must remain active. Unlocking restores only the Send Messages bit Irminsul removed, preserving unrelated permission changes, and startup/event/periodic reconciliation repairs drift.
+
+Level 4 can only be requested with `/Level 4 confirm`, followed by the requester's ✅ reaction within two minutes. Stoat rejects ordinary default-role sends before a message exists, so Level 4 bans authors only when a message reaches Irminsul through an explicit override. Bots, webhooks, the owner, and verified moderation staff are exempt from reactive enforcement. Level 3 and 4 messages do not enter the review queue, automod detector, command router, or message archive; the review channel receives one protected activation notice instead of one card per denied post. `/Post-Gate off` remains Enka-approved and disables the policy completely.
 
 ### Anti-raid automod
 
@@ -208,7 +209,7 @@ The detector keeps bounded, in-memory message and join windows. It opens a case 
 
 Five joins within 60 seconds activate heightened weighting for 10 minutes and write a warning to the automod logger. A join surge by itself never changes a member. Bots, webhooks, the server owner, and verified moderation staff are excluded. If fresh permission verification is unavailable, an enforcement trigger is downgraded to monitor-only.
 
-In enforcement mode, successful containment advances a persistent, bounded timeout ladder: **10 minutes → 1 hour → 24 hours → 7 days**. Further triggers remain capped at seven days, and the ladder resets after 14 quiet days. Monitor mode displays the projected strike without changing it. The bot then best-effort deletes the triggering messages and writes a protected evidence record. A successfully contained case gets a separate 10-minute ban prompt. Permanent bans are **never automatic**: two distinct authorized staff approvals are required by default, using the 🔨 reaction or `/Automod approve CASE_ID`. `/Automod quorum 1` exists for a one-moderator sandbox; restore it to `2` before production use.
+In enforcement mode, successful containment advances a persistent, bounded strike-stage ladder: **10 minutes → 1 hour → 24 hours → 7 days**. Further triggers remain capped at seven days, and the ladder resets after 14 quiet days. Monitor mode displays the projected strike stage without changing it. The bot then best-effort deletes the triggering messages and writes a protected evidence record. A successfully contained automod case gets a separate 10-minute ban prompt. Automod case bans are **never automatic**: two distinct authorized staff approvals are required by default, using the 🔨 reaction or `/Automod approve CASE_ID`. `/Level 4` is a separate, explicitly confirmed server-wide policy. `/Automod quorum 1` exists for a one-moderator sandbox; restore it to `2` before production use.
 
 Queued triggers while the same timeout is still active extend that containment without creating vote spam or another strike. Once the timeout expires, another trigger advances the ladder and opens a fresh approval window even if the older case is less than 15 minutes old. Pending case IDs, approval state, strike history, reversible manual actions, and per-server configuration survive restarts in `data/automod_cases.json`, `data/automod_strikes.json`, `data/moderation_actions.json`, and `data/automod.json`; message-rate windows and uncommitted reaction pickers intentionally reset on restart.
 
@@ -372,6 +373,11 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ## 📝 Changelog
 
+### Next
+
+- Replaced the short-lived threshold/kick-based `/Level 1|2|3` posture with Post Gate-backed Levels 1–4: Levels 1–2 review qualifying links/media, Level 3 locks default-role sending with deletion fallback, and reaction-confirmed Level 4 also bans slipped-message authors
+- Hardened Levels 1–2 against common link obfuscation using bounded Unicode, whitespace, protocol, punctuation, domain, and IP normalization while retaining the original post for review
+
 ### v2.5.1
 
 - Level 2 and 3 no longer hold every message from a new account — all three levels now hold the same trigger, links and attachments, and rely on the wider new-account window and lower automod threshold to cover text-only abuse instead of queuing every plain-text message for manual review
@@ -403,7 +409,7 @@ docker run -d --name hoyofetch --restart unless-stopped \
 ### v2.4.0
 
 - Added `/Post-Gate`, an Enka-approved first-post review queue that holds a link or attachment from a new account, a newly joined member, or a first-time poster, instead of leaving it visible unreviewed
-- A held message is deleted and posted to a review channel for a single moderator's ✅/❌ decision; approving reposts it attributed to the author, rejecting discards it and raises the author's automod strike level, and unreviewed holds expire after 7 days
+- A held message is deleted and posted to a review channel for a single moderator's ✅/❌ decision; approving reposts it attributed to the author, rejecting discards it and raises the author's automod strike stage, and unreviewed holds expire after 7 days
 - Fixed bulk message deletes never showing preserved attachment evidence, added an attachment count to edited-message records, and replaced the single generic "not preserved" reason with the actual cause (disabled, untrusted URL, over the size cap, failed download, or a local save error)
 - Fixed the daily privacy exclusion digest never firing for a bot that restarts more often than once a day; it now persists each server's last-posted time and polls hourly instead of resetting a fixed 24-hour timer on every boot
 
