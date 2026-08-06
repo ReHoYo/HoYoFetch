@@ -36,11 +36,24 @@ Five joins within 60 seconds activate heightened weighting for ten minutes and c
 
 Successful enforcement advances a persistent ladder:
 
-```text
-10 minutes → 1 hour → 24 hours → 7 days
-```
+| Level | Containment duration |
+| ----- | -------------------- |
+| 1     | 10 minutes           |
+| 2     | 1 hour               |
+| 3     | 24 hours             |
+| 4     | 7 days               |
 
 Further triggers remain capped at seven days. The ladder resets after 14 quiet days. Activity while the same timeout is active extends containment without creating another strike or approval prompt.
+
+### Post-gate rejections share these levels
+
+A moderator's rejection of a [held first post](/HoYoFetch/moderation/post-gate/) advances this same
+stored level but does not apply the level's timeout. For example, the first held-post rejection
+stores level 1 with no timeout; a later, separate automod trigger advances to level 2 and projects
+or applies a one-hour timeout, depending on whether the server is in monitor or enforce mode.
+
+Approval of a held post, an unreviewed hold expiring after seven days, and the act of holding a post
+do not change the level. A rejection refreshes the same 14-day quiet-reset clock used by automod.
 
 ## Permanent bans require people
 
