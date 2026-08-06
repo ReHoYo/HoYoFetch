@@ -41,7 +41,7 @@ export const DEFAULT_ARCHIVE = Object.freeze({
 });
 
 // Cap the roles list so a role-heavy member can't push the fields that
-// follow (strike level, spam reports, message count) past the embed's
+// follow (strike stage, spam reports, message count) past the embed's
 // truncation budget.
 const MAX_RENDERED_ROLES = 15;
 
@@ -229,7 +229,7 @@ export function evaluateBotSignals(record, now = Date.now()) {
 
   if (record.automodStrikeLevel) {
     signals.push(
-      `Existing automod strike (level ${record.automodStrikeLevel}/4)`
+      `Existing automod strike (stage ${record.automodStrikeLevel}/4)`
     );
   }
 
@@ -406,7 +406,7 @@ export function buildUserInfoLines(
     );
   }
   if (record.automodStrikeLevel || verbose) {
-    lines.push(`**Automod strike level:** ${record.automodStrikeLevel ?? 0}/4`);
+    lines.push(`**Automod strike stage:** ${record.automodStrikeLevel ?? 0}/4`);
   }
   if (record.hasActiveAutomodCase || verbose) {
     lines.push(

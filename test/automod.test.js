@@ -130,6 +130,7 @@ function makeHarness({
   failFreshFor = new Set(),
   deleteFails = false,
   timeoutFails = false,
+  shouldExcludeMessage = () => false,
 } = {}) {
   let clock = 1_800_000_000_000;
   let promptCounter = 0;
@@ -232,6 +233,7 @@ function makeHarness({
     },
     request,
     store,
+    shouldExcludeMessage,
     now: () => clock,
     caseIdFactory: () => "AMCASE123",
     attach: false,
@@ -490,6 +492,17 @@ test("permission refresh failures downgrade enforcement to monitor-only", async 
     harness.protectedLogs[0].payload.embeds[0].description,
     /enforcement suppressed/
   );
+});
+
+test("server lockdown exclusions bypass automod detection and case queues", async () => {
+  const harness = makeHarness({
+    mode: "enforce",
+    shouldExcludeMessage: async () => true,
+  });
+  await harness.sendDuplicates();
+  assert.equal(harness.protectedLogs.length, 0);
+  assert.equal(harness.store.cases.size, 0);
+  assert.equal(harness.requests.length, 0);
 });
 
 test("verified moderation staff are exempt from cases", async () => {

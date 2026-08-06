@@ -100,6 +100,7 @@ let restartInProgress = false;
 const commandRateLimiter = new CommandRateLimiter();
 const codeFetchSingleFlight = new SingleFlight();
 const accountLookupProbes = buildLookupProbes(apiRequest);
+let postGate = null;
 const tamperProtection = createTamperProtection(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
   request: apiRequest,
@@ -108,6 +109,8 @@ const automod = createAutomod(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
   sendProtected: tamperProtection.sendProtected,
   request: apiRequest,
+  shouldExcludeMessage: (message) =>
+    postGate?.shouldExcludeMessage(message) ?? false,
 });
 const moderation = createModeration(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
@@ -136,7 +139,7 @@ const channelExclusion = createChannelExclusion(client, {
   approvalGate,
   runIntentionalDelete: tamperProtection.runIntentionalDelete,
 });
-const postGate = createPostGate(client, {
+postGate = createPostGate(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
   sendProtected: tamperProtection.sendProtected,
   request: apiRequest,
@@ -212,6 +215,7 @@ client.on("ready", async () => {
 
   approvalGate.resolveApprover();
   channelExclusion.startDigest();
+  await postGate.reconcilePermissionLocks();
   postGate.startQueuePrune();
 
   // Seed known codes on first boot so we don't spam existing codes
@@ -234,9 +238,12 @@ client.on("ready", async () => {
 
 // ── Message handler (command router) ───────────────
 client.on("messageCreate", async (message) => {
-  // Ignore own messages and messages without content
-  if (!message.content) return;
+  // Ignore own messages and messages without content. Lockdown decisions are
+  // awaited first so a denied command cannot race the policy delete and send
+  // a response of its own.
   if (message.authorId === client.user.id) return;
+  if (await postGate.shouldExcludeMessage(message)) return;
+  if (!message.content) return;
 
   const raw = message.content.trim();
 
@@ -428,6 +435,12 @@ client.on("messageCreate", async (message) => {
     // ── Post-Gate [status|here|off|confirm|cancel|approve|reject] ─
     if (cmd === "post-gate" || cmd === "postgate") {
       await postGate.handleCommand(message, cmdArgs);
+      return;
+    }
+
+    // ── Level [status|1|2|3|4 confirm] ────────────
+    if (cmd === "level") {
+      await postGate.handleLevelCommand(message, cmdArgs);
       return;
     }
 

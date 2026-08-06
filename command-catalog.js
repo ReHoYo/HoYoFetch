@@ -283,7 +283,32 @@ export const COMMAND_CATALOG = Object.freeze([
     notes: [
       "Turning the gate on, moving its review channel, and turning it off each require a fresh one-time code sent to Enka#4961.",
       "Holds trigger only when the message contains a link or an attachment, from an account created under 7 days ago, a member who joined under 24 hours ago, or a member with no other archived message in this server.",
-      "Recognized moderators are always exempt, and privacy-excluded channels are never gated.",
+      "Link checks normalize common spacing, invisible-character, Unicode-punctuation, bracketed-dot, hxxp, domain, and IP obfuscations before deciding whether to hold the original post.",
+      "Recognized moderators are always exempt, and privacy-excluded channels are never queued at Levels 1–2.",
+    ],
+  },
+  {
+    id: "level",
+    section: COMMAND_SECTIONS.SETUP,
+    route: "level",
+    access: "fetch_manager",
+    syntax: "/Level [status|1|2|3|4 confirm]",
+    summary: "Inspect or change the server-wide moderation policy level.",
+    help: "Set link/media review or server lockdown behavior _(admins/mods only)_",
+    permission:
+      "Server owner, Manage Server, or a recognized moderation capability",
+    examples: [
+      "/Level status",
+      "/Level 1",
+      "/Level 2",
+      "/Level 3",
+      "/Level 4 confirm",
+    ],
+    notes: [
+      "An Enka-approved Post Gate review channel must be configured first.",
+      "Levels 1 and 2 hold qualifying links/media; Levels 3 and 4 remove Send Messages from the server default role and delete slipped regular-member posts without queueing them.",
+      "Irminsul needs Manage Permissions and explicit review-channel View/Send access; trusted staff and bot roles also need explicit Send Messages during lockdown.",
+      "Level 4 requires a two-minute invoker-only reaction confirmation and automatically bans authors whose messages reach Irminsul through an explicit permission override.",
     ],
   },
   {
@@ -420,7 +445,7 @@ export const COMMAND_CATALOG = Object.freeze([
     access: "manage_messages",
     syntax: "/Post-Gate approve QUEUE_ID",
     summary:
-      "Repost a held first post, or discard it and increase the author's automod strike level.",
+      "Repost a held first post, or discard it and increase the author's automod strike stage.",
     help: "React ✅/❌ on the held-post review card, or use `/Post-Gate approve|reject QUEUE_ID` _(Manage Messages)_",
     permission: "Manage Messages in the review channel",
     examples: [
@@ -429,7 +454,7 @@ export const COMMAND_CATALOG = Object.freeze([
     ],
     notes: [
       "Approving reposts the held content as Irminsul, attributed to the original author.",
-      "Rejecting discards the held content and increases the author's automod strike level; it does not apply a timeout by itself.",
+      "Rejecting discards the held content and increases the author's automod strike stage; it does not apply a timeout by itself.",
       "Unreviewed holds expire and are discarded after 7 days.",
     ],
   },

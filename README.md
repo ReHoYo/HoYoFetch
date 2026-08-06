@@ -75,6 +75,8 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/AuditLog [status\|here\|#channel\|off\|confirm CODE\|cancel]` | View or request an Enka-approved audit-log configuration change (admins/mods only)                                                |
 | `/Test-AuditLog`                                                | Send a test event through the audit pipeline to verify delivery (admins/mods only; legacy diagnostic alias)                       |
 | `/Exclude-Channel [status\|here\|#channel\|remove #channel]`    | Request Enka-approved message-content privacy exclusions (admins/mods only)                                                       |
+| `/Post-Gate [status\|here\|#channel\|off]`                      | Configure the Enka-approved review channel used by moderation levels (admins/mods only)                                           |
+| `/Level [status\|1\|2\|3\|4 confirm]`                           | Set the server-wide link/media review or lockdown policy (admins/mods only)                                                       |
 | `/Automod status`                                               | Show this server's automod mode, logger, and ban quorum (admins/mods only)                                                        |
 | `/Automod monitor [here\|#channel]`                             | Detect and log cases without changing messages or members (admins/mods only)                                                      |
 | `/Automod enforce [here\|#channel]`                             | Enable temporary containment and staff-approved ban cases (admins/mods only)                                                      |
@@ -176,6 +178,23 @@ Stoat has no username-to-ID search, so a non-member must be looked up by their 2
 
 Signals are heuristics for a moderator to weigh, not proof that an account is a bot.
 
+### Server moderation levels
+
+`/Post-Gate here` or `/Post-Gate #channel` first establishes the Enka-approved review destination. Recognized moderators can then use `/Level status` or select a persistent server policy:
+
+| Level | Policy                                                                            |
+| ----- | --------------------------------------------------------------------------------- |
+| 1     | Hold links and media from new, newly joined, or first-time members for review     |
+| 2     | Same link/media review policy as Level 1                                          |
+| 3     | Remove default-role sending and delete slipped posts without creating queue items |
+| 4     | Apply Level 3 and automatically ban each slipped-message author                   |
+
+Levels 1–2 normalize common link obfuscations before deciding whether to hold a post. This includes inserted spaces or invisible characters, spaced and `hxxp` protocols, Unicode URL punctuation, bracketed dots, bare domains, and IPv4 addresses; the original message is preserved unchanged for moderator review.
+
+Levels 3–4 clear **Send Messages** from the server default role, then keep reactive deletion as a fallback for messages allowed by explicit channel or role overrides. Irminsul must have **Manage Permissions** plus explicit **View Channel** and **Send Messages** access in the protected review channel so it cannot lock itself out. Staff roles and bots that rely only on the default role are also silenced; give trusted roles explicit sending permission if they must remain active. Unlocking restores only the Send Messages bit Irminsul removed, preserving unrelated permission changes, and startup/event/periodic reconciliation repairs drift.
+
+Level 4 can only be requested with `/Level 4 confirm`, followed by the requester's ✅ reaction within two minutes. Stoat rejects ordinary default-role sends before a message exists, so Level 4 bans authors only when a message reaches Irminsul through an explicit override. Bots, webhooks, the owner, and verified moderation staff are exempt from reactive enforcement. Level 3 and 4 messages do not enter the review queue, automod detector, command router, or message archive; the review channel receives one protected activation notice instead of one card per denied post. `/Post-Gate off` remains Enka-approved and disables the policy completely.
+
 ### Anti-raid automod
 
 Automod is **off by default for every server**. Start with `/Automod monitor here` in a sandbox or logger channel. Monitor mode runs the complete detector and writes protected case records, but never deletes messages, times out members, or creates ban votes. `/Automod enforce here` must be selected explicitly before containment is allowed.
@@ -190,7 +209,7 @@ The detector keeps bounded, in-memory message and join windows. It opens a case 
 
 Five joins within 60 seconds activate heightened weighting for 10 minutes and write a warning to the automod logger. A join surge by itself never changes a member. Bots, webhooks, the server owner, and verified moderation staff are excluded. If fresh permission verification is unavailable, an enforcement trigger is downgraded to monitor-only.
 
-In enforcement mode, successful containment advances a persistent, bounded timeout ladder: **10 minutes → 1 hour → 24 hours → 7 days**. Further triggers remain capped at seven days, and the ladder resets after 14 quiet days. Monitor mode displays the projected strike without changing it. The bot then best-effort deletes the triggering messages and writes a protected evidence record. A successfully contained case gets a separate 10-minute ban prompt. Permanent bans are **never automatic**: two distinct authorized staff approvals are required by default, using the 🔨 reaction or `/Automod approve CASE_ID`. `/Automod quorum 1` exists for a one-moderator sandbox; restore it to `2` before production use.
+In enforcement mode, successful containment advances a persistent, bounded strike-stage ladder: **10 minutes → 1 hour → 24 hours → 7 days**. Further triggers remain capped at seven days, and the ladder resets after 14 quiet days. Monitor mode displays the projected strike stage without changing it. The bot then best-effort deletes the triggering messages and writes a protected evidence record. A successfully contained automod case gets a separate 10-minute ban prompt. Automod case bans are **never automatic**: two distinct authorized staff approvals are required by default, using the 🔨 reaction or `/Automod approve CASE_ID`. `/Level 4` is a separate, explicitly confirmed server-wide policy. `/Automod quorum 1` exists for a one-moderator sandbox; restore it to `2` before production use.
 
 Queued triggers while the same timeout is still active extend that containment without creating vote spam or another strike. Once the timeout expires, another trigger advances the ladder and opens a fresh approval window even if the older case is less than 15 minutes old. Pending case IDs, approval state, strike history, reversible manual actions, and per-server configuration survive restarts in `data/automod_cases.json`, `data/automod_strikes.json`, `data/moderation_actions.json`, and `data/automod.json`; message-rate windows and uncommitted reaction pickers intentionally reset on restart.
 
@@ -356,6 +375,8 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ### v2.4.1
 
+- Added persistent `/Level` policy states: Levels 1–2 review qualifying new-member links/media, Level 3 locks default-role sending and deletes slipped posts without queue flood, and reaction-confirmed Level 4 also automatically bans slipped-message authors
+- Hardened Levels 1–2 against common link obfuscation using bounded Unicode, whitespace, protocol, punctuation, domain, and IP normalization while retaining the original post for review
 - Replaced the persistent VPS attachment cache with immediate RAM-only copies into protected Stoat Logger cards; the local journal keeps filenames, sizes, Stoat URLs, and protected record IDs but never attachment bytes
 - Delete/edit records reference the existing Logger card, bulk deletes reply to at most five cards without re-uploading media, and a bounded two-worker 50-message archive queue reports precise transfer failure reasons
 - Moved first-post attachment storage to the Stoat review card; approval, rejection, and expiry remove the review card on completion, and metadata-only tamper restoration plus legacy `data/evidence/` cleanup were added
@@ -364,7 +385,7 @@ docker run -d --name hoyofetch --restart unless-stopped \
 ### v2.4.0
 
 - Added `/Post-Gate`, an Enka-approved first-post review queue that holds a link or attachment from a new account, a newly joined member, or a first-time poster, instead of leaving it visible unreviewed
-- A held message is deleted and posted to a review channel for a single moderator's ✅/❌ decision; approving reposts it attributed to the author, rejecting discards it and raises the author's automod strike level, and unreviewed holds expire after 7 days
+- A held message is deleted and posted to a review channel for a single moderator's ✅/❌ decision; approving reposts it attributed to the author, rejecting discards it and raises the author's automod strike stage, and unreviewed holds expire after 7 days
 - Fixed bulk message deletes never showing preserved attachment evidence, added an attachment count to edited-message records, and replaced the single generic "not preserved" reason with the actual cause (disabled, untrusted URL, over the size cap, failed download, or a local save error)
 - Fixed the daily privacy exclusion digest never firing for a bot that restarts more often than once a day; it now persists each server's last-posted time and polls hourly instead of resetting a fixed 24-hour timer on every boot
 

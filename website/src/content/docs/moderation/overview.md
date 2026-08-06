@@ -7,7 +7,7 @@ Irminsul moderation is designed around exact permission checks, explicit reasons
 
 Member safety reports use the same protected-record destination but are not moderation actions. A report can raise a staff-review priority when several independent members report the same account, but it never changes the target's account or server state.
 
-Anti-abuse coverage is layered: automod reacts to _behavior_ (message bursts, floods, join surges) that needs several messages to show itself, while the [first-post gate](/HoYoFetch/moderation/post-gate/) reacts to _one_ message — a link or attachment as a new or first-time poster's opening move — before behavioral signals have a chance to accumulate. Holding a post does not change the author's automod level; rejecting it advances the shared four-level ladder without immediately applying a timeout.
+Anti-abuse coverage is layered: automod reacts to _behavior_ (message bursts, floods, join surges) that needs several messages to show itself, while the [first-post gate and server levels](/HoYoFetch/moderation/post-gate/) can review a new member's first link/media or place the whole server into lockdown. Holding a post does not change the author's automod strike stage; rejecting it advances the shared four-stage timeout ladder without immediately applying a timeout.
 
 ## Before the first action
 
@@ -40,7 +40,8 @@ Stoat does not provide command interaction buttons, so Irminsul uses reactions f
 - a window picker and then a ✅/❌ confirmation for `/Purge-User`;
 - ten-minute undo windows for bans and mutes;
 - staff approvals for automod ban cases; and
-- ✅/❌ approve/discard review of a held first post.
+- ✅/❌ approve/discard review of a held first post; and
+- the invoker-only two-minute confirmation for server Level 4.
 
 Reaction handlers re-check the reacting moderator's current permission before applying the action, and only the moderator who ran the command can answer their own picker.
 

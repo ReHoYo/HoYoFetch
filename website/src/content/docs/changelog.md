@@ -5,6 +5,14 @@ description: Major public Irminsul capabilities and documentation milestones.
 
 ## Version 2.4.1
 
+### Server moderation levels
+
+- Added persistent `/Level` policy states on top of the Enka-approved Post Gate destination: Levels 1–2 review qualifying new-member links/media, Level 3 denies regular-member posts server-wide, and Level 4 also automatically bans slipped-message authors.
+- Hardened Levels 1–2 against common link obfuscation, including inserted whitespace and invisible characters, spaced or `hxxp` protocols, Unicode punctuation, bracketed dots, domains, and IPv4 addresses. Detection uses a normalized copy while review evidence keeps the original text.
+- Levels 3–4 now clear Send Messages from the server default role and retain reactive deletion for slips. Lock ownership is persisted so downgrades restore only the bit Irminsul removed, while startup, server-update, and periodic reconciliation repair permission drift.
+- Level 4 requires `/Level 4 confirm` plus an invoker-only two-minute reaction confirmation and fresh permission checks. Lockdown attempts bypass review, automod, commands, attachment copies, and message archives to prevent queue floods.
+- Renamed the separate per-member automod timeout ladder publicly to strike stages while preserving its existing persisted data.
+
 ### Stoat-hosted attachment archive
 
 - Replaced the persistent VPS attachment cache with immediate RAM-only copies into protected Stoat Logger cards. The local journal now keeps filenames, sizes, Stoat URLs, and protected record IDs but never attachment bytes.
@@ -23,7 +31,7 @@ description: Major public Irminsul capabilities and documentation milestones.
 
 - Added `/Post-Gate`, an Enka-approved review queue that holds a message instead of leaving it visible when it carries a link or an attachment **and** its author is a new account, a newly joined member, or has no other archived message in this server.
 - A held message is deleted immediately and posted to a dedicated review channel with a bounded evidence excerpt; a single recognized moderator clears it with ✅/❌ or `/Post-Gate approve|reject QUEUE_ID`.
-- Approving reposts the content as Irminsul, attributed to the original author. Rejecting discards it and increases the author's automod strike level, so a repeat offender escalates faster without applying a timeout by itself.
+- Approving reposts the content as Irminsul, attributed to the original author. Rejecting discards it and increases the author's automod strike stage, so a repeat offender escalates faster without applying a timeout by itself.
 - Turning the gate on, moving its review channel, and turning it off each require a fresh one-time code sent exclusively to Enka#4961, the same approval flow used by `/AuditLog` and `/Exclude-Channel`. Privacy-excluded channels are never gated, and recognized moderators are always exempt.
 - Unreviewed holds expire and are discarded after 7 days with no strike.
 

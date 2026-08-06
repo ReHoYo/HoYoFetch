@@ -268,7 +268,7 @@ function createCaseId() {
 
 /**
  * The strike-ladder arithmetic shared by automod's own containment flow and
- * any other module (e.g. post-gate.js) that needs to bump a strike level
+ * any other module (e.g. post-gate.js) that needs to bump a strike stage
  * without applying a timeout of its own.
  */
 export function nextStrikeLevel(stored, now = Date.now()) {
@@ -338,7 +338,7 @@ function formatCaseEmbed({
       `**Target:** <@${userId}>`,
       `**Mode:** ${mode}`,
       `**Score:** ${result.score}`,
-      `**Escalation:** strike ${escalation.level}/4 (${formatDuration(escalation.durationMs)})${mode === "monitor" ? " projected" : ""}`,
+      `**Escalation:** strike stage ${escalation.level}/4 (${formatDuration(escalation.durationMs)})${mode === "monitor" ? " projected" : ""}`,
       `**Signals:** ${activeSignals.join(", ")}`,
       `**Account age:** ${formatAge(accountCreatedAt, now)}`,
       `**Server membership age:** ${formatAge(joinedAt, now)}`,
@@ -373,6 +373,7 @@ export function createAutomod(
     sendProtected,
     request,
     store = DEFAULT_STORE,
+    shouldExcludeMessage = () => false,
     logger = console,
     now = Date.now,
     detector = new AntiRaidDetector({ now }),
@@ -661,6 +662,7 @@ export function createAutomod(
     ) {
       return;
     }
+    if (await shouldExcludeMessage(message)) return;
     const config = store.getAutomodConfig(serverId);
     if (config.mode === "off" || !isSafeId(config.logChannelId)) return;
 

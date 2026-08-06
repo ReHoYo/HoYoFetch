@@ -2,7 +2,7 @@
 // detection, and atomic writes. Runs hermetically against a temp data dir.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,6 +12,21 @@ let dataDir;
 before(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "hoyofetch-test-"));
   process.env.HOYOFETCH_DATA_DIR = dataDir;
+  writeFileSync(
+    join(dataDir, "post_gate.json"),
+    JSON.stringify({
+      "legacy-hold": {
+        mode: "hold",
+        reviewChannelId: "legacy-review",
+        updatedAt: "legacy-time",
+      },
+      "legacy-off": {
+        mode: "off",
+        reviewChannelId: null,
+        updatedAt: "legacy-time",
+      },
+    })
+  );
   // Import AFTER setting the env so the store reads the temp dir.
   store = await import("../store.js");
 });
@@ -325,20 +340,47 @@ test("reversible moderation actions support message lookup and expiry", () => {
 test("post-gate configuration defaults off and persists mode + review channel", () => {
   assert.deepEqual(store.getPostGateConfig("server-postgate"), {
     mode: "off",
+    level: 0,
+    defaultSendLock: null,
     reviewChannelId: null,
     updatedAt: null,
   });
   store.setPostGateConfig("server-postgate", {
     mode: "hold",
+    defaultSendLock: {
+      restoreOnUnlock: true,
+      capturedAt: "2026-08-06T00:00:00.000Z",
+    },
     reviewChannelId: "channel-postgate",
   });
   const config = store.getPostGateConfig("server-postgate");
   assert.equal(config.mode, "hold");
+  assert.equal(config.level, 1);
+  assert.deepEqual(config.defaultSendLock, {
+    restoreOnUnlock: true,
+    capturedAt: "2026-08-06T00:00:00.000Z",
+  });
   assert.equal(config.reviewChannelId, "channel-postgate");
   assert.ok(config.updatedAt);
+  assert.deepEqual(
+    store
+      .getAllPostGateConfigs()
+      .find(({ serverId }) => serverId === "server-postgate"),
+    { serverId: "server-postgate", ...config }
+  );
   assert.doesNotThrow(() =>
     JSON.parse(readFileSync(join(dataDir, "post_gate.json"), "utf-8"))
   );
+});
+
+test("legacy post-gate configurations migrate to server levels", () => {
+  assert.equal(store.getPostGateConfig("legacy-hold").level, 1);
+  assert.equal(store.getPostGateConfig("legacy-off").level, 0);
+  const persisted = JSON.parse(
+    readFileSync(join(dataDir, "post_gate.json"), "utf-8")
+  );
+  assert.equal(persisted["legacy-hold"].level, 1);
+  assert.equal(persisted["legacy-off"].level, 0);
 });
 
 test("post-gate queue supports lookup by id and by review message, pending listing, and eviction cleanup", () => {

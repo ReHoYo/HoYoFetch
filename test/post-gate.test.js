@@ -30,7 +30,12 @@ const APPROVER_ID = ENKA_APPROVER_USER_ID;
 const DM_ID = "DMCHANNEL123";
 
 const MANAGE_MESSAGES_BIT = 2 ** 23;
+const MANAGE_PERMISSIONS_BIT = 2 ** 2;
+const BAN_MEMBERS_BIT = 2 ** 7;
 const TIMEOUT_MEMBERS_BIT = 2 ** 8;
+const VIEW_CHANNEL_BIT = 2 ** 20;
+const SEND_MESSAGE_BIT = 2 ** 22;
+const UNRELATED_PERMISSION_BIT = 2 ** 16;
 
 function makeStore() {
   const config = new Map();
@@ -45,6 +50,8 @@ function makeStore() {
       return (
         config.get(serverId) ?? {
           mode: "off",
+          level: 0,
+          defaultSendLock: null,
           reviewChannelId: null,
           updatedAt: null,
         }
@@ -52,9 +59,25 @@ function makeStore() {
     },
     setPostGateConfig(serverId, patch) {
       const previous = this.getPostGateConfig(serverId);
-      const current = { ...previous, ...patch, updatedAt: "now" };
+      const current = {
+        ...previous,
+        ...patch,
+        level:
+          patch.mode === "off"
+            ? 0
+            : patch.mode === "hold" && !patch.level
+              ? previous.level || 1
+              : (patch.level ?? previous.level),
+        updatedAt: `now-${Date.now()}-${Math.random()}`,
+      };
       config.set(serverId, current);
       return { previous, current };
+    },
+    getAllPostGateConfigs() {
+      return [...config.entries()].map(([serverId, value]) => ({
+        serverId,
+        ...structuredClone(value),
+      }));
     },
     isChannelExcluded: (channelId) => excludedChannels.has(channelId),
     createHeldPost(record) {
@@ -111,6 +134,18 @@ function makeHarness({
   attachmentUploadFails = false,
   attachmentUploadFailsAfter = Number.POSITIVE_INFINITY,
   sourceRepostFailsOnce = false,
+  permissionRefreshFails = false,
+  permissionUpdateFails = false,
+  permissionUpdateFailsAfter = permissionUpdateFails
+    ? 0
+    : Number.POSITIVE_INFINITY,
+  botRetainsControl = true,
+  botCanDelete = true,
+  reviewChannelGrantsManageMessages = true,
+  initialDefaultPermissions = SEND_MESSAGE_BIT,
+  runPermissionEventImmediately = false,
+  lockdownDeleteFails = false,
+  lockdownBanFails = false,
 } = {}) {
   let current = clock;
   const store = makeStore();
@@ -119,9 +154,12 @@ function makeHarness({
   const dmPayloads = [];
   const sendCalls = [];
   const reactionPuts = [];
+  const bans = [];
+  const permissionWrites = [];
   const deletedMessageIds = [];
   const removedEvidencePaths = [];
   let attachmentUploads = 0;
+  let serverDefaultPermissions = initialDefaultPermissions;
   let sourceRepostFailuresRemaining = sourceRepostFailsOnce ? 1 : 0;
 
   const channels = new Map([
@@ -151,6 +189,7 @@ function makeHarness({
     authenticationHeader: ["X-Bot-Token", "secret"],
     api: {
       async get(path) {
+        if (permissionRefreshFails) throw new Error("permission API down");
         const memberMatch = path.match(
           new RegExp(`^/servers/${SERVER_ID}/members/([A-Za-z0-9]+)$`)
         );
@@ -158,11 +197,23 @@ function makeHarness({
           return {
             _id: SERVER_ID,
             owner: OWNER_ID,
-            default_permissions: 0,
+            default_permissions: serverDefaultPermissions,
             roles: {
               MODROLE: {
                 rank: 1,
                 permissions: { a: TIMEOUT_MEMBERS_BIT, d: 0 },
+              },
+              BOTROLE: {
+                rank: 1,
+                permissions: {
+                  a:
+                    BAN_MEMBERS_BIT |
+                    MANAGE_PERMISSIONS_BIT |
+                    (botCanDelete ? MANAGE_MESSAGES_BIT : 0) |
+                    VIEW_CHANNEL_BIT |
+                    (botRetainsControl ? SEND_MESSAGE_BIT : 0),
+                  d: 0,
+                },
               },
             },
           };
@@ -174,7 +225,12 @@ function makeHarness({
             joined_at: new Date(
               current - 30 * 24 * 60 * 60 * 1_000
             ).toISOString(),
-            roles: userId === MOD_USER_ID ? ["MODROLE"] : [],
+            roles:
+              userId === MOD_USER_ID
+                ? ["MODROLE"]
+                : userId === BOT_ID
+                  ? ["BOTROLE"]
+                  : [],
           };
         }
         if (path === `/channels/${SOURCE_CHANNEL_ID}`) {
@@ -191,13 +247,25 @@ function makeHarness({
             _id: REVIEW_CHANNEL_ID,
             channel_type: "TextChannel",
             server: SERVER_ID,
-            default_permissions: { a: MANAGE_MESSAGES_BIT, d: 0 },
+            default_permissions: {
+              a: reviewChannelGrantsManageMessages ? MANAGE_MESSAGES_BIT : 0,
+              d: 0,
+            },
+            role_permissions: {},
+          };
+        }
+        if (path === `/channels/${EXCLUDED_CHANNEL_ID}`) {
+          return {
+            _id: EXCLUDED_CHANNEL_ID,
+            channel_type: "TextChannel",
+            server: SERVER_ID,
+            default_permissions: { a: 0, d: 0 },
             role_permissions: {},
           };
         }
         const userMatch = path.match(/^\/users\/([A-Za-z0-9]+)$/);
         if (userMatch) {
-          return { _id: userMatch[1] };
+          return { _id: userMatch[1], bot: userMatch[1] === BOT_ID };
         }
         throw new Error(`unexpected path ${path}`);
       },
@@ -209,11 +277,28 @@ function makeHarness({
       method === "DELETE" &&
       /^\/channels\/[^/]+\/messages\/[^/]+$/.test(path)
     ) {
+      if (lockdownDeleteFails) return { ok: false, status: 403 };
       deletedMessageIds.push(path.split("/").pop());
       return { ok: true, status: 200 };
     }
     if (method === "PUT" && path.includes("/reactions/")) {
       reactionPuts.push(path);
+      return { ok: true, status: 200 };
+    }
+    if (method === "PUT" && path.includes("/bans/")) {
+      if (lockdownBanFails) return { ok: false, status: 503 };
+      bans.push({ path, body });
+      return { ok: true, status: 200 };
+    }
+    if (
+      method === "PUT" &&
+      path === `/servers/${SERVER_ID}/permissions/default`
+    ) {
+      permissionWrites.push(body.permissions);
+      if (permissionWrites.length > permissionUpdateFailsAfter) {
+        return { ok: false, status: 403 };
+      }
+      serverDefaultPermissions = body.permissions;
       return { ok: true, status: 200 };
     }
     if (method === "GET" && path === `/users/${APPROVER_ID}/dm`) {
@@ -271,7 +356,12 @@ function makeHarness({
     queueIdFactory: () => `PGQUEUE${++nextId}`,
     requestIdFactory: () => `PGREQ${++nextId}`,
     runIntentionalDelete: async (_messageId, operation) => operation(),
-    scheduleTimeout: () => ({ unref() {} }),
+    scheduleTimeout: (callback, delay) => {
+      if (runPermissionEventImmediately && delay === 500) {
+        queueMicrotask(callback);
+      }
+      return { unref() {} };
+    },
     scheduleInterval: () => ({ unref() {} }),
     logger: { log() {}, warn() {} },
   });
@@ -284,10 +374,18 @@ function makeHarness({
     dmPayloads,
     sendCalls,
     reactionPuts,
+    bans,
+    permissionWrites,
     deletedMessageIds,
     removedEvidencePaths,
     get attachmentUploads() {
       return attachmentUploads;
+    },
+    get serverDefaultPermissions() {
+      return serverDefaultPermissions;
+    },
+    set serverDefaultPermissions(value) {
+      serverDefaultPermissions = value;
     },
     advance(ms) {
       current += ms;
@@ -323,6 +421,7 @@ function newAccountMessage({
 async function enableHold(harness) {
   harness.store.setPostGateConfig(SERVER_ID, {
     mode: "hold",
+    level: 1,
     reviewChannelId: REVIEW_CHANNEL_ID,
   });
 }
@@ -348,6 +447,61 @@ test("holds a first-post link from a brand-new account", async () => {
   const [record] = [...harness.store.queue.values()];
   assert.equal(record.status, "pending");
   assert.equal(record.userId, NEW_USER_ID);
+});
+
+test("levels 1 and 2 hold common obfuscated link forms without rewriting evidence", async () => {
+  const variants = [
+    "h t t p s : / / example . com / login",
+    "hxxps://example.com/login",
+    "w w w . example . com",
+    "example [.] com",
+    "example (dot) com",
+    "example { dot } com",
+    "example\u3002com",
+    "exa\u200Bmple.com",
+    "ｅｘａｍｐｌｅ．ｃｏｍ",
+    "discord [.] gg / invite",
+    "192 . 0 . 2 . 1 : 8080 / login",
+    "shop.example.xn--p1ai",
+  ];
+
+  for (const level of [1, 2]) {
+    for (const [index, content] of variants.entries()) {
+      const harness = makeHarness();
+      await enableHold(harness);
+      harness.store.setPostGateConfig(SERVER_ID, { level });
+      const messageId = `MSGOBFUSCATED${level}${index}`;
+
+      await harness.postGate.handleMessage(
+        newAccountMessage({ id: messageId, content })
+      );
+
+      assert.deepEqual(harness.deletedMessageIds, [messageId], content);
+      assert.equal(harness.store.queue.size, 1, content);
+      const [record] = [...harness.store.queue.values()];
+      assert.equal(record.content, content, content);
+    }
+  }
+});
+
+test("broad link normalization still allows ordinary non-link prose", async () => {
+  const examples = [
+    "hello everyone!",
+    "please dot the i and cross the t",
+    "version 1.2.3 is ready",
+    "this sentence is fine. No worries here.",
+    "we discussed protocols and domains today",
+  ];
+
+  for (const [index, content] of examples.entries()) {
+    const harness = makeHarness();
+    await enableHold(harness);
+    await harness.postGate.handleMessage(
+      newAccountMessage({ id: `MSGPROSE${index}`, content })
+    );
+    assert.equal(harness.deletedMessageIds.length, 0, content);
+    assert.equal(harness.store.queue.size, 0, content);
+  }
 });
 
 test("holds a first-post attachment from a brand-new account", async () => {
@@ -586,6 +740,408 @@ test("shouldExcludeMessage/shouldExcludeMessageDelete track the hold decision", 
   );
 });
 
+test("level 2 retains the new-member link and media review policy", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  harness.store.setPostGateConfig(SERVER_ID, { level: 2 });
+
+  await harness.postGate.handleMessage(
+    newAccountMessage({ id: "MSGLEVEL2", content: "https://example.com" })
+  );
+
+  assert.deepEqual(harness.deletedMessageIds, ["MSGLEVEL2"]);
+  assert.equal(harness.store.queue.size, 1);
+  assert.equal(harness.protectedLogs.length, 1);
+  assert.equal(harness.permissionWrites.length, 0);
+});
+
+test("level 3 denies every regular-member message without queue or evidence", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  harness.store.setPostGateConfig(SERVER_ID, { level: 3 });
+  const messages = [
+    newAccountMessage({ id: "MSGLOCKTEXT", content: "hello" }),
+    newAccountMessage({
+      id: "MSGLOCKLINK",
+      content: "https://example.com",
+    }),
+    newAccountMessage({
+      id: "MSGLOCKMEDIA",
+      attachments: [{ id: "ATTLOCK", filename: "x.png", size: 5 }],
+    }),
+    newAccountMessage({
+      id: "MSGLOCKPRIVATE",
+      channelId: EXCLUDED_CHANNEL_ID,
+      content: "private text",
+    }),
+  ];
+
+  for (const message of messages) {
+    const excluded = harness.postGate.shouldExcludeMessage(message);
+    await harness.postGate.handleMessage(message);
+    assert.equal(await excluded, true);
+  }
+
+  assert.deepEqual(harness.deletedMessageIds, [
+    "MSGLOCKTEXT",
+    "MSGLOCKLINK",
+    "MSGLOCKMEDIA",
+    "MSGLOCKPRIVATE",
+  ]);
+  assert.equal(harness.store.queue.size, 0);
+  assert.equal(harness.protectedLogs.length, 0);
+  assert.equal(harness.attachmentUploads, 0);
+});
+
+test("level 3 exempts verified moderators and fails safe on refresh errors", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  harness.store.setPostGateConfig(SERVER_ID, { level: 3 });
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGLOCKMOD",
+      authorId: MOD_USER_ID,
+      content: "moderator update",
+    })
+  );
+  assert.equal(harness.deletedMessageIds.length, 0);
+
+  const failed = makeHarness({ permissionRefreshFails: true });
+  await enableHold(failed);
+  failed.store.setPostGateConfig(SERVER_ID, { level: 3 });
+  const message = newAccountMessage({
+    id: "MSGLOCKUNKNOWN",
+    content: "could be staff",
+  });
+  const excluded = failed.postGate.shouldExcludeMessage(message);
+  await failed.postGate.handleMessage(message);
+  assert.equal(await excluded, false);
+  assert.equal(failed.deletedMessageIds.length, 0);
+});
+
+test("level 3 activation posts one transition notice and no-op changes stay quiet", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  const command = {
+    server: { id: SERVER_ID },
+    channelId: REVIEW_CHANNEL_ID,
+    authorId: MOD_USER_ID,
+  };
+
+  const changed = await harness.postGate.handleLevelCommand(command, ["3"]);
+  assert.equal(changed.outcome, "level_changed");
+  assert.equal(harness.store.getPostGateConfig(SERVER_ID).level, 3);
+  assert.deepEqual(harness.permissionWrites, [0]);
+  assert.equal(harness.serverDefaultPermissions & SEND_MESSAGE_BIT, 0);
+  assert.equal(
+    harness.store.getPostGateConfig(SERVER_ID).defaultSendLock.restoreOnUnlock,
+    true
+  );
+  assert.equal(harness.protectedLogs.length, 1);
+  assert.match(
+    harness.protectedLogs[0].payload.embeds[0].description,
+    /avoid flooding the moderation queue/
+  );
+
+  const unchanged = await harness.postGate.handleLevelCommand(command, ["3"]);
+  assert.equal(unchanged.outcome, "no_change");
+  assert.equal(harness.protectedLogs.length, 1);
+});
+
+test("level 3 refuses activation when the permission lock cannot be applied", async () => {
+  const failedUpdate = makeHarness({ permissionUpdateFails: true });
+  await enableHold(failedUpdate);
+  const command = {
+    server: { id: SERVER_ID },
+    channelId: REVIEW_CHANNEL_ID,
+    authorId: MOD_USER_ID,
+  };
+
+  const failed = await failedUpdate.postGate.handleLevelCommand(command, ["3"]);
+  assert.equal(failed.outcome, "permission_update_failed");
+  assert.equal(failedUpdate.store.getPostGateConfig(SERVER_ID).level, 1);
+  assert.equal(
+    failedUpdate.store.getPostGateConfig(SERVER_ID).defaultSendLock,
+    null
+  );
+
+  const losesControl = makeHarness({ botRetainsControl: false });
+  await enableHold(losesControl);
+  const unsafe = await losesControl.postGate.handleLevelCommand(command, ["3"]);
+  assert.equal(unsafe.outcome, "control_access_required");
+  assert.equal(losesControl.store.getPostGateConfig(SERVER_ID).level, 1);
+  assert.equal(losesControl.permissionWrites.length, 0);
+
+  const unverified = makeHarness({ permissionRefreshFails: true });
+  await enableHold(unverified);
+  const denied = await unverified.postGate.handleLevelCommand(command, ["3"]);
+  assert.equal(denied.outcome, "unauthorized");
+  assert.equal(unverified.store.getPostGateConfig(SERVER_ID).level, 1);
+  assert.equal(unverified.permissionWrites.length, 0);
+});
+
+test("level 3 warns but still locks when deletion fallback is unavailable", async () => {
+  const harness = makeHarness({
+    botCanDelete: false,
+    reviewChannelGrantsManageMessages: false,
+  });
+  await enableHold(harness);
+  const command = {
+    server: { id: SERVER_ID },
+    channelId: REVIEW_CHANNEL_ID,
+    authorId: MOD_USER_ID,
+  };
+
+  const changed = await harness.postGate.handleLevelCommand(command, ["3"]);
+
+  assert.equal(changed.outcome, "level_changed");
+  assert.equal(harness.store.getPostGateConfig(SERVER_ID).level, 3);
+  assert.equal(harness.serverDefaultPermissions & SEND_MESSAGE_BIT, 0);
+  assert.match(
+    harness.protectedLogs[0].payload.embeds[0].description,
+    /deletion of any slipped messages is best effort/
+  );
+});
+
+test("unlock restores only the default Send Messages bit Irminsul removed", async () => {
+  const harness = makeHarness({
+    initialDefaultPermissions: SEND_MESSAGE_BIT | UNRELATED_PERMISSION_BIT,
+  });
+  await enableHold(harness);
+  const command = {
+    server: { id: SERVER_ID },
+    channelId: REVIEW_CHANNEL_ID,
+    authorId: MOD_USER_ID,
+  };
+
+  await harness.postGate.handleLevelCommand(command, ["3"]);
+  const permissionAddedDuringLockdown = 2 ** 17;
+  harness.serverDefaultPermissions |= permissionAddedDuringLockdown;
+  const changed = await harness.postGate.handleLevelCommand(command, ["2"]);
+
+  assert.equal(changed.outcome, "level_changed");
+  assert.equal(harness.store.getPostGateConfig(SERVER_ID).level, 2);
+  assert.equal(
+    harness.store.getPostGateConfig(SERVER_ID).defaultSendLock,
+    null
+  );
+  assert.equal(
+    harness.serverDefaultPermissions,
+    SEND_MESSAGE_BIT | UNRELATED_PERMISSION_BIT | permissionAddedDuringLockdown
+  );
+});
+
+test("unlock leaves Send Messages disabled when it was already disabled", async () => {
+  const harness = makeHarness({
+    initialDefaultPermissions: UNRELATED_PERMISSION_BIT,
+  });
+  await enableHold(harness);
+  const command = {
+    server: { id: SERVER_ID },
+    channelId: REVIEW_CHANNEL_ID,
+    authorId: MOD_USER_ID,
+  };
+
+  await harness.postGate.handleLevelCommand(command, ["3"]);
+  assert.equal(harness.permissionWrites.length, 0);
+  assert.equal(
+    harness.store.getPostGateConfig(SERVER_ID).defaultSendLock.restoreOnUnlock,
+    false
+  );
+  await harness.postGate.handleLevelCommand(command, ["1"]);
+
+  assert.equal(harness.serverDefaultPermissions, UNRELATED_PERMISSION_BIT);
+  assert.equal(harness.permissionWrites.length, 0);
+  assert.equal(
+    harness.store.getPostGateConfig(SERVER_ID).defaultSendLock,
+    null
+  );
+});
+
+test("a failed unlock keeps lockdown active and retains restoration metadata", async () => {
+  const harness = makeHarness({ permissionUpdateFailsAfter: 1 });
+  await enableHold(harness);
+  const command = {
+    server: { id: SERVER_ID },
+    channelId: REVIEW_CHANNEL_ID,
+    authorId: MOD_USER_ID,
+  };
+
+  await harness.postGate.handleLevelCommand(command, ["3"]);
+  const failed = await harness.postGate.handleLevelCommand(command, ["2"]);
+
+  assert.equal(failed.outcome, "permission_restore_failed");
+  assert.equal(harness.store.getPostGateConfig(SERVER_ID).level, 3);
+  assert.equal(
+    harness.store.getPostGateConfig(SERVER_ID).defaultSendLock.restoreOnUnlock,
+    true
+  );
+  assert.equal(harness.serverDefaultPermissions & SEND_MESSAGE_BIT, 0);
+});
+
+test("permission reconciliation repairs lockdown drift and preserves other bits", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  const command = {
+    server: { id: SERVER_ID },
+    channelId: REVIEW_CHANNEL_ID,
+    authorId: MOD_USER_ID,
+  };
+  await harness.postGate.handleLevelCommand(command, ["3"]);
+
+  harness.serverDefaultPermissions =
+    SEND_MESSAGE_BIT | UNRELATED_PERMISSION_BIT;
+  const repaired = await harness.postGate.reconcilePermissionLock(SERVER_ID);
+
+  assert.equal(repaired.ok, true);
+  assert.equal(repaired.changed, true);
+  assert.equal(harness.serverDefaultPermissions, UNRELATED_PERMISSION_BIT);
+  assert.deepEqual(harness.permissionWrites, [0, UNRELATED_PERMISSION_BIT]);
+});
+
+test("ServerUpdate triggers permission reconciliation for active lockdown", async () => {
+  const harness = makeHarness({ runPermissionEventImmediately: true });
+  await enableHold(harness);
+  const command = {
+    server: { id: SERVER_ID },
+    channelId: REVIEW_CHANNEL_ID,
+    authorId: MOD_USER_ID,
+  };
+  await harness.postGate.handleLevelCommand(command, ["3"]);
+  harness.serverDefaultPermissions = SEND_MESSAGE_BIT;
+
+  await harness.postGate.handleRawEvent({
+    type: "ServerUpdate",
+    id: SERVER_ID,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(harness.serverDefaultPermissions & SEND_MESSAGE_BIT, 0);
+  assert.equal(harness.permissionWrites.length, 2);
+});
+
+test("legacy lockdown stays deletion-only when reconciliation is degraded", async () => {
+  const harness = makeHarness({ permissionUpdateFails: true });
+  await enableHold(harness);
+  harness.store.setPostGateConfig(SERVER_ID, { level: 3 });
+
+  const result = await harness.postGate.reconcilePermissionLocks();
+
+  assert.equal(result[0].outcome, "permission_update_failed");
+  assert.equal(harness.store.getPostGateConfig(SERVER_ID).level, 3);
+  assert.equal(
+    harness.store.getPostGateConfig(SERVER_ID).defaultSendLock,
+    null
+  );
+  assert.equal(harness.protectedLogs.length, 1);
+  assert.match(
+    harness.protectedLogs[0].payload.embeds[0].description,
+    /Reactive deletion remains active/
+  );
+});
+
+test("lockdown enforcement failures throttle protected alerts", async () => {
+  const harness = makeHarness({ lockdownDeleteFails: true });
+  await enableHold(harness);
+  harness.store.setPostGateConfig(SERVER_ID, { level: 3 });
+
+  for (const id of ["MSGFAIL1", "MSGFAIL2", "MSGFAIL3"]) {
+    await harness.postGate.handleMessage(
+      newAccountMessage({ id, content: "blocked" })
+    );
+  }
+  assert.equal(harness.protectedLogs.length, 1);
+  assert.match(
+    harness.protectedLogs[0].payload.embeds[0].title,
+    /Enforcement Degraded/
+  );
+
+  harness.advance(10 * 60 * 1000 + 1);
+  await harness.postGate.handleMessage(
+    newAccountMessage({ id: "MSGFAIL4", content: "blocked again" })
+  );
+  assert.equal(harness.protectedLogs.length, 2);
+});
+
+test("level 4 requires an invoker-only reaction and bans each poster once", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  const command = {
+    server: { id: SERVER_ID },
+    channelId: REVIEW_CHANNEL_ID,
+    authorId: MOD_USER_ID,
+  };
+
+  const requested = await harness.postGate.handleLevelCommand(command, [
+    "4",
+    "confirm",
+  ]);
+  assert.equal(requested.outcome, "confirmation_requested");
+  assert.equal(harness.store.getPostGateConfig(SERVER_ID).level, 1);
+
+  await harness.postGate.handleRawEvent({
+    type: "MessageReact",
+    id: requested.promptMessageId,
+    user_id: NEW_USER_ID,
+    emoji_id: "✅",
+  });
+  assert.equal(harness.store.getPostGateConfig(SERVER_ID).level, 1);
+
+  await harness.postGate.handleRawEvent({
+    type: "MessageReact",
+    id: requested.promptMessageId,
+    user_id: MOD_USER_ID,
+    emoji_id: "✅",
+  });
+  assert.equal(harness.store.getPostGateConfig(SERVER_ID).level, 4);
+
+  await harness.postGate.handleMessage(
+    newAccountMessage({ id: "MSGLEVEL4A", content: "first attempt" })
+  );
+  await harness.postGate.handleMessage(
+    newAccountMessage({ id: "MSGLEVEL4B", content: "second attempt" })
+  );
+  assert.deepEqual(harness.deletedMessageIds, ["MSGLEVEL4A", "MSGLEVEL4B"]);
+  assert.equal(harness.bans.length, 1);
+  assert.match(harness.bans[0].body.reason, /Level 4 lockdown/);
+  assert.equal(harness.store.queue.size, 0);
+});
+
+test("level 4 confirmation expires or becomes stale without changing level", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  const command = {
+    server: { id: SERVER_ID },
+    channelId: REVIEW_CHANNEL_ID,
+    authorId: MOD_USER_ID,
+  };
+  const expired = await harness.postGate.handleLevelCommand(command, [
+    "4",
+    "confirm",
+  ]);
+  harness.advance(2 * 60 * 1000 + 1);
+  await harness.postGate.handleRawEvent({
+    type: "MessageReact",
+    id: expired.promptMessageId,
+    user_id: MOD_USER_ID,
+    emoji_id: "✅",
+  });
+  assert.equal(harness.store.getPostGateConfig(SERVER_ID).level, 1);
+
+  const stale = await harness.postGate.handleLevelCommand(command, [
+    "4",
+    "confirm",
+  ]);
+  harness.store.setPostGateConfig(SERVER_ID, { level: 2 });
+  await harness.postGate.handleRawEvent({
+    type: "MessageReact",
+    id: stale.promptMessageId,
+    user_id: MOD_USER_ID,
+    emoji_id: "✅",
+  });
+  assert.equal(harness.store.getPostGateConfig(SERVER_ID).level, 2);
+});
+
 test("approving a held post reposts it and clears the queue entry", async () => {
   const harness = makeHarness();
   await enableHold(harness);
@@ -649,7 +1205,7 @@ test("a failed approval remains pending and can be retried", async () => {
   assert.equal(harness.store.getHeldPost(record.queueId).status, "approved");
 });
 
-test("rejecting a held post discards it and increases the automod strike level", async () => {
+test("rejecting a held post discards it and increases the automod strike stage", async () => {
   const harness = makeHarness();
   await enableHold(harness);
   await harness.postGate.handleMessage(
