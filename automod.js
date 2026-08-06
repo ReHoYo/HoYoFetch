@@ -54,6 +54,13 @@ const MAX_MESSAGES_PER_ACTOR = 40;
 const MAX_JOIN_SERVERS = 1_000;
 const MAX_JOINS_PER_SERVER = 100;
 const MAX_RAID_JOINERS_PER_SERVER = 500;
+const DEFAULT_POLICY = Object.freeze({
+  recentAccountMs: AUTOMOD_LIMITS.recentAccountMs,
+  recentMemberMs: AUTOMOD_LIMITS.recentMemberMs,
+  scoreThreshold: 2,
+  joinSurgeCount: AUTOMOD_LIMITS.joinSurgeCount,
+  raidModeMs: AUTOMOD_LIMITS.raidModeMs,
+});
 
 const DEFAULT_STORE = Object.freeze({
   createAutomodCase,
@@ -130,7 +137,7 @@ export class AntiRaidDetector {
     this.joinStates = new Map();
   }
 
-  recordJoin(serverId, userId) {
+  recordJoin(serverId, userId, policy = DEFAULT_POLICY) {
     const now = this.now();
     let state = this.joinStates.get(serverId);
     if (!state) {
@@ -150,11 +157,8 @@ export class AntiRaidDetector {
     }
 
     let raidActivated = false;
-    if (
-      state.raidUntil <= now &&
-      state.joins.length >= AUTOMOD_LIMITS.joinSurgeCount
-    ) {
-      state.raidUntil = now + AUTOMOD_LIMITS.raidModeMs;
+    if (state.raidUntil <= now && state.joins.length >= policy.joinSurgeCount) {
+      state.raidUntil = now + policy.raidModeMs;
       raidActivated = true;
     }
     if (state.raidUntil > now) {
@@ -182,6 +186,7 @@ export class AntiRaidDetector {
     mentionIds = [],
     accountCreatedAt,
     joinedAt,
+    policy = DEFAULT_POLICY,
   }) {
     const now = this.now();
     const key = `${serverId}:${userId}`;
@@ -217,8 +222,8 @@ export class AntiRaidDetector {
     const joinedDuringRaid =
       (raidState?.joinedDuringRaid.get(userId) ?? 0) > now;
     const recentIdentity =
-      isRecent(asTime(accountCreatedAt), now, AUTOMOD_LIMITS.recentAccountMs) ||
-      isRecent(asTime(joinedAt), now, AUTOMOD_LIMITS.recentMemberMs);
+      isRecent(asTime(accountCreatedAt), now, policy.recentAccountMs) ||
+      isRecent(asTime(joinedAt), now, policy.recentMemberMs);
 
     const signals = {
       rapidBurst: rapid.length >= AUTOMOD_LIMITS.rapidMessages,
@@ -239,8 +244,11 @@ export class AntiRaidDetector {
       (signals.recentIdentity ? 1 : 0) +
       (signals.joinedDuringRaid ? 1 : 0);
 
+    // The behavioural signal stays mandatory at every level: raising the
+    // moderation level lowers how much corroboration one signal needs, but
+    // identity alone can still never trigger containment.
     return {
-      triggered: behaviourSignal && score >= 2,
+      triggered: behaviourSignal && score >= policy.scoreThreshold,
       score,
       signals,
       messages: history.map((entry) => ({
@@ -691,7 +699,7 @@ export function createAutomod(
       config.logChannelId,
       buildStatusEmbed(
         "🚨 Automod Raid Mode Activated",
-        `${result.joinCount} members joined within 60 seconds. Heightened risk weighting is active for 10 minutes. **No member was punished by the join surge alone.**`,
+        `${result.joinCount} members joined within 60 seconds. Heightened risk weighting is active for ${AUTOMOD_LIMITS.raidModeMs / 60_000} minutes. **No member was punished by the join surge alone.**`,
         "#E67E22"
       )
     );

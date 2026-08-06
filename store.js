@@ -34,6 +34,7 @@ const AUTOMOD_STRIKES_PATH = join(DATA_DIR, "automod_strikes.json");
 const MODERATION_ACTIONS_PATH = join(DATA_DIR, "moderation_actions.json");
 const SPAM_REPORTS_PATH = join(DATA_DIR, "spam_reports.json");
 const CHANNEL_EXCLUSIONS_PATH = join(DATA_DIR, "channel_exclusions.json");
+const MODERATION_LEVEL_PATH = join(DATA_DIR, "moderation_level.json");
 const POST_GATE_PATH = join(DATA_DIR, "post_gate.json");
 const POST_GATE_QUEUE_PATH = join(DATA_DIR, "post_gate_queue.json");
 const PRIVACY_DIGEST_PATH = join(DATA_DIR, "privacy_digest.json");
@@ -954,6 +955,53 @@ export function pruneModerationActions(now = Date.now()) {
     }
   }
   if (changed) persistModerationActions();
+}
+
+// ═══════════════════════════════════════════════════
+//  Legacy moderation posture compatibility
+// ═══════════════════════════════════════════════════
+// { "<serverId>": { level: 1|2|3, tenureDays, updatedAt, updatedBy } }
+// Kept readable so deployments that briefly persisted the retired
+// threshold/kick policy do not lose data during rollback. Runtime enforcement
+// uses the Post Gate configuration below.
+
+export const MODERATION_LEVELS = Object.freeze([1, 2, 3]);
+export const DEFAULT_TENURE_DAYS = 7;
+export const MIN_TENURE_DAYS = 1;
+export const MAX_TENURE_DAYS = 30;
+
+let moderationLevels = readJSON(MODERATION_LEVEL_PATH, {});
+
+function normaliseModerationLevel(value = {}) {
+  const level = Number(value.level);
+  const tenureDays = Number(value.tenureDays);
+  return {
+    level: MODERATION_LEVELS.includes(level) ? level : 1,
+    tenureDays: Number.isFinite(tenureDays)
+      ? Math.max(
+          MIN_TENURE_DAYS,
+          Math.min(MAX_TENURE_DAYS, Math.trunc(tenureDays))
+        )
+      : DEFAULT_TENURE_DAYS,
+    updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : null,
+    updatedBy: typeof value.updatedBy === "string" ? value.updatedBy : null,
+  };
+}
+
+export function getModerationLevel(serverId) {
+  return normaliseModerationLevel(moderationLevels[serverId]);
+}
+
+export function setModerationLevel(serverId, patch = {}) {
+  const previous = getModerationLevel(serverId);
+  const next = normaliseModerationLevel({
+    ...previous,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  });
+  moderationLevels[serverId] = next;
+  writeJSON(MODERATION_LEVEL_PATH, moderationLevels);
+  return { previous, current: next };
 }
 
 // ═══════════════════════════════════════════════════

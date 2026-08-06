@@ -7,11 +7,13 @@ All manual actions require an active Irminsul audit channel.
 
 ## Writing a command
 
-Every manual action takes one member and a reason written in plain words. The member, the reason,
-and any option may appear in any order:
+Every manual action takes one target and a reason written in plain words. The target, the reason,
+and any option may appear in any order. `/Ban` accepts either a member mention or a raw Stoat
+account ID; the other member actions require a current member.
 
 ```text
 /Ban @member for spamming and stuff
+/Ban 01ABCDEFGHJKMNPQRSTVWXYZ12 for coordinating a raid
 /Mute 1h @member because they argued with staff
 /Ban @member delete:1d reason: raid cleanup
 ```
@@ -24,7 +26,7 @@ straight` opens the duration picker and keeps the sentence intact.
 ## Confirm before acting
 
 Because the reason is free text, a mistyped or auto-completed mention would otherwise be
-indistinguishable from the intended member. `/Ban`, `/Kick`, and `/Mute` therefore post a
+indistinguishable from the intended account. `/Ban`, `/Kick`, and `/Mute` therefore post a
 confirmation that names the action, the target, the reason, and any typed cleanup window:
 
 ```text
@@ -35,7 +37,7 @@ Reason: spamming and stuff
 ```
 
 Nothing is sent to Stoat until the moderator who ran the command reacts ✅. Another moderator's
-reaction is ignored, ❌ cancels without touching the member, and the prompt expires after two
+reaction is ignored, ❌ cancels without touching the target, and the prompt expires after two
 minutes. Permissions and the target are verified at that point, not when the command was typed, so
 the checks reflect the moment of the action.
 
@@ -43,12 +45,21 @@ the checks reflect the moment of the action.
 
 ```text
 /Ban @member for repeated spam
+/Ban 01ABCDEFGHJKMNPQRSTVWXYZ12 for coordinating a raid
 ```
 
-After ✅, `/Ban` verifies Ban Members and acts. Once the ban lands, Irminsul offers a cleanup
+After ✅, `/Ban` freshly verifies Ban Members and the protected server context, then sends the
+account ID to Stoat's native ban endpoint. The account may be a current member, a departed member,
+or someone who has never joined the server. Irminsul does not keep a separate pending-ban list and
+does not wait for a join event; Stoat owns and enforces the ban immediately. Invalid accounts and
+hierarchy failures are rejected by Stoat without a success record.
+
+Once the ban lands, Irminsul offers a cleanup
 picker: 1️⃣ 1h · 2️⃣ 6h · 3️⃣ 1d · 4️⃣ 3d · 5️⃣ 7d · 6️⃣ 1mo · 7️⃣ 3mo · 8️⃣ 6mo · 9️⃣ 1y, or ❌ to keep the messages.
 Only the moderator who ran the command can choose, and the picker expires after two minutes.
-Cleanup requires Manage Messages in every affected channel.
+Cleanup requires Manage Messages in every affected channel and covers only messages Irminsul
+previously observed, so a never-joined account normally has nothing to delete. A departed account's
+archived messages remain eligible.
 
 The protected record accepts a ↩️ reaction for ten minutes from a freshly authorized ban moderator.
 Undo unbans the account but cannot restore membership or deleted messages.

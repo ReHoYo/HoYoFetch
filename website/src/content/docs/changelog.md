@@ -3,15 +3,58 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
-## Version 2.4.1
+## Unreleased
 
 ### Server moderation levels
 
-- Added persistent `/Level` policy states on top of the Enka-approved Post Gate destination: Levels 1–2 review qualifying new-member links/media, Level 3 denies regular-member posts server-wide, and Level 4 also automatically bans slipped-message authors.
+- Replaced the short-lived threshold/kick-based `/Level 1|2|3` posture with persistent Post Gate-backed Levels 1–4. Levels 1–2 review qualifying new-member links/media, Level 3 locks default-role sending and deletes slips, and Level 4 also bans slipped-message authors after an invoker-only reaction confirmation.
 - Hardened Levels 1–2 against common link obfuscation, including inserted whitespace and invisible characters, spaced or `hxxp` protocols, Unicode punctuation, bracketed dots, domains, and IPv4 addresses. Detection uses a normalized copy while review evidence keeps the original text.
-- Levels 3–4 now clear Send Messages from the server default role and retain reactive deletion for slips. Lock ownership is persisted so downgrades restore only the bit Irminsul removed, while startup, server-update, and periodic reconciliation repair permission drift.
-- Level 4 requires `/Level 4 confirm` plus an invoker-only two-minute reaction confirmation and fresh permission checks. Lockdown attempts bypass review, automod, commands, attachment copies, and message archives to prevent queue floods.
+- Persisted permission-lock ownership so downgrades restore only the Send Messages bit Irminsul removed; startup, server-update, and periodic reconciliation repair drift.
+- Lockdown messages bypass review, automod, commands, attachment copies, and message archives to prevent queue floods.
 - Renamed the separate per-member automod timeout ladder publicly to strike stages while preserving its existing persisted data.
+
+## Version 2.5.1
+
+### Level 2/3 no longer hold plain text
+
+- Levels 2 and 3 dropped `holdEveryMessage`: they now hold the same trigger as level 1 — links and attachments — instead of queuing every message a new account posts. Moderators reported that holding plain-text greetings both discouraged new members from sticking around and made the review queue unsustainable to keep up with.
+- The wider "new account"/"new member" windows, the lower automod score threshold, and (at level 3) kick-on-join and tenure-gated posting are unchanged, so levels 2 and 3 are still meaningfully stricter than level 1. Text-only abuse from a new account is now covered by automod's behavioral scoring rather than by manual review of every message.
+
+## Version 2.5.0
+
+### Moderation levels
+
+- Added `/Level 1|2|3`, a single dial for the whole server's moderation posture, using the same capability-based moderator policy as `/Automod` and `/Post-Gate` (owner, Manage Server, or a recognized moderation capability). Every server starts at level 1, which is the behavior that existed before this release, and `/Level 1` stands everything back down.
+- **Level 2** holds every message from a new account instead of only links and attachments, widens "new account" from 7 days to 30 and "new member" from 24 hours to 7 days, lets automod act on a single behavioral signal, and trips raid mode at 3 joins in 60 seconds for 30 minutes.
+- **Level 3** adds two enforcement actions: every new join is kicked on sight, and members who joined less than the tenure threshold ago (default 7 days, adjustable with `/Level tenure <1-30>`) have their messages deleted and their automod strike raised.
+- A behavioral signal remains mandatory at every level. Being new, or joining during a raid, still only adds weight to observed behavior and can never trigger containment on its own.
+- Level 3 is refused unless the command carries the literal word `confirm` and `/Automod` has a log channel configured, so no automatic kick can happen without a protected record. Bots and verified moderators are never kicked, and a joiner whose fresh permission check cannot complete is reported rather than removed.
+- A restricted member has every message deleted but escalates at most one strike per 15 minutes, so a flood cannot walk an account to the top of the ladder in seconds or fill the log with hundreds of notices.
+- Levels only retune thresholds `/Automod` and `/Post-Gate` already own; raising the level does not switch either feature on.
+
+### Post-gate approval no longer reposts
+
+- `/Post-Gate approve` and the ✅ reaction now clear the **author** rather than republishing the content: the review card is removed and the author's automod strike is reset to zero. The held message is not reposted, and the author is free to post it again themselves.
+- Previously, approval re-uploaded every held attachment and republished the message as Irminsul attributed to the original author. Under a sustained wave that made the review queue a delivery mechanism, since clearing an account also relaunched whatever it had posted.
+- A dead or unavailable archive copy no longer blocks approval. `repost_failed` and `attachments_unavailable` no longer exist as outcomes, because nothing is republished.
+
+## Version 2.4.2
+
+### Reliable member join and leave records
+
+- Member joins and departures are now read from the raw gateway stream in addition to the Stoat library's own events. Previously a join was lost whenever the library's account lookup failed before it announced the event, and a departure was lost whenever its payload did not match the exact shape the library expected — in both cases silently, with nothing posted and nothing reported.
+- Each arrival and departure is still recorded exactly once no matter which source delivered it.
+- `/Test-AuditLog` and `/Server-Info` now report member joins and leaves separately, distinguishing what arrived on the wire from what was posted, with a running count of discarded events and the most recent reason.
+- Member, identity, and nickname listeners now report their own failures instead of surfacing as an untraceable console error.
+- An account Irminsul has never cached is reported with an **unknown** avatar rather than being flagged for review as a default-avatar account.
+
+## Version 2.4.1
+
+### Native pre-join bans
+
+- Extended `/Ban` to accept a raw Stoat account ID for current, departed, or never-joined accounts. Irminsul now sends the ID directly to Stoat's native ban endpoint instead of requiring a current server membership.
+- Preserved moderator confirmation, fresh Ban Members checks, protected records, message cleanup for departed accounts, and the ten-minute unban reaction. `/Kick`, `/Mute`, and `/Automod release` remain current-member-only.
+- No pending-ban file or join-event workaround is used; Stoat owns and enforces the ban immediately.
 
 ### Stoat-hosted attachment archive
 

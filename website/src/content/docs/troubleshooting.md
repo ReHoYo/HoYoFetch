@@ -50,6 +50,16 @@ Configure and test it before trying again:
 
 The bot must be able to send messages and embeds in the selected channel.
 
+## Member joins or leaves are not being posted
+
+Run `/Test-AuditLog` (or `/Server-Info`) and read the member-event line. It reports joins and leaves separately, in each case distinguishing what arrived from what was posted:
+
+- **seen but never posted** — the events are arriving and something is discarding them; the drop reason names which check rejected them.
+- **never seen** — Stoat is not delivering member events to this bot. Confirm the bot is still in the server and has not lost view permissions; this is not something the audit configuration controls.
+- **joins posted, leaves never seen** (or the reverse) — only one of the two is affected, which points at the gateway rather than at audit delivery, since both share the same send pipeline.
+
+Set `AUDITLOG_DEBUG=1` for a console line naming the discarded field on every dropped member event.
+
 ## A deleted message shows “content unknown”
 
 The message was sent before audit logging was enabled, while Irminsul was offline, or after its archived copy aged out. Stoat only sends the ID during deletion, so content not observed earlier cannot be reconstructed.

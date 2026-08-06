@@ -14,7 +14,7 @@ A message is deleted and queued for review at Levels 1–2 only when **all** of 
 - The server's post gate is in `hold` mode with a configured review channel.
 - The channel is not privacy-excluded via `/Exclude-Channel` — excluded channels retain nothing, so the gate never touches them.
 - The author is not a recognized moderator. This is checked with the same fresh permission verification `/Automod` uses, and fails closed: if the check itself is unavailable, nothing is held.
-- The message contains a link **or** at least one attachment.
+- The message contains a link **or** at least one attachment. Levels 1 and 2 intentionally use the same review trigger.
 - The author is, by locally cached or archived evidence, **new**:
   - the account was created less than 7 days ago, or
   - the author joined this server less than 24 hours ago, or
@@ -91,20 +91,18 @@ Every held message posts a review card to the configured channel with the author
 
 The hold itself does **not** count as an automod strike. Its effect depends on how the review ends:
 
-| Review outcome         | Original channel                                                      | Automod strike stage                                                 | Queue and review card                                             |
-| ---------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Approve                | Complete content is reposted by Irminsul and attributed to the author | No change                                                            | Marked approved; review card is deleted                           |
-| Reject                 | Content stays discarded                                               | Advances one stage, up to stage 4; no timeout is applied immediately | Marked rejected; review card is deleted                           |
-| No decision for 7 days | Content stays discarded                                               | No change                                                            | Marked expired; review card is deleted and an expiry notice posts |
-| Approval cannot repost | Nothing is reposted; no partial or text-only fallback is sent         | No change                                                            | Remains pending for another approval attempt or rejection         |
+| Review outcome         | Original channel                                                           | Automod strike stage                                                 | Queue and review card                                             |
+| ---------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Approve                | Content stays discarded; the cleared author may submit it again themselves | Existing strike is reset                                             | Marked approved; review card is deleted                           |
+| Reject                 | Content stays discarded                                                    | Advances one stage, up to stage 4; no timeout is applied immediately | Marked rejected; review card is deleted                           |
+| No decision for 7 days | Content stays discarded                                                    | No change                                                            | Marked expired; review card is deleted and an expiry notice posts |
 
 ### Approve
 
-Approval downloads every held attachment from the Stoat review card into RAM, creates fresh
-one-use Stoat uploads, and reposts the complete content as Irminsul, attributed to the original
-author, in the original channel. If any attachment is unavailable, approval fails without a
-partial or text-only repost and the queue remains pending. After success, the review card is
-intentionally deleted and untracked.
+Approval clears the author, resets any existing automod strike, and resolves the queue entry. It
+does not repost the held content. The author may submit the post again themselves, which avoids
+republishing hostile content during a raid and preserves the real author on the new message. The
+review card and its Stoat-hosted evidence are intentionally deleted after approval.
 
 ### Reject and the automod strike ladder
 
@@ -129,8 +127,8 @@ from the stored stage and applies the corresponding containment duration.
 An unreviewed hold expires after **7 days**: the review card and its Stoat media are deleted, the queued content is discarded with no strike, and a notice is posted to the review channel.
 
 :::note[Reversible by design]
-A held post never remains visible while awaiting review. Its retained copy is either reposted,
-discarded with a recorded strike, or discarded after 7 days without a decision. Review needs only
-one moderator because approval restores content and rejection only changes future escalation; it
-does not apply a timeout or permanent ban itself.
+A held post never remains visible while awaiting review. Its retained copy is discarded after an
+approval, discarded with a recorded strike after a rejection, or discarded after 7 days without a
+decision. Review needs only one moderator because approval clears the author and rejection only
+changes future escalation; neither applies a timeout or permanent ban itself.
 :::

@@ -595,23 +595,23 @@ export function createModeration(
         );
         return false;
       }
-      // Purges may intentionally target someone who already left. A safe ID,
-      // same-server archive selection, and owner/self/bot exclusions are the
-      // only identity requirements in that case.
+      // Native bans accept a raw account ID, including for accounts that have
+      // never joined, and purges may intentionally target someone who left.
+      // A safe ID plus freshly checked server/owner/self/bot exclusions are
+      // the only local identity requirements for those operations; Stoat's
+      // ban endpoint remains authoritative for account existence and hierarchy.
       if (!requireMember) return true;
       const user = await client.api.get(`/users/${targetId}`);
       if (user?._id !== targetId) throw new Error("target identity mismatch");
-      if (requireMember) {
-        const response = await client.api.get(
-          `/servers/${serverId}/members/${targetId}`,
-          { roles: false }
-        );
-        const member = response?.member ?? response;
-        const memberUserId = member?._id?.user ?? member?.id?.user;
-        const memberServerId = member?._id?.server ?? member?.id?.server;
-        if (memberUserId !== targetId || memberServerId !== serverId) {
-          throw new Error("target member mismatch");
-        }
+      const response = await client.api.get(
+        `/servers/${serverId}/members/${targetId}`,
+        { roles: false }
+      );
+      const member = response?.member ?? response;
+      const memberUserId = member?._id?.user ?? member?.id?.user;
+      const memberServerId = member?._id?.server ?? member?.id?.server;
+      if (memberUserId !== targetId || memberServerId !== serverId) {
+        throw new Error("target member mismatch");
       }
       return true;
     } catch (error) {
@@ -621,7 +621,7 @@ export function createModeration(
         "⚠️ Target Verification Failed",
         requireMember
           ? "The target could not be freshly verified as a member of this server."
-          : "The target identity could not be freshly verified.",
+          : "The target could not be safely checked against this server.",
         "#E74C3C"
       );
       return false;
@@ -1248,7 +1248,12 @@ export function createModeration(
   async function applyBan(message, parsed, auditChannelId) {
     const serverId = message.server?.id ?? message.channel?.serverId;
     if (!(await requireAccess(message, COMMAND_ACCESS.BAN))) return;
-    if (!(await validateTarget(message, parsed.targetId))) return;
+    if (
+      !(await validateTarget(message, parsed.targetId, {
+        requireMember: false,
+      }))
+    )
+      return;
     const prepared = await prepareTypedCleanup(
       message,
       parsed.targetId,
@@ -1288,7 +1293,7 @@ export function createModeration(
     });
     await respond(
       message.channelId,
-      "🔨 Member Banned",
+      "🔨 Account Banned",
       `<@${parsed.targetId}> was banned.${cleanup ? ` ${cleanupSummary(cleanup)}` : ""}${recorded ? ` Action \`${recorded.actionId}\` was logged.` : " Protected logging failed after the ban."}`,
       cleanup?.failed ? "#E67E22" : "#2ECC71"
     );
