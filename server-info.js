@@ -13,9 +13,11 @@ import {
   getAutomodConfig,
   getEnabledChannels,
   getExcludedChannels,
+  getModerationLevel,
   getPostGateConfig,
 } from "./store.js";
 import { getAuditDiagnostics } from "./auditlog.js";
+import { MODERATION_LEVEL_POLICIES } from "./moderation-policy.js";
 
 const require = createRequire(import.meta.url);
 const APP_VERSION = require("./package.json").version;
@@ -31,6 +33,7 @@ const DEFAULT_DEPS = Object.freeze({
   enabledChannels: getEnabledChannels,
   excludedChannels: getExcludedChannels,
   automodConfig: getAutomodConfig,
+  moderationLevel: getModerationLevel,
   postGateConfig: getPostGateConfig,
   auditDiagnostics: getAuditDiagnostics,
   systemMetrics: collectSystemMetrics,
@@ -84,6 +87,7 @@ export function buildServerInfoEmbed(client, serverId, overrides = {}) {
   const audit = safeProbe(() => deps.auditDiagnostics(serverId)) ?? {};
   const automod = safeProbe(() => deps.automodConfig(serverId)) ?? {};
   const postGate = safeProbe(() => deps.postGateConfig(serverId)) ?? {};
+  const level = safeProbe(() => deps.moderationLevel(serverId)) ?? {};
   const excluded = safeProbe(() => deps.excludedChannels(serverId)) ?? [];
   const enabled = safeProbe(() => deps.enabledChannels()) ?? [];
   const fetchChannels = enabled.filter(
@@ -104,8 +108,10 @@ export function buildServerInfoEmbed(client, serverId, overrides = {}) {
     `**Policy:** ${integer(policy.retentionMonths)} months · ${formatInteger(policy.maxMessages)} message installation cap`,
     "",
     "**Features · this server**",
+    `**Moderation level:** ${moderationLevelSummary(level)}`,
     `**Auto-fetch:** ${fetchSummary(fetchChannels)}`,
     `**Audit log:** ${featureChannel(audit.enabled, audit.channelId)} · ${auditHealth(audit)}`,
+    `**Member events:** ${memberEventHealth(audit.memberEvents)}`,
     `**Settings monitor:** ${settingsHealth(audit.settings)}`,
     `**Automod:** ${modeChannel(automod.mode, automod.logChannelId)} · quorum ${integer(automod.quorum)}`,
     `**Post-gate:** ${modeChannel(postGate.mode, postGate.reviewChannelId)}`,
@@ -233,10 +239,33 @@ function modeChannel(mode = "off", channelId) {
     : label;
 }
 
+function moderationLevelSummary(level) {
+  const policy = MODERATION_LEVEL_POLICIES[level?.level];
+  if (!policy) return "unavailable";
+  return policy.restrictSubTenure
+    ? `${policy.level} — ${policy.name} · tenure ${integer(level.tenureDays)}d`
+    : `${policy.level} — ${policy.name}`;
+}
+
 function auditHealth(audit) {
   const failures = integer(audit.consecutiveFailures);
   const queue = `${integer(audit.queuePending)}/${integer(audit.queueLimit)}`;
   return `${failures ? `${failures} recent failure(s)` : "delivery healthy"}; installation queue ${queue}`;
+}
+
+// Joins and leaves are the one audit path that can fail with nothing posted
+// and nothing logged, so report arrivals separately from deliveries: "seen"
+// with no "posted" means the gateway is delivering and something here is
+// discarding them; neither means the events are not reaching us at all.
+function memberEventHealth(stats) {
+  if (!stats) return "unavailable";
+  const seen = (value) => (value ? "seen" : "never seen");
+  const dropped = integer(stats.joinsDropped) + integer(stats.leavesDropped);
+  return (
+    `joins ${seen(stats.lastJoinSeenAt)}/${stats.lastJoinPostedAt ? "posted" : "never posted"} · ` +
+    `leaves ${seen(stats.lastLeaveSeenAt)}/${stats.lastLeavePostedAt ? "posted" : "never posted"}` +
+    `${dropped ? ` · ${dropped} dropped (${bounded(stats.lastDropReason ?? "unknown", 32)})` : ""}`
+  );
 }
 
 function settingsHealth(settings) {

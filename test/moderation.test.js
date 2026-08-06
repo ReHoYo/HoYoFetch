@@ -86,6 +86,7 @@ function makeHarness({
   messages: initialMessages = [],
   permissionBits = ALL_MOD_BITS,
   requestOverride,
+  missingMemberIds = [],
   // Real pacing would make every cleanup test wait seconds; the pacing itself
   // is asserted separately.
   deletePacingMs = 0,
@@ -97,16 +98,19 @@ function makeHarness({
   let messages = initialMessages;
   const store = memoryStore({ audit });
   const requests = [];
+  const apiGetPaths = [];
   const sent = [];
   const protectedLogs = [];
   const reconciled = [];
   const timeouts = new Map();
   const channels = [CHANNEL_ID, SECOND_CHANNEL_ID, AUDIT_CHANNEL_ID];
+  const missingMembers = new Set(missingMemberIds);
   const client = {
     user: { id: BOT_ID },
     events: new EventEmitter(),
     api: {
       async get(path) {
+        apiGetPaths.push(path);
         if (path === `/servers/${SERVER_ID}`) {
           return {
             _id: SERVER_ID,
@@ -119,6 +123,9 @@ function makeHarness({
           /^\/servers\/SERVER123\/members\/([A-Za-z0-9]+)$/
         );
         if (member) {
+          if (missingMembers.has(member[1])) {
+            throw new Error("member not found");
+          }
           return {
             _id: { server: SERVER_ID, user: member[1] },
             roles: [],
@@ -220,6 +227,7 @@ function makeHarness({
     moderation,
     message,
     requests,
+    apiGetPaths,
     sent,
     protectedLogs,
     reconciled,
@@ -384,6 +392,101 @@ test("ban waits for the invoker's own confirmation before acting", async () => {
     harness.requests.some(
       (entry) => entry.method === "PUT" && entry.path.includes("/bans/")
     )
+  );
+});
+
+test("ban sends a never-joined raw account ID straight to Stoat", async () => {
+  const harness = makeHarness({ missingMemberIds: [TARGET_ID] });
+  await harness.run("ban", [TARGET_ID, "for", "coordinating", "a", "raid"]);
+
+  assert.ok(
+    harness.requests.some(
+      (entry) =>
+        entry.method === "PUT" &&
+        entry.path === `/servers/${SERVER_ID}/bans/${TARGET_ID}` &&
+        entry.body.reason === "coordinating a raid"
+    )
+  );
+  assert.equal(
+    harness.apiGetPaths.includes(`/servers/${SERVER_ID}/members/${TARGET_ID}`),
+    false
+  );
+  assert.match(harness.sent.at(-2).payload.embeds[0].title, /Account Banned/);
+});
+
+test("ban still rejects the moderator, bot, and server owner", async () => {
+  for (const targetId of [MOD_ID, BOT_ID, OWNER_ID]) {
+    const harness = makeHarness();
+    await harness.run("ban", [`<@${targetId}>`, "reason:", "test"]);
+    assert.equal(
+      harness.requests.some(
+        (entry) => entry.method === "PUT" && entry.path.includes("/bans/")
+      ),
+      false
+    );
+    assert.match(
+      harness.sent.at(-1).payload.embeds[0].title,
+      /Invalid Moderation Target/
+    );
+  }
+});
+
+test("kick, mute, and release remain limited to current members", async () => {
+  for (const command of ["kick", "mute", "automod-release"]) {
+    const harness = makeHarness({ missingMemberIds: [TARGET_ID] });
+    const args =
+      command === "mute"
+        ? [TARGET_ID, "1h", "reason:", "test"]
+        : [TARGET_ID, "reason:", "test"];
+    await harness.run(command, args);
+
+    assert.equal(
+      mutations(harness).some(
+        (entry) =>
+          entry.path.endsWith(`/members/${TARGET_ID}`) ||
+          entry.path.includes("/bans/")
+      ),
+      false
+    );
+    assert.match(
+      harness.sent.at(-1).payload.embeds[0].title,
+      /Target Verification Failed/
+    );
+  }
+});
+
+test("ban can clean archived messages from an account that already left", async () => {
+  const now = 1_900_000_000_000;
+  const harness = makeHarness({
+    missingMemberIds: [TARGET_ID],
+    messages: [
+      {
+        id: "DEPARTED1",
+        channelId: CHANNEL_ID,
+        serverId: SERVER_ID,
+        authorId: TARGET_ID,
+        createdAt: now - 1_000,
+      },
+    ],
+  });
+  await harness.run("ban", [TARGET_ID, "delete:1h", "reason:", "raid"]);
+
+  assert.ok(
+    harness.requests.some(
+      (entry) =>
+        entry.method === "PUT" && entry.path.includes(`/bans/${TARGET_ID}`)
+    )
+  );
+  assert.ok(
+    harness.requests.some(
+      (entry) =>
+        entry.path.endsWith("/messages/bulk") &&
+        entry.body.ids.includes("DEPARTED1")
+    )
+  );
+  assert.equal(
+    harness.apiGetPaths.includes(`/servers/${SERVER_ID}/members/${TARGET_ID}`),
+    false
   );
 });
 

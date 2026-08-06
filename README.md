@@ -75,6 +75,7 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/AuditLog [status\|here\|#channel\|off\|confirm CODE\|cancel]` | View or request an Enka-approved audit-log configuration change (admins/mods only)                                                |
 | `/Test-AuditLog`                                                | Send a test event through the audit pipeline to verify delivery (admins/mods only; legacy diagnostic alias)                       |
 | `/Exclude-Channel [status\|here\|#channel\|remove #channel]`    | Request Enka-approved message-content privacy exclusions (admins/mods only)                                                       |
+| `/Level [status\|1\|2\|3 confirm\|tenure <days>]`               | Set the server-wide moderation posture from standard to lockdown (admins/mods only)                                               |
 | `/Automod status`                                               | Show this server's automod mode, logger, and ban quorum (admins/mods only)                                                        |
 | `/Automod monitor [here\|#channel]`                             | Detect and log cases without changing messages or members (admins/mods only)                                                      |
 | `/Automod enforce [here\|#channel]`                             | Enable temporary containment and staff-approved ban cases (admins/mods only)                                                      |
@@ -82,7 +83,7 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/Automod quorum 1\|2`                                          | Set the approval quorum for new cases; production defaults to two (admins/mods only)                                              |
 | `/Automod approve CASE_ID`                                      | Approve a pending ban case (owner, Manage Server, or Ban Members only)                                                            |
 | `/Automod release @member <reason>`                             | Remove a timeout and reset that member's automod escalation history (Timeout Members only)                                        |
-| `/Ban @member <reason>`                                         | Confirm with ✅, then pick a 1h–1y cleanup window by reaction (Ban Members; cleanup also needs Manage Messages)                   |
+| `/Ban <@member\|account ID> <reason>`                           | Natively ban a current or never-joined account after ✅ confirmation (Ban Members; cleanup also needs Manage Messages)            |
 | `/Kick @member <reason>`                                        | Confirm with ✅, then pick a cleanup window by reaction; the kick cannot be undone (Kick Members)                                 |
 | `/Mute @member [10m\|30m\|1h\|4h\|24h\|3d\|7d] <reason>`        | Type a duration and confirm with ✅, or omit it for a reaction picker (Timeout Members only)                                      |
 | `/Purge-User @member <reason>`                                  | Pick a window by reaction, then confirm deletion of the member's observed messages (Manage Messages only)                         |
@@ -116,11 +117,11 @@ Irminsul cannot observe private friend requests or DMs between ordinary members.
 
 ### Manual moderation
 
-Reasons are mandatory but are written in plain words — `/Ban @member for spamming and stuff` — and may contain up to 300 characters. The member, the reason, and any option may appear in any order, and the older `reason:`, `delete:`, and `window:` delimiters are still accepted. Commands accept one member mention or one raw user ID. Stoat has no interaction buttons, so Irminsul uses reactions for duration selection, cleanup windows, destructive confirmation, and undo. Every picker and confirmation is answerable only by the moderator who ran the command and expires after two minutes.
+Reasons are mandatory but are written in plain words — `/Ban @member for spamming and stuff` — and may contain up to 300 characters. The target, the reason, and any option may appear in any order, and the older `reason:`, `delete:`, and `window:` delimiters are still accepted. Commands accept one member mention or one raw user ID. Stoat has no interaction buttons, so Irminsul uses reactions for duration selection, cleanup windows, destructive confirmation, and undo. Every picker and confirmation is answerable only by the moderator who ran the command and expires after two minutes.
 
 Because the reason is free text, a mistyped or auto-completed mention would otherwise be indistinguishable from the intended member. `/Ban`, `/Kick`, and `/Mute` therefore post a ✅/❌ confirmation naming the action, target, reason, and any typed cleanup window; nothing reaches Stoat until the invoking moderator reacts ✅. Permissions and the target are verified at that point rather than when the command was typed. `/Automod release` has no confirmation because it only restores access.
 
-- `/Ban @member for repeated spam` bans once confirmed, then offers a cleanup picker: 1️⃣ 1h, 2️⃣ 6h, 3️⃣ 1d, 4️⃣ 3d, 5️⃣ 7d, 6️⃣ 1mo, 7️⃣ 3mo, 8️⃣ 6mo, 9️⃣ 1y, or ❌ to keep the messages. Cleanup needs Manage Messages in every affected channel. The ↩️ reaction on the protected record is available for 10 minutes to any freshly authorized ban moderator; it unbans but cannot restore membership or deleted messages.
+- `/Ban @member for repeated spam` or `/Ban ACCOUNT_ID for coordinating a raid` uses Stoat's native ban endpoint once confirmed. A current membership is not required, so moderators can ban current, departed, or never-joined accounts by raw ID. Irminsul then offers a cleanup picker: 1️⃣ 1h, 2️⃣ 6h, 3️⃣ 1d, 4️⃣ 3d, 5️⃣ 7d, 6️⃣ 1mo, 7️⃣ 3mo, 8️⃣ 6mo, 9️⃣ 1y, or ❌ to keep any messages Irminsul previously observed. Cleanup needs Manage Messages in every affected channel. The ↩️ reaction on the protected record is available for 10 minutes to any freshly authorized ban moderator; it unbans but cannot restore membership or deleted messages.
 - `/Kick @member for raiding` kicks once confirmed and offers the same cleanup picker. Stoat cannot put a kicked member back, so no undo reaction is offered and the reason is retained in Irminsul's protected log.
 - `/Mute @member 1h cooldown` confirms first, then applies that duration; omitting the duration opens the 10m–7d picker instead, and choosing from it is itself the confirmation. Either way the cleanup picker follows. The protected record has a 10-minute ↩️ undo reaction for authorized timeout moderators.
 - `/Purge-User @member because of spam` asks for a window with the same 1h–1y picker, then shows a ✅/❌ confirmation with the number of matching messages. Only one purge or cleanup runs per server at a time.
@@ -175,6 +176,23 @@ Join records now carry full account and membership detail — creation date, ava
 Stoat has no username-to-ID search, so a non-member must be looked up by their 26-character account ID (or by a mention when one is available).
 
 Signals are heuristics for a moderator to weigh, not proof that an account is a bot.
+
+### Moderation levels
+
+`/Level` is a single dial for the whole server's posture, and every server starts at **level 1** — the behavior that existed before this command. It uses the same capability-based moderator policy as `/Automod` and `/Post-Gate` (owner, Manage Server, or a recognized moderation capability), and only retunes thresholds those two features already own; raising the level never switches either one on.
+
+|                                    | 1 — Standard                | 2 — Heightened              | 3 — Lockdown                |
+| ---------------------------------- | --------------------------- | --------------------------- | --------------------------- |
+| Post gate holds                    | links and attachments       | every message               | every message               |
+| "New account" / "new member"       | 7d / 24h                    | 30d / 7d                    | 30d / 7d                    |
+| Automod trips at                   | behavior signal + score ≥ 2 | behavior signal + score ≥ 1 | behavior signal + score ≥ 1 |
+| Raid mode                          | 5 joins/60s for 10m         | 3 joins/60s for 30m         | 3 joins/60s for 30m         |
+| New joins                          | observed                    | observed                    | kicked on sight             |
+| Members below the tenure threshold | —                           | —                           | cannot post                 |
+
+A behavior signal stays mandatory at every level: being new, or joining during a raid, only ever adds weight to observed behavior and can never trigger containment on its own.
+
+Level 3 is the only setting that removes members automatically, so it has two preconditions. `/Level 3` alone refuses and explains what it would do — only `/Level 3 confirm` applies it — and it is refused outright unless `/Automod` has a log channel, since every kick, withheld kick, and restricted message is written there as a protected record. Bots and freshly verified moderators are never kicked, and a joiner whose permission check cannot complete is reported rather than removed. Restricted members have every message deleted but escalate at most one strike per 15 minutes, so a flood cannot walk an account up the ladder in seconds. `/Level 1` stands everything down immediately; kicked accounts are not banned and can rejoin.
 
 ### Anti-raid automod
 
@@ -354,8 +372,29 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ## 📝 Changelog
 
+### v2.5.1
+
+- Level 2 and 3 no longer hold every message from a new account — all three levels now hold the same trigger, links and attachments, and rely on the wider new-account window and lower automod threshold to cover text-only abuse instead of queuing every plain-text message for manual review
+
+### v2.5.0
+
+- Added `/Level 1|2|3`, a server-wide moderation posture that retunes the post gate, automod's trigger threshold, and raid-mode sensitivity in one command _(same capability-based moderator policy as `/Automod` and `/Post-Gate`)_
+- Level 2 widens the new-account window to 30 days and lets automod act on a single behavioural signal; a behavioural signal remains mandatory at every level, so being new still cannot trigger containment on its own
+- Level 3 is lockdown: every new join is kicked on sight, and members who joined less than the tenure threshold ago (default 7 days, `/Level tenure <1-30>`) have their messages deleted and their automod strike raised, at most one strike per 15 minutes
+- Level 3 requires the literal word `confirm` and a configured automod log channel, and never kicks bots, verified moderators, or a joiner whose permission check could not complete
+- `/Post-Gate approve` no longer reposts the held content; it clears the author and resets their automod strike instead, so approving an account during a wave cannot republish what it posted
+
+### v2.4.2
+
+- Fixed member joins and leaves silently never reaching the audit channel; both are now read from the raw gateway stream as well as the Stoat library's own events, which drop a join whose account lookup fails and a departure whose payload does not match the expected shape
+- Each join and departure is still recorded exactly once regardless of which source delivered it
+- `/Test-AuditLog` and `/Server-Info` now report joins and leaves separately, distinguishing what arrived on the wire from what was posted, plus a running count of discarded events and the most recent reason
+- Member, identity, and nickname listeners now report their own failures instead of surfacing as an untraceable console error
+- An account Irminsul has never cached is reported with an unknown avatar instead of being flagged for review as a default-avatar account
+
 ### v2.4.1
 
+- Extended `/Ban` to use Stoat's native raw-account-ID support for current, departed, and never-joined accounts; no pending-ban list or join-event workaround is required
 - Replaced the persistent VPS attachment cache with immediate RAM-only copies into protected Stoat Logger cards; the local journal keeps filenames, sizes, Stoat URLs, and protected record IDs but never attachment bytes
 - Delete/edit records reference the existing Logger card, bulk deletes reply to at most five cards without re-uploading media, and a bounded two-worker 50-message archive queue reports precise transfer failure reasons
 - Moved first-post attachment storage to the Stoat review card; approval, rejection, and expiry remove the review card on completion, and metadata-only tamper restoration plus legacy `data/evidence/` cleanup were added

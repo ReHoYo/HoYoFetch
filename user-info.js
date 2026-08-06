@@ -156,10 +156,14 @@ export function collectUserInfo(
     displayName: resolvedUser?.displayName ?? identity?.displayName ?? null,
     accountCreatedAt,
     accountCreatedAtSource,
+    // Tri-state: null means "no identity to read", which is not the same as
+    // "no avatar". The raw-event join path routinely sees accounts revolt.js
+    // never cached, and reporting those as default-avatar bots would flag
+    // every such join for review.
     hasCustomAvatar:
       resolvedUser != null
         ? Boolean(resolvedUser.avatar)
-        : (identity?.hasCustomAvatar ?? false),
+        : (identity?.hasCustomAvatar ?? null),
     badges: flagNames(UserBadges, resolvedUser?.badges),
     flags: flagNames(
       UserFlags,
@@ -207,7 +211,7 @@ export function evaluateBotSignals(record, now = Date.now()) {
   }
 
   if (
-    !record.hasCustomAvatar &&
+    record.hasCustomAvatar === false &&
     (record.lookup ? record.lookup.identitySource !== "none" : true)
   ) {
     signals.push("Using the default avatar");
@@ -365,7 +369,14 @@ export function buildUserInfoLines(
     );
   }
   lines.push(
-    `**Avatar:** ${record.lookup?.identitySource === "none" ? "unknown" : record.hasCustomAvatar ? "custom" : "default"}`
+    `**Avatar:** ${
+      record.lookup?.identitySource === "none" ||
+      record.hasCustomAvatar === null
+        ? "unknown"
+        : record.hasCustomAvatar
+          ? "custom"
+          : "default"
+    }`
   );
   if (record.profileFetched || verbose) {
     lines.push(

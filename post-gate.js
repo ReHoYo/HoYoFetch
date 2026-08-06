@@ -25,22 +25,24 @@ import {
   ENKA_APPROVER_USER_ID,
 } from "./approval-gate.js";
 import {
-  copyArchivedAttachments,
   finaliseArchiveDescriptors,
   humanReadableSize,
   prepareAttachmentCopies,
 } from "./attachment-evidence.js";
-import { AUTOMOD_LIMITS, nextStrikeLevel } from "./automod.js";
+import { nextStrikeLevel } from "./automod.js";
 import { parseChannelArg } from "./auditlog.js";
 import { buildAuditEmbed, buildStatusEmbed } from "./embeds.js";
 import { countArchivedMessages } from "./message-archive.js";
+import { policyFor } from "./moderation-policy.js";
 import { deriveAccountCreatedAt } from "./user-info.js";
 import {
+  clearAutomodStrike,
   createHeldPost,
   findHeldPostByReviewMessage,
   getAutomodStrike,
   getExpiredPendingPosts,
   getHeldPost,
+  getModerationLevel,
   getPendingHeldPosts,
   getPostGateConfig,
   isChannelExcluded,
@@ -81,11 +83,13 @@ function hasLinkOrAttachment(message) {
 }
 
 const DEFAULT_STORE = Object.freeze({
+  clearAutomodStrike,
   createHeldPost,
   findHeldPostByReviewMessage,
   getAutomodStrike,
   getExpiredPendingPosts,
   getHeldPost,
+  getModerationLevel,
   getPendingHeldPosts,
   getPostGateConfig,
   isChannelExcluded,
@@ -161,6 +165,7 @@ export function createPostGate(
   }
 
   function actorLabel(userId) {
+    if (!isSafeId(userId)) return "*(unknown — author id not recorded)*";
     const username = client.users?.get?.(userId)?.username;
     return username ? `@${username} (<@${userId}>)` : `<@${userId}>`;
   }
@@ -607,7 +612,7 @@ export function createPostGate(
    * listeners — in particular auditlog.js's own archive write for this same
    * message, which only happens after an await of its own.
    */
-  function isFirstPostCandidate(serverId, authorId, message) {
+  function isFirstPostCandidate(serverId, authorId, message, policy) {
     const current = now();
     const accountCreatedAt =
       message.author?.createdAt ?? deriveAccountCreatedAt(authorId);
@@ -615,11 +620,11 @@ export function createPostGate(
     const isNewAccount =
       accountCreatedAt instanceof Date &&
       current - accountCreatedAt.getTime() >= 0 &&
-      current - accountCreatedAt.getTime() < AUTOMOD_LIMITS.recentAccountMs;
+      current - accountCreatedAt.getTime() < policy.recentAccountMs;
     const isNewMember =
       joinedAt instanceof Date &&
       current - joinedAt.getTime() >= 0 &&
-      current - joinedAt.getTime() < AUTOMOD_LIMITS.recentMemberMs;
+      current - joinedAt.getTime() < policy.recentMemberMs;
     const isFirstMessage = countArchivedMessages({ serverId, authorId }) === 0;
     return isNewAccount || isNewMember || isFirstMessage;
   }
@@ -647,7 +652,8 @@ export function createPostGate(
     }
     lines.push(
       "",
-      `React ${APPROVE_EMOJI} to repost, ${REJECT_EMOJI} to discard and strike, or use \`${commandName()} approve ${record.queueId}\` / \`${commandName()} reject ${record.queueId}\`.`,
+      `React ${APPROVE_EMOJI} to clear the author and reset their automod strike, ${REJECT_EMOJI} to discard and strike, or use \`${commandName()} approve ${record.queueId}\` / \`${commandName()} reject ${record.queueId}\`.`,
+      "Approving does not repost the content — the author may post it again themselves.",
       `This request expires in 7 days if left unreviewed.`
     );
     return buildAuditEmbed(
@@ -674,18 +680,14 @@ export function createPostGate(
   async function holdMessage(
     serverId,
     channelId,
-    message,
+    held,
     config,
     resolveDecision
   ) {
-    const messageId = message.id ?? message._id;
-    const prepared = await prepareAttachmentCopies(
-      client,
-      message.attachments,
-      {
-        fetchImpl,
-      }
-    );
+    const messageId = held.id;
+    const prepared = await prepareAttachmentCopies(client, held.attachments, {
+      fetchImpl,
+    });
 
     const deleted = await request(
       "DELETE",
@@ -705,9 +707,9 @@ export function createPostGate(
       queueId: queueIdFactory(),
       serverId,
       channelId,
-      userId: message.authorId,
+      userId: held.authorId,
       messageId,
-      content: message.content ?? "",
+      content: held.content,
       attachments: prepared.descriptors,
       reviewChannelId: config.reviewChannelId,
       reviewMessageId: null,
@@ -737,7 +739,7 @@ export function createPostGate(
       );
     }
     logger.log?.(
-      `🛑  post-gate held queue=${auditAlias(record.queueId)} actor=${auditAlias(message.authorId)} server=${auditAlias(serverId)}`
+      `🛑  post-gate held queue=${auditAlias(record.queueId)} actor=${auditAlias(held.authorId)} server=${auditAlias(serverId)}`
     );
   }
 
@@ -763,11 +765,27 @@ export function createPostGate(
     if (config.mode !== "hold" || !isSafeId(config.reviewChannelId)) return;
     if (channelId === config.reviewChannelId) return;
     if (store.isChannelExcluded(channelId)) return;
-    if (!hasLinkOrAttachment(message)) return;
+    // All levels hold only links and attachments; levels 2/3 widen who
+    // counts as "new" and lower automod's trip threshold instead of
+    // holding plain text.
+    const policy = policyFor(store.getModerationLevel(serverId));
+    if (!policy.holdEveryMessage && !hasLinkOrAttachment(message)) return;
     // The first-post signal is only meaningful for a message actually
     // eligible for a hold, so this stays inside the gate rather than
     // running (and racing the archive) on every message.
-    if (!isFirstPostCandidate(serverId, authorId, message)) return;
+    if (!isFirstPostCandidate(serverId, authorId, message, policy)) return;
+
+    // revolt.js Message fields are live getters into the client's message
+    // collection. holdMessage deletes the message before it needs these
+    // values, and our own DELETE triggers a MessageDelete gateway event that
+    // clears that collection entry — so anything read off `message` after
+    // that point can come back undefined. Snapshot now, before any await.
+    const held = {
+      id: messageId,
+      authorId,
+      content: message.content ?? "",
+      attachments: message.attachments ?? [],
+    };
 
     let resolveDecision;
     const decision = new Promise((resolve) => {
@@ -794,7 +812,7 @@ export function createPostGate(
         return;
       }
 
-      await holdMessage(serverId, channelId, message, config, resolveDecision);
+      await holdMessage(serverId, channelId, held, config, resolveDecision);
     } catch (error) {
       logFailure("hold decision failed", error);
       resolveDecision(false);
@@ -805,15 +823,20 @@ export function createPostGate(
 
   // ── Review ───────────────────────────────────────────────────
 
-  async function notifyReviewOutcome(record, outcome, moderatorId) {
+  async function notifyReviewOutcome(
+    record,
+    outcome,
+    moderatorId,
+    { strikeCleared = false, strikeSkipped = false } = {}
+  ) {
     const title =
       outcome === "approved"
         ? "✅ Held Post Approved"
         : "❌ Held Post Rejected";
     const description =
       outcome === "approved"
-        ? `${channelLabel(record.channelId)} received the reposted content, attributed to ${actorLabel(record.userId)}.`
-        : `The held content from ${actorLabel(record.userId)} was discarded and their automod strike level was increased.`;
+        ? `${actorLabel(record.userId)} was cleared${strikeCleared ? " and their automod strike was reset" : ""}. The content was **not** reposted to ${channelLabel(record.channelId)} — they can post it again themselves.`
+        : `The held content from ${actorLabel(record.userId)} was discarded${strikeSkipped ? " (no automod strike was recorded — the original author's id was not captured)" : " and their automod strike level was increased"}.`;
     await sendAccountability(
       record.serverId,
       title,
@@ -867,51 +890,31 @@ export function createPostGate(
       return { outcome: "unauthorized" };
     }
 
-    let preservedAttachmentIds;
-    try {
-      preservedAttachmentIds = await copyArchivedAttachments(
-        client,
-        record.attachments,
-        { fetchImpl }
-      );
-    } catch (error) {
-      logFailure("held attachments unavailable", error);
-      return { outcome: "attachments_unavailable" };
-    }
-
-    const attribution = `**Reposted for ${actorLabel(record.userId)} after moderator review:**`;
-    const content = record.content
-      ? `${attribution}\n${record.content}`
-      : attribution;
-    let posted = null;
-    try {
-      posted = await send(record.channelId, {
-        content,
-        ...(preservedAttachmentIds.length
-          ? { attachments: preservedAttachmentIds }
-          : {}),
-      });
-    } catch (error) {
-      logFailure("repost failed", error);
-      return { outcome: "repost_failed" };
-    }
-    if (!isSafeId(posted?._id)) {
-      logger.warn?.("post-gate: repost returned no trackable message id");
-      return { outcome: "repost_failed" };
-    }
-
+    // Approval clears the author, not the content. Republishing held material
+    // through the bot means a moderator's "this account is fine" also
+    // relaunches whatever they posted — during a troll wave that turns the
+    // review queue into a delivery mechanism. The author keeps the right to
+    // post it again themselves; the archived copy stays on the review card as
+    // the evidence record.
     const reviewDeleted = await deleteReviewCard(record);
     if (!reviewDeleted) logger.warn?.("post-gate: review card cleanup failed");
+    // Legacy queue entries from before the authorId-snapshot fix may have no
+    // userId recorded — never touch the strike store under a phantom key.
+    const strikeCleared =
+      isSafeId(record.userId) &&
+      Boolean(store.clearAutomodStrike(record.serverId, record.userId));
     store.updateHeldPost(queueId, {
       status: "approved",
       reviewedBy: moderatorId,
       reviewedAt: now(),
     });
-    await notifyReviewOutcome(record, "approved", moderatorId);
+    await notifyReviewOutcome(record, "approved", moderatorId, {
+      strikeCleared,
+    });
     logger.log?.(
-      `🛑  post-gate approved queue=${auditAlias(queueId)} moderator=${auditAlias(moderatorId)}`
+      `🛑  post-gate approved queue=${auditAlias(queueId)} moderator=${auditAlias(moderatorId)} strike_cleared=${strikeCleared}`
     );
-    return { outcome: "approved", repostedId: posted?._id ?? null };
+    return { outcome: "approved", strikeCleared };
   }
 
   async function reject(queueId, moderatorId) {
@@ -928,22 +931,30 @@ export function createPostGate(
     if (!reviewDeleted) logger.warn?.("post-gate: review card cleanup failed");
 
     const current = now();
-    const stored = store.getAutomodStrike(record.serverId, record.userId);
-    const level = nextStrikeLevel(stored, current);
-    store.setAutomodStrike(record.serverId, record.userId, {
-      level,
-      lastContainedAt: current,
-      timeoutUntil: stored?.timeoutUntil ?? null,
-    });
+    // Legacy queue entries from before the authorId-snapshot fix may have no
+    // userId recorded — never strike a phantom "serverId:undefined" user.
+    const strikeSkipped = !isSafeId(record.userId);
+    let level = null;
+    if (!strikeSkipped) {
+      const stored = store.getAutomodStrike(record.serverId, record.userId);
+      level = nextStrikeLevel(stored, current);
+      store.setAutomodStrike(record.serverId, record.userId, {
+        level,
+        lastContainedAt: current,
+        timeoutUntil: stored?.timeoutUntil ?? null,
+      });
+    }
 
     store.updateHeldPost(queueId, {
       status: "rejected",
       reviewedBy: moderatorId,
       reviewedAt: current,
     });
-    await notifyReviewOutcome(record, "rejected", moderatorId);
+    await notifyReviewOutcome(record, "rejected", moderatorId, {
+      strikeSkipped,
+    });
     logger.log?.(
-      `🛑  post-gate rejected queue=${auditAlias(queueId)} moderator=${auditAlias(moderatorId)} strike=${level}`
+      `🛑  post-gate rejected queue=${auditAlias(queueId)} moderator=${auditAlias(moderatorId)} strike=${level ?? "skipped"}`
     );
     return { outcome: "rejected", strikeLevel: level };
   }
@@ -1037,7 +1048,8 @@ export function createPostGate(
           ? await approve(queueId, message.authorId)
           : await reject(queueId, message.authorId);
       const descriptions = {
-        approved: "The held post was reposted and marked resolved.",
+        approved:
+          "The author was cleared and their automod strike reset. The content was not reposted — they can post it again themselves.",
         rejected:
           "The held post was discarded and the author's automod strike level was increased.",
         missing:
@@ -1046,10 +1058,6 @@ export function createPostGate(
         expired: "That queue entry's 7-day review window already expired.",
         unauthorized:
           "Fresh permission verification did not confirm Manage Messages.",
-        repost_failed:
-          "Approval was authorized, but Irminsul could not repost the content.",
-        attachments_unavailable:
-          "Approval was not completed because every held attachment could not be copied from Stoat. The queue remains pending for rejection or another review attempt.",
       };
       await respond(
         channelIdFrom(message),
@@ -1126,7 +1134,14 @@ export function createPostGate(
 
   async function shouldExcludeMessage(message) {
     const messageId = message?.id ?? message?._id;
-    if (!hasLinkOrAttachment(message)) return false;
+    // Mirrors handleMessage's own eligibility check: only links/attachments
+    // are ever held, and the archive must not record a message this module
+    // is about to delete.
+    const serverId = serverIdFrom(message);
+    const policy = isSafeId(serverId)
+      ? policyFor(store.getModerationLevel(serverId))
+      : policyFor(null);
+    if (!policy.holdEveryMessage && !hasLinkOrAttachment(message)) return false;
     await Promise.resolve();
     const decision = pendingDecisions.get(messageId);
     return decision ? decision : false;

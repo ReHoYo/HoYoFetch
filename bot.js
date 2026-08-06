@@ -70,6 +70,7 @@ import { createAuditLogConfiguration } from "./audit-log-configuration.js";
 import { createTamperProtection } from "./tamper-protection.js";
 import { createAutomod } from "./automod.js";
 import { createModeration } from "./moderation.js";
+import { createModerationLevel } from "./moderation-level.js";
 import { createHelpMenu } from "./help-menu.js";
 import { createSpamReporter } from "./spam-report.js";
 import { createChannelExclusion } from "./channel-exclusion.js";
@@ -143,6 +144,31 @@ const postGate = createPostGate(client, {
   prefix: CONFIG.prefix,
   approvalGate,
   runIntentionalDelete: tamperProtection.runIntentionalDelete,
+});
+const moderationLevel = createModerationLevel(client, {
+  sendProtected: tamperProtection.sendProtected,
+  request: apiRequest,
+  prefix: CONFIG.prefix,
+});
+client.on("messageCreate", (message) => {
+  moderationLevel
+    .handleMessage(message)
+    .catch((error) =>
+      console.error(
+        "moderation-level: message handler failed:",
+        error?.message || error
+      )
+    );
+});
+client.on("serverMemberJoin", (member) => {
+  moderationLevel
+    .handleMemberJoin(member)
+    .catch((error) =>
+      console.error(
+        "moderation-level: join handler failed:",
+        error?.message || error
+      )
+    );
 });
 client.on("messageCreate", (message) => {
   postGate
@@ -428,6 +454,13 @@ client.on("messageCreate", async (message) => {
     // ── Post-Gate [status|here|off|confirm|cancel|approve|reject] ─
     if (cmd === "post-gate" || cmd === "postgate") {
       await postGate.handleCommand(message, cmdArgs);
+      return;
+    }
+
+    // ── Level [status|1|2|3 confirm|tenure] ────────
+    if (cmd === "level") {
+      const embed = await moderationLevel.handleCommand(message, cmdArgs);
+      await safeSend(message.channel, { embeds: [embed] });
       return;
     }
 

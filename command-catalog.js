@@ -323,17 +323,18 @@ export const COMMAND_CATALOG = Object.freeze([
     section: COMMAND_SECTIONS.MODERATION,
     route: "ban",
     access: "ban",
-    syntax: "/Ban @member <reason>",
+    syntax: "/Ban <@member|account ID> <reason>",
     summary:
-      "Confirm and ban a member, then choose a message-cleanup window by reaction.",
-    help: "Confirm with ✅, then pick a cleanup window (1h–1y) by reaction. The 10-minute ↩️ undo only unbans _(Ban Members; cleanup also needs Manage Messages)_",
+      "Confirm and ban a current, departed, or never-joined account, then choose a message-cleanup window by reaction.",
+    help: "Ban a current or never-joined account by mention or raw ID after ✅ confirmation, then pick a cleanup window (1h–1y). The 10-minute ↩️ undo only unbans _(Ban Members; cleanup also needs Manage Messages)_",
     permission: "Ban Members; Manage Messages is also required for cleanup",
     examples: [
       "/Ban @member for spamming and stuff",
-      "/Ban @member 7d raid cleanup",
+      "/Ban 01ABCDEFGHJKMNPQRSTVWXYZ12 for coordinating a raid",
     ],
     notes: [
-      "Write the reason in plain words; the member, an optional window, and the reason may appear in any order.",
+      "Write the reason in plain words; the account, an optional window, and the reason may appear in any order.",
+      "Stoat's native ban endpoint accepts raw account IDs, so the target does not need to be a current or former server member.",
       "Nothing happens until the moderator who ran the command reacts ✅ to the confirmation naming the target and reason.",
       "Undo unbans the account but cannot restore server membership or deleted messages.",
     ],
@@ -420,7 +421,7 @@ export const COMMAND_CATALOG = Object.freeze([
     access: "manage_messages",
     syntax: "/Post-Gate approve QUEUE_ID",
     summary:
-      "Repost a held first post, or discard it and increase the author's automod strike level.",
+      "Clear the author of a held first post, or discard it and increase their automod strike level.",
     help: "React ✅/❌ on the held-post review card, or use `/Post-Gate approve|reject QUEUE_ID` _(Manage Messages)_",
     permission: "Manage Messages in the review channel",
     examples: [
@@ -428,9 +429,34 @@ export const COMMAND_CATALOG = Object.freeze([
       "/Post-Gate reject PGABCDEF01234567",
     ],
     notes: [
-      "Approving reposts the held content as Irminsul, attributed to the original author.",
+      "Approving clears the author and resets their automod strike; it does not repost the held content, which the author may post again themselves.",
       "Rejecting discards the held content and increases the author's automod strike level; it does not apply a timeout by itself.",
       "Unreviewed holds expire and are discarded after 7 days.",
+    ],
+  },
+  {
+    id: "level",
+    section: COMMAND_SECTIONS.MODERATION,
+    route: "level",
+    access: "fetch_manager",
+    syntax: "/Level [status|1|2|3 confirm|tenure <days>]",
+    summary:
+      "Set the server-wide moderation posture from standard to lockdown.",
+    help: "Dial the whole server's protection up or down. Level 3 kicks every new join _(admins/mods only)_",
+    permission:
+      "Server owner, Manage Server, or a recognized moderation capability",
+    examples: [
+      "/Level status",
+      "/Level 2",
+      "/Level 3 confirm",
+      "/Level tenure 14",
+      "/Level 1",
+    ],
+    notes: [
+      "Level 1 is the default: links and attachments from new or first-time posters are held for review.",
+      "Level 2 widens the new-account window to 30 days and lets automod trip on a single behavioural signal; it still only holds links and attachments, same as level 1.",
+      "Level 3 additionally kicks every new join and deletes messages from members below the tenure threshold; bots and verified moderators are exempt from the kick.",
+      "Level 3 requires the literal word `confirm` and an automod log channel, so every automatic kick is recorded.",
     ],
   },
   {

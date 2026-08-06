@@ -14,10 +14,10 @@ A message is deleted and queued for review only when **all** of the following ar
 - The server's post gate is in `hold` mode with a configured review channel.
 - The channel is not privacy-excluded via `/Exclude-Channel` — excluded channels retain nothing, so the gate never touches them.
 - The author is not a recognized moderator. This is checked with the same fresh permission verification `/Automod` uses, and fails closed: if the check itself is unavailable, nothing is held.
-- The message contains a link **or** at least one attachment.
+- The message contains a link **or** at least one attachment. At [moderation level](/moderation/levels/) 2 and above this condition is dropped — every message from a new account is held.
 - The author is, by locally cached or archived evidence, **new**:
-  - the account was created less than 7 days ago, or
-  - the author joined this server less than 24 hours ago, or
+  - the account was created less than 7 days ago (30 days at level 2 and above), or
+  - the author joined this server less than 24 hours ago (7 days at level 2 and above), or
   - the author has no other message Irminsul has archived in this server.
 
 Obfuscated links (spaced-out domains, homoglyphs, URL shorteners disguised as plain text) are not detected — the pattern matches ordinary `https://`, `www.`, and bare common-TLD links only.

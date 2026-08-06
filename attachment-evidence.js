@@ -176,7 +176,7 @@ export function buildAttachmentArchiveEmbed({
     "**Attachments:**",
     ...descriptors.map((att) => {
       const status = att.archiveAttachmentId
-        ? "archived below"
+        ? "archived above"
         : `not archived (${SKIP_REASON_LABELS[att.skipReason] ?? "unknown reason"})`;
       return `- \`${att.filename}\` (${humanReadableSize(att.size)}) — ${status}`;
     }),
