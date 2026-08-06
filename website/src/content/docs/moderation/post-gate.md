@@ -61,24 +61,26 @@ After the review channel is configured, any recognized moderator may inspect or 
 /Level 4 confirm
 ```
 
-| Level | Behavior                                                                                  |
-| ----- | ----------------------------------------------------------------------------------------- |
-| 1     | Hold qualifying links and media from new, newly joined, or first-time members             |
-| 2     | Same behavior as Level 1                                                                  |
-| 3     | Remove default-role sending and silently delete regular-member messages that slip through |
-| 4     | Apply Level 3 and automatically ban each slipped-message author                           |
+| Level | Review queue                                               | Default-role Send Messages | Slipped regular-member posts | Automatic ban                                              | Activation                                   |
+| ----- | ---------------------------------------------------------- | -------------------------- | ---------------------------- | ---------------------------------------------------------- | -------------------------------------------- |
+| 1     | Hold qualifying links/media from new or first-time members | Unchanged                  | Normal processing            | No                                                         | Immediate                                    |
+| 2     | Same as Level 1; retained as a compatible policy setting   | Unchanged                  | Normal processing            | No                                                         | Immediate                                    |
+| 3     | Bypassed to prevent queue floods                           | Removed                    | Silently deleted             | No                                                         | Immediate after permission checks            |
+| 4     | Bypassed to prevent queue floods                           | Removed                    | Silently deleted             | Yes, when the message reaches Irminsul through an override | `/Level 4 confirm`, then ✅ within 2 minutes |
 
-Levels 3–4 include privacy-excluded channels because they retain no content: the denied message is not copied to the review queue or archive. Bots, webhooks, the server owner, and freshly verified moderation staff are exempt from reactive deletion and bans. The default-role restriction still affects any non-owner staff or bot role that does not explicitly grant Send Messages. If identity or permission verification is unavailable, Irminsul fails safe and does not delete or ban a possible moderator.
+### Levels 3–4 lockdown
 
-On Level 3 or 4 activation, Irminsul removes **Send Messages** from the server default role before changing the stored level. Reactive deletion remains enabled as a fallback for messages permitted through explicit role or channel overrides. Irminsul refuses a new lockdown if it cannot update permissions or if its bot role would lose explicit **View Channel** or **Send Messages** access in the protected review channel. It warns, but does not refuse activation, when **Manage Messages** cannot be verified for the deletion fallback. Staff and bot roles that inherit only the server default are silenced too; trusted roles need an explicit Send Messages grant.
+- Irminsul removes **Send Messages** from the server default role. Trusted staff and bot roles need an explicit Send Messages grant to remain active.
+- Irminsul must retain **View Channel** and **Send Messages** in the protected review channel. Missing permission-management access or a self-lockout risk prevents activation; missing **Manage Messages** produces a deletion-fallback warning.
+- Messages allowed through an explicit role or channel override are deleted without entering the review queue, automod, command router, attachment archive, or message archive. Privacy-excluded channels remain covered because no content is retained.
+- Bots, webhooks, the server owner, and freshly verified moderation staff are exempt from reactive deletion and bans. An unavailable identity or permission check fails safe.
+- Downgrading restores only the Send Messages bit Irminsul removed. Startup, server updates, and periodic reconciliation repair drift; degraded failures are reported at most once every ten minutes.
 
-Irminsul records whether Send Messages was enabled before lockdown. On a downgrade or approved `/Post-Gate off`, it restores only that bit when it was the actor that removed it, preserving every unrelated permission change. It checks the lock at startup, after server updates, and periodically; drift is repaired automatically. A migrated server already stored at Level 3 or 4 remains in deletion-only degraded mode if the permission lock cannot immediately be applied, warns at most once every ten minutes, and keeps retrying.
+### Level 4 automatic bans
 
-Entering Level 3 posts one protected notice: **Lockdown mode is currently enabled. Posts are automatically denied to avoid flooding the moderation queue.** Level 4 posts one corresponding automatic-ban warning. Individual attempts do not create held-post records, attachment copies, automod cases, command responses, or additional review cards. Runtime permission/delete/ban failures produce at most one degraded-mode notice every ten minutes.
-
-Stoat rejects ordinary default-role sends before creating a message event, so Irminsul cannot identify or ban those users. Level 4's native ban applies exactly once to each non-exempt author whose message reaches the bot through an explicit role or channel override; the message is still deleted first.
-
-Level 4 requires `/Level 4 confirm`, then the requesting moderator's ✅ reaction within two minutes; ❌ cancels it. The bot rechecks the requester, its own Ban Members and permission-management capabilities, and the unchanged Post Gate configuration before activation. A different moderator cannot answer the prompt. A downgrade completes only after the default permission has been safely restored. `/Post-Gate off` remains the Enka-approved way to disable the feature entirely.
+- Only the requesting moderator can confirm activation with ✅ within two minutes. Irminsul rechecks the moderator, its own Ban Members and permission-management capabilities, and the unchanged Post Gate configuration.
+- Stoat blocks ordinary default-role sends before a message exists, so Irminsul cannot identify those authors. Level 4 bans a non-exempt author only when their message reaches the bot through an explicit permission override; the message is deleted first.
+- A downgrade completes only after the default permission is safely restored. `/Post-Gate off` remains the Enka-approved way to disable the feature entirely.
 
 ## Reviewing a held post
 
@@ -106,21 +108,7 @@ review card and its Stoat-hosted evidence are intentionally deleted after approv
 
 ### Reject and the automod strike ladder
 
-Rejection deletes the review card and its Stoat media, discards the held content, and advances the
-author's shared automod strike stage:
-
-| Stored stage after rejection | Timeout on that rejection | Timeout projected for the next separate automod trigger |
-| ---------------------------- | ------------------------- | ------------------------------------------------------- |
-| Stage 1                      | None                      | Stage 2 — 1 hour                                        |
-| Stage 2                      | None                      | Stage 3 — 24 hours                                      |
-| Stage 3                      | None                      | Stage 4 — 7 days                                        |
-| Stage 4                      | None                      | Stage 4 — 7 days                                        |
-
-The first rejection after no recent history stores stage 1. Another rejection within 14 days
-stores stage 2, and so on to the stage-4 cap. Each rejection refreshes that 14-day quiet-reset
-clock. Rejection never times the author out and never opens a permanent-ban vote by itself; a later
-automod detection must independently reach its normal score threshold. If it does, it advances
-from the stored stage and applies the corresponding containment duration.
+Rejection deletes the review card and its Stoat media, discards the held content, and advances the author's [automod strike stage](/HoYoFetch/moderation/automod/#containment-strike-stages). It never applies a timeout or opens a permanent-ban vote by itself. A later automod detection must independently reach the normal score threshold; it then advances the stage again and applies or projects the new duration.
 
 ### Expiry
 
