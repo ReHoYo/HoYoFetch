@@ -189,6 +189,17 @@ Signals are heuristics for a moderator to weigh, not proof that an account is a 
 | 3     | Remove default-role sending and delete slipped posts without creating queue items |
 | 4     | Apply Level 3 and automatically ban each slipped-message author                   |
 
+Choose the lowest level that matches the current situation:
+
+| Level | Recommended use                                                                                                                                                      |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | **Day-to-day protection.** Reviews link or media posts from new and first-time members while normal chat continues.                                                  |
+| 2     | **Elevated watch or a small suspected bot raid.** Currently enforces the same rules as Level 1, but records that moderators intentionally raised the server posture. |
+| 3     | **A large or active raid.** Stops regular members from sending server-wide and deletes anything that slips through, without automatically banning the author.        |
+| 4     | **Emergency lockdown for the most severe raids.** Uses Level 3's message lockdown and also bans non-exempt authors whose messages bypass the permission lock.        |
+
+Levels 1–2 reduce common link/media bot spam but do not block ordinary text messages. Level 2 is intentionally behaviorally identical to Level 1 for now; selecting it communicates an elevated posture without silently changing thresholds. Levels 3–4 are disruptive lockdown settings, not everyday filters.
+
 Levels 1–2 normalize common link obfuscations before deciding whether to hold a post. This includes inserted spaces or invisible characters, spaced and `hxxp` protocols, Unicode URL punctuation, bracketed dots, bare domains, and IPv4 addresses; the original message is preserved unchanged for moderator review.
 
 Levels 3–4 clear **Send Messages** from the server default role, then keep reactive deletion as a fallback for messages allowed by explicit channel or role overrides. Irminsul must have **Manage Permissions** plus explicit **View Channel** and **Send Messages** access in the protected review channel so it cannot lock itself out. Staff roles and bots that rely only on the default role are also silenced; give trusted roles explicit sending permission if they must remain active. Unlocking restores only the Send Messages bit Irminsul removed, preserving unrelated permission changes, and startup/event/periodic reconciliation repairs drift.
