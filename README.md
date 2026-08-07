@@ -412,7 +412,7 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ## 📝 Changelog
 
-### Unreleased
+### v3.1.0
 
 - Added a VPS-only REST emergency command that can verify, own, and safely restore the server default Send Messages lock without relying on Stoat gateway command delivery
 

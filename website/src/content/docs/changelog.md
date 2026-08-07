@@ -3,7 +3,7 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
-## Unreleased
+## Version 3.1.0
 
 ### VPS-only emergency lock
 
