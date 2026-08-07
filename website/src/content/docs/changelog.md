@@ -3,6 +3,13 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Unreleased
+
+### VPS-only emergency lock
+
+- Added host-side `emergency:lock`, `emergency:status`, and `emergency:unlock` commands that control the server default Send Messages permission over REST without waiting for Stoat gateway command delivery.
+- Persisted ownership before mutation, preserved unrelated permission bits, retried transient failures, and prevented the recovery path from enabling sending when another lock owned the disabled state.
+
 ## Version 3.0.0
 
 ### Server moderation levels
