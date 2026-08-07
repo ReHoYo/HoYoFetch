@@ -10,6 +10,9 @@ const ALLOWED_ENV_KEYS = new Set([
   "FETCH_COOLDOWN",
   "EMOJI_MODE",
   "HOYO_API_BASE",
+  "EMERGENCY_SERVER_ID",
+  "STOAT_API_BASE",
+  "HOYOFETCH_DATA_DIR",
   "AUDITLOG_DEBUG",
   "AUDITLOG_EVIDENCE_MAX_MB",
   "AUDITLOG_EVIDENCE_BUDGET_MB",
@@ -75,6 +78,8 @@ export const CONFIG = {
   fetchCooldownSeconds,
   hoyoApiBase:
     process.env.HOYO_API_BASE || "https://hoyo-codes.seria.moe/codes",
+  emergencyServerId: process.env.EMERGENCY_SERVER_ID || "",
+  stoatApiBase: process.env.STOAT_API_BASE || "https://api.stoat.chat",
 };
 
 // ═══════════════════════════════════════════════════

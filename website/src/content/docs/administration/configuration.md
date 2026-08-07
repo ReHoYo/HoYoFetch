@@ -1,24 +1,28 @@
 ---
 title: Configuration
-description: Environment variables for code fetching, emoji, audit diagnostics, and Stoat-hosted attachment archiving.
+description: Environment variables for code fetching, emergency controls, emoji, audit diagnostics, and Stoat-hosted attachment archiving.
 ---
 
 Copy `.env.example` to `.env` and provide the bot token. Never commit `.env`.
 
-| Variable                   | Default             | Purpose                                                          |
-| -------------------------- | ------------------- | ---------------------------------------------------------------- |
-| `BOT_TOKEN`                | Required            | Revolt bot token                                                 |
-| `PREFIX`                   | `/`                 | Message-command prefix                                           |
-| `FETCH_INTERVAL`           | `60`                | Auto-fetch interval in minutes, clamped to a safe range          |
-| `FETCH_COOLDOWN`           | `10`                | Minimum seconds between manual fetches per channel; `0` disables |
-| `EMOJI_MODE`               | `unicode`           | Initial `unicode` or `custom` reward-emoji mode                  |
-| `AUDITLOG_DEBUG`           | Off                 | Set to `1` for verbose, redacted audit pipeline diagnostics      |
-| `AUDITLOG_EVIDENCE_MAX_MB` | `20`                | Maximum Stoat-mirrored size; `0` disables attachment archiving   |
-| `HOYOFETCH_DATA_DIR`       | `./data`            | Runtime persistence directory                                    |
-| `HOYO_API_BASE`            | hoyo-codes endpoint | Override for the GI, HSR, and ZZZ API base                       |
+| Variable                   | Default              | Purpose                                                          |
+| -------------------------- | -------------------- | ---------------------------------------------------------------- |
+| `BOT_TOKEN`                | Required             | Revolt bot token                                                 |
+| `EMERGENCY_SERVER_ID`      | Emergency CLI only   | Server controlled by the VPS-only default Send Messages lock     |
+| `STOAT_API_BASE`           | Stoat production API | REST endpoint used by the VPS-only emergency command             |
+| `PREFIX`                   | `/`                  | Message-command prefix                                           |
+| `FETCH_INTERVAL`           | `60`                 | Auto-fetch interval in minutes, clamped to a safe range          |
+| `FETCH_COOLDOWN`           | `10`                 | Minimum seconds between manual fetches per channel; `0` disables |
+| `EMOJI_MODE`               | `unicode`            | Initial `unicode` or `custom` reward-emoji mode                  |
+| `AUDITLOG_DEBUG`           | Off                  | Set to `1` for verbose, redacted audit pipeline diagnostics      |
+| `AUDITLOG_EVIDENCE_MAX_MB` | `20`                 | Maximum Stoat-mirrored size; `0` disables attachment archiving   |
+| `HOYOFETCH_DATA_DIR`       | `./data`             | Runtime persistence directory                                    |
+| `HOYO_API_BASE`            | hoyo-codes endpoint  | Override for the GI, HSR, and ZZZ API base                       |
 
 ```dotenv title=".env"
 BOT_TOKEN=replace_with_your_token
+EMERGENCY_SERVER_ID=replace_with_server_id
+STOAT_API_BASE=https://api.stoat.chat
 PREFIX=/
 FETCH_INTERVAL=60
 FETCH_COOLDOWN=10

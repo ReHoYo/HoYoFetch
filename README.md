@@ -287,6 +287,7 @@ hoyofetch/
 ├── auditlog.js         Message/member audit event pipeline
 ├── settings-monitor.js Persistent server-setting diff and reconciliation
 ├── tamper-protection.js Always-on protected audit-message restoration
+├── emergency-lockdown.js VPS-only default Send Messages control
 ├── custom_emojis.json  Optional: custom Revolt emoji IDs
 ├── .env.example        Configuration template
 ├── package.json
@@ -332,15 +333,42 @@ API poll (hourly)
 
 All settings are in `.env`:
 
-| Variable             | Default                              | Description                                                                        |
-| -------------------- | ------------------------------------ | ---------------------------------------------------------------------------------- |
-| `BOT_TOKEN`          | _(required)_                         | Revolt bot token                                                                   |
-| `PREFIX`             | `/`                                  | Command prefix                                                                     |
-| `FETCH_INTERVAL`     | `60`                                 | Auto-fetch interval in minutes                                                     |
-| `FETCH_COOLDOWN`     | `10`                                 | Min seconds between manual `/Fetch*` commands per channel (`0` disables)           |
-| `EMOJI_MODE`         | `unicode`                            | Initial emoji mode (`unicode` or `custom`); switchable at runtime via `/EmojiMode` |
-| `HOYO_API_BASE`      | `https://hoyo-codes.seria.moe/codes` | GI/HSR/ZZZ API                                                                     |
-| `HOYOFETCH_DATA_DIR` | `./data`                             | Where `channels.json` / `known_codes.json` / `source_cache.json` are stored        |
+| Variable              | Default                              | Description                                                                        |
+| --------------------- | ------------------------------------ | ---------------------------------------------------------------------------------- |
+| `BOT_TOKEN`           | _(required)_                         | Revolt bot token                                                                   |
+| `EMERGENCY_SERVER_ID` | _(required for VPS emergency lock)_  | Server whose default Send Messages permission the host command controls            |
+| `STOAT_API_BASE`      | `https://api.stoat.chat`             | Stoat REST endpoint used by the VPS emergency command                              |
+| `PREFIX`              | `/`                                  | Command prefix                                                                     |
+| `FETCH_INTERVAL`      | `60`                                 | Auto-fetch interval in minutes                                                     |
+| `FETCH_COOLDOWN`      | `10`                                 | Min seconds between manual `/Fetch*` commands per channel (`0` disables)           |
+| `EMOJI_MODE`          | `unicode`                            | Initial emoji mode (`unicode` or `custom`); switchable at runtime via `/EmojiMode` |
+| `HOYO_API_BASE`       | `https://hoyo-codes.seria.moe/codes` | GI/HSR/ZZZ API                                                                     |
+| `HOYOFETCH_DATA_DIR`  | `./data`                             | Where `channels.json` / `known_codes.json` / `source_cache.json` are stored        |
+
+### VPS-only emergency Send Messages lock
+
+Set `EMERGENCY_SERVER_ID` in `.env`, then use these commands directly from
+the trusted VPS shell when Stoat is too unstable to deliver `/Level`:
+
+```bash
+npm run emergency:status
+npm run emergency:lock
+npm run emergency:unlock
+```
+
+This path makes direct authenticated REST requests and never waits for a
+gateway login. `lock` retries transient network, rate-limit, and server errors
+until a fresh server read verifies that the default role's **Send Messages**
+bit is disabled. `unlock` restores that bit only when this VPS command removed
+it, and refuses to fight an active `/Level 3` or `/Level 4` lock. Recovery state
+is stored privately in the persistent `data/` directory, so do not run the
+emergency command against an ephemeral container filesystem.
+
+The command changes only the server default role. The owner and members,
+bots, or webhooks with explicit role/channel sending permission may still
+send. It has no network listener and sends no Stoat message; access is governed
+by the VPS account and the permissions protecting the repository, `.env`, and
+runtime data directory.
 
 ## 🚀 Production Deployment
 
@@ -372,6 +400,10 @@ docker run -d --name hoyofetch --restart unless-stopped \
 ```
 
 ## 📝 Changelog
+
+### Unreleased
+
+- Added a VPS-only REST emergency command that can verify, own, and safely restore the server default Send Messages lock without relying on Stoat gateway command delivery
 
 ### v3.0.0
 

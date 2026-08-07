@@ -33,6 +33,12 @@ import { AUTOMOD_LIMITS, nextStrikeLevel } from "./automod.js";
 import { parseChannelArg } from "./auditlog.js";
 import { buildAuditEmbed, buildStatusEmbed } from "./embeds.js";
 import { countArchivedMessages } from "./message-archive.js";
+import {
+  hasPermission,
+  PERMISSION_BITS,
+  removePermission,
+  toPermissionBits,
+} from "./permission-bits.js";
 import { deriveAccountCreatedAt } from "./user-info.js";
 import {
   clearAutomodStrike,
@@ -74,13 +80,6 @@ const APPROVE_EMOJI = "✅";
 const REJECT_EMOJI = "❌";
 const LOCKDOWN_BAN_REASON =
   "Irminsul Level 4 lockdown: posted through the server permission lock while automatic bans were enabled";
-const PERMISSION_BITS = Object.freeze({
-  ManagePermissions: 1n << 2n,
-  ViewChannel: 1n << 20n,
-  SendMessage: 1n << 22n,
-  ManageMessages: 1n << 23n,
-});
-
 // Stoat messages are much shorter than this, but keep normalization bounded
 // so an unexpected payload cannot turn link protection into expensive work.
 const LINK_SCAN_LIMIT = 8_192;
@@ -365,22 +364,6 @@ export function createPostGate(
     }
   }
 
-  function toPermissionBits(value) {
-    if (typeof value === "bigint") return value >= 0n ? value : null;
-    if (typeof value === "number") {
-      return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : null;
-    }
-    if (typeof value === "string" && /^\d+$/.test(value)) {
-      const parsed = BigInt(value);
-      return parsed <= BigInt(Number.MAX_SAFE_INTEGER) ? parsed : null;
-    }
-    return null;
-  }
-
-  function hasPermission(bits, permission) {
-    return (bits & permission) === permission;
-  }
-
   function permissionLockLabel(config) {
     if (config.level < 3) return "not active";
     if (!config.defaultSendLock) return "pending reconciliation";
@@ -424,8 +407,10 @@ export function createPostGate(
       ) {
         return { ok: false, outcome: "invalid_snapshot" };
       }
-      const lockedPermissions =
-        currentPermissions & ~PERMISSION_BITS.SendMessage;
+      const lockedPermissions = removePermission(
+        currentPermissions,
+        PERMISSION_BITS.SendMessage
+      );
       const evaluated = evaluatePermissionSnapshot({
         authorId: client.user.id,
         server: {

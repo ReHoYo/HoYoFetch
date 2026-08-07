@@ -66,6 +66,42 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 Mount persistent storage for `/app/data`; otherwise channel configuration, code history, message metadata, protected-record references, and audit state disappear when the container is replaced. Attachment bytes live on Stoat, not in this volume.
 
+## VPS-only emergency lock
+
+When Stoat is too unstable to deliver an in-server `/Level` command, an operator
+with access to the trusted host can directly disable the server default role's
+Send Messages permission:
+
+```bash
+npm run emergency:status
+npm run emergency:lock
+npm run emergency:unlock
+```
+
+For the Docker example above, run the same scripts inside the bot container,
+for example `docker exec hoyofetch npm run emergency:lock`, so the command sees
+the container's environment and persistent `/app/data` volume.
+
+Set `EMERGENCY_SERVER_ID` in `.env` first. The command reuses `BOT_TOKEN` for
+direct REST calls and does not open a gateway connection, HTTP server, or other
+remote control surface. Transient outages and rate limits retry until the live
+server state verifies the requested change; invalid credentials, a wrong server
+ID, and missing permission-management access fail immediately.
+
+The recovery record is written before the permission changes and remains in the
+persistent data directory. `unlock` restores Send Messages only if this tool
+originally removed it, preserves every unrelated permission bit, and refuses to
+run while `/Level 3` or `/Level 4` remains active. If Send Messages was already
+disabled, `lock` reports that fact without claiming restoration ownership.
+
+:::caution[Default role only]
+This is the same default-role permission barrier used by Irminsul's normal
+lockdown. The server owner and accounts or webhooks with explicit role/channel
+allows can still send. The emergency CLI itself is protected by host access and
+filesystem permissions, so keep the repository, `.env`, and data volume limited
+to the VPS owner or bot service account.
+:::
+
 ## Deploy versus restart
 
 Updating production generally has three separate steps:
