@@ -12,6 +12,7 @@ description: Major public Irminsul capabilities and documentation milestones.
 - Automatic holds do not apply a strike, timeout, or ban. Protected cards retain only the stable rule id and whether the signal came from the message or bio; profile contents and external contact details are withheld.
 - Successful profile and no-profile checks use a ten-minute, 5,000-entry in-memory LRU cache. Concurrent posts share one lookup; unavailable profiles fail open to message-only detection with redacted diagnostics and a one-minute retry backoff.
 - Approving a queued message does not release its account-level hold. A moderator must release the account explicitly; a later match automatically holds it again only while recent-identity eligibility remains active, and cached bio results are ignored after both windows expire.
+- Version 3.2.2 is the final version of Irminsul. If Stoat grows to the point where a larger operational surface is needed, its next chapter will add an administrator dashboard and SQLite-backed persistence; until then, Irminsul ends here.
 
 ## Version 3.2.1 — breaking command cleanup
 
@@ -31,7 +32,6 @@ The repository has no per-command telemetry, so real-world use of the removed al
 | `reason:`, `delete:`, `window:`, `purge:`, `duration:`, `mute:`, `timeout:`      | Plain reasons and bare values, for example `/Ban @member 1d repeated spam`            |
 
 The undocumented internal `postgate` route, retired `moderation_level.json` subsystem, v2 evidence-cache infrastructure, and completed pre-v3 startup migrations were also removed. Defensive readers remain for legacy attachment shapes in the one-year archive and Post Gate queue entries without an author ID until live data proves they are gone.
-- Version 3.2.2 is the final version of Irminsul. If Stoat grows to the point where a larger operational surface is needed, its next chapter will add an administrator dashboard and SQLite-backed persistence; until then, Irminsul ends here.
 
 ## Version 3.2.0
 
