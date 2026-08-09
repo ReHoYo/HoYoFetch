@@ -14,9 +14,9 @@
 // `attachments` is an array of descriptors:
 //   {id, filename, size, contentType, archiveAttachmentId, archiveUrl,
 //    archiveRecordId, skipReason}
-// Attachment bytes live only in the referenced Stoat Logger record. Legacy
-// `evidencePath` descriptors normalize to `legacy_purged`; older journals may
-// also carry a plain number (attachment count), which callers still accept.
+// Attachment bytes live only in the referenced Stoat Logger record. Older
+// journals may carry legacy descriptor shapes or a plain number (attachment
+// count), which callers still accept until a dedicated inventory proves them gone.
 //
 // Appends are cheap (no full-file rewrite); the journal is compacted when it
 // grows well past the live set. Entries expire after RETENTION_MONTHS
@@ -306,11 +306,10 @@ export function markMessagesDeleted(ids, deletedAt = Date.now()) {
 /**
  * Permanently remove all archived content for one privacy-excluded channel.
  * @param {string} channelId
- * @return {{evidencePaths: string[], archiveRecordIds: string[]}}
- *   legacy paths and Stoat Logger records formerly referenced by removed entries
+ * @return {{archiveRecordIds: string[]}}
+ *   Stoat Logger records formerly referenced by removed entries
  */
 export function purgeChannelFromArchive(channelId) {
-  const evidencePaths = [];
   const archiveRecordIds = [];
   const ops = [];
   const deletedAt = Date.now();
@@ -318,9 +317,6 @@ export function purgeChannelFromArchive(channelId) {
     if (entry.channelId !== channelId) continue;
     if (Array.isArray(entry.attachments)) {
       for (const attachment of entry.attachments) {
-        if (typeof attachment?.evidencePath === "string") {
-          evidencePaths.push(attachment.evidencePath);
-        }
         if (
           typeof attachment?.archiveRecordId === "string" &&
           !archiveRecordIds.includes(attachment.archiveRecordId)
@@ -333,7 +329,7 @@ export function purgeChannelFromArchive(channelId) {
     ops.push({ op: "delete", id, deletedAt, purge: true });
   }
   appendOps(ops);
-  return { evidencePaths, archiveRecordIds };
+  return { archiveRecordIds };
 }
 
 /**

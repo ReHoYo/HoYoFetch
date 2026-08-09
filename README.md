@@ -54,49 +54,44 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 
 ## 📋 Commands
 
-| Command                                                         | Description                                                                                                                       |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `/FetchGI`                                                      | Fetch active Genshin Impact codes                                                                                                 |
-| `/FetchHSR`                                                     | Fetch active Honkai: Star Rail codes                                                                                              |
-| `/FetchZZZ`                                                     | Fetch active Zenless Zone Zero codes                                                                                              |
-| `/FetchHI3`                                                     | Fetch active Honkai Impact 3rd codes                                                                                              |
-| `/FetchNTE`                                                     | Fetch active Neverness to Everness codes                                                                                          |
-| `/FetchWuWa`                                                    | Fetch active Wuthering Waves codes                                                                                                |
-| `/Report-Spam @member <what happened>`                          | Privately submit suspected friend-request or DM spam for review                                                                   |
-| `/EnableFetch`                                                  | Enable HoYoverse + NTE + WuWa auto-fetch in the current channel (admins/mods only)                                                |
-| `/EnableFetchHoyo`                                              | Enable HoYoverse-only auto-fetch in the current channel (admins/mods only)                                                        |
-| `/EnableFetchNTE`                                               | Enable NTE-only auto-fetch in the current channel (admins/mods only)                                                              |
-| `/EnableFetchWuWa`                                              | Enable WuWa-only auto-fetch in the current channel (admins/mods only)                                                             |
-| `/EnableFetchNTEWuWa`                                           | Enable NTE + WuWa auto-fetch in the current channel (admins/mods only)                                                            |
-| `/DisableFetch`                                                 | Disable auto-fetch in the current channel (admins/mods only)                                                                      |
-| `/EmojiMode [unicode\|custom]`                                  | Show or switch reward-emoji rendering at runtime (admins/mods only)                                                               |
-| `/Restart`                                                      | Restart the bot after deploying updates (admins/mods only)                                                                        |
-| `/Server-Info`                                                  | Show cached server, archive, feature-health, and safe VPS diagnostics (admins/mods only)                                          |
-| `/AuditLog [status\|here\|#channel\|off\|confirm CODE\|cancel]` | View or request an Enka-approved audit-log configuration change (admins/mods only)                                                |
-| `/Test-AuditLog`                                                | Send a test event through the audit pipeline to verify delivery (admins/mods only; legacy diagnostic alias)                       |
-| `/Exclude-Channel [status\|here\|#channel\|remove #channel]`    | Request Enka-approved message-content privacy exclusions (admins/mods only)                                                       |
-| `/Post-Gate [status\|here\|#channel\|off\|holds\|terms]`        | Configure the Enka-approved review channel, list held members, or inspect the prohibited-term list (admins/mods only)             |
-| `/Post-Gate [approve\|reject\|deny-hold] QUEUE_ID`              | Resolve a held post: clear the author, discard with a strike, or discard and place the author in Post Gate (Manage Messages)      |
-| `/Post-Gate release @member`                                    | Release a member from Post Gate so their messages post normally again (Manage Messages)                                           |
-| `/Level [status\|1\|2\|3\|4 confirm]`                           | Set the server-wide link/media review or lockdown policy (admins/mods only)                                                       |
-| `/Automod status`                                               | Show this server's automod mode, logger, and ban quorum (admins/mods only)                                                        |
-| `/Automod monitor [here\|#channel]`                             | Detect and log cases without changing messages or members (admins/mods only)                                                      |
-| `/Automod enforce [here\|#channel]`                             | Enable temporary containment and staff-approved ban cases (admins/mods only)                                                      |
-| `/Automod off`                                                  | Disable anti-raid evaluation for this server (admins/mods only)                                                                   |
-| `/Automod quorum 1\|2`                                          | Set the approval quorum for new cases; production defaults to two (admins/mods only)                                              |
-| `/Automod approve CASE_ID`                                      | Approve a pending ban case (owner, Manage Server, or Ban Members only)                                                            |
-| `/Automod release @member <reason>`                             | Remove a timeout and reset that member's automod escalation history (Timeout Members only)                                        |
-| `/Ban <@member\|account ID> <reason>`                           | Natively ban a current or never-joined account after ✅ confirmation (Ban Members; cleanup also needs Manage Messages)            |
-| `/Kick @member <reason>`                                        | Confirm with ✅, then pick a cleanup window by reaction; the kick cannot be undone (Kick Members)                                 |
-| `/Mute @member [10m\|30m\|1h\|4h\|24h\|3d\|7d] <reason>`        | Type a duration and confirm with ✅, or omit it for a reaction picker (Timeout Members only)                                      |
-| `/Purge-User @member <reason>`                                  | Pick a window by reaction, then confirm deletion of the member's observed messages (Manage Messages only)                         |
-| `/Get-Info <@member\|account ID>`                               | Vet current, departed, banned, or never-joined accounts with tiered account, ban, archive, and bot-risk detail (admins/mods only) |
-| `/HelpHoyoFetch`                                                | Show the two-page command reference; the opener navigates with ◀️/▶️                                                              |
-| `/Docs`                                                         | Open the permanent searchable documentation site                                                                                  |
+| Command                                                               | Description                                                                                                                       |
+| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `/FetchGI`                                                            | Fetch active Genshin Impact codes                                                                                                 |
+| `/FetchHSR`                                                           | Fetch active Honkai: Star Rail codes                                                                                              |
+| `/FetchZZZ`                                                           | Fetch active Zenless Zone Zero codes                                                                                              |
+| `/FetchHI3`                                                           | Fetch active Honkai Impact 3rd codes                                                                                              |
+| `/FetchNTE`                                                           | Fetch active Neverness to Everness codes                                                                                          |
+| `/FetchWuWa`                                                          | Fetch active Wuthering Waves codes                                                                                                |
+| `/Report-Spam @member <what happened>`                                | Privately submit suspected friend-request or DM spam for review                                                                   |
+| `/EnableFetch [all\|hoyo\|nte\|wuwa\|nte-wuwa]`                       | Enable the selected auto-fetch scope; no argument means all games (admins/mods only)                                              |
+| `/DisableFetch`                                                       | Disable auto-fetch in the current channel (admins/mods only)                                                                      |
+| `/EmojiMode [unicode\|custom]`                                        | Show or switch reward-emoji rendering at runtime (admins/mods only)                                                               |
+| `/Restart`                                                            | Restart the bot after deploying updates (admins/mods only)                                                                        |
+| `/Server-Info`                                                        | Show cached server, archive, feature-health, and safe VPS diagnostics (admins/mods only)                                          |
+| `/AuditLog [status\|test\|here\|#channel\|off\|confirm CODE\|cancel]` | View, test, or request an Enka-approved audit-log configuration change (admins/mods only)                                         |
+| `/Exclude-Channel [status\|here\|#channel\|remove #channel]`          | Request Enka-approved message-content privacy exclusions (admins/mods only)                                                       |
+| `/Post-Gate [status\|here\|#channel\|off\|holds\|terms]`              | Configure the Enka-approved review channel, list held members, or inspect the prohibited-term list (admins/mods only)             |
+| `/Post-Gate [approve\|reject\|deny-hold] QUEUE_ID`                    | Resolve a held post: clear the author, discard with a strike, or discard and place the author in Post Gate (Manage Messages)      |
+| `/Post-Gate release @member`                                          | Release a member from Post Gate so their messages post normally again (Manage Messages)                                           |
+| `/Level [status\|1\|2\|3\|4 confirm]`                                 | Set the server-wide link/media review or lockdown policy (admins/mods only)                                                       |
+| `/Automod status`                                                     | Show this server's automod mode, logger, and ban quorum (admins/mods only)                                                        |
+| `/Automod monitor [here\|#channel]`                                   | Detect and log cases without changing messages or members (admins/mods only)                                                      |
+| `/Automod enforce [here\|#channel]`                                   | Enable temporary containment and staff-approved ban cases (admins/mods only)                                                      |
+| `/Automod off`                                                        | Disable anti-raid evaluation for this server (admins/mods only)                                                                   |
+| `/Automod quorum 1\|2`                                                | Set the approval quorum for new cases; production defaults to two (admins/mods only)                                              |
+| `/Automod approve CASE_ID`                                            | Approve a pending ban case (owner, Manage Server, or Ban Members only)                                                            |
+| `/Automod release @member <reason>`                                   | Remove a timeout and reset that member's automod escalation history (Timeout Members only)                                        |
+| `/Ban <@member\|account ID> <reason>`                                 | Natively ban a current or never-joined account after ✅ confirmation (Ban Members; cleanup also needs Manage Messages)            |
+| `/Kick @member <reason>`                                              | Confirm with ✅, then pick a cleanup window by reaction; the kick cannot be undone (Kick Members)                                 |
+| `/Mute @member [10m\|30m\|1h\|4h\|24h\|3d\|7d] <reason>`              | Type a duration and confirm with ✅, or omit it for a reaction picker (Timeout Members only)                                      |
+| `/Purge-User @member <reason>`                                        | Pick a window by reaction, then confirm deletion of the member's observed messages (Manage Messages only)                         |
+| `/Get-Info <@member\|account ID>`                                     | Vet current, departed, banned, or never-joined accounts with tiered account, ban, archive, and bot-risk detail (admins/mods only) |
+| `/HelpHoyoFetch`                                                      | Show the three-page command reference; the opener navigates with ◀️/▶️                                                            |
+| `/Docs`                                                               | Open the permanent searchable documentation site                                                                                  |
 
 > **Note:** Revolt does not support Discord-style slash commands. These are message-based prefix commands using `/` as the prefix. Command names are case-insensitive; channel IDs are preserved exactly.
 
-`/HelpHoyoFetch` opens on the code, member-safety, and setup reference. The person who opened it can use ◀️/▶️ for five minutes to switch between that page and the moderation reference; other members' navigation reactions are ignored. Run `/Docs` for the full searchable reference at any time.
+`/HelpHoyoFetch` opens on the member command reference. The person who opened it can use ◀️/▶️ for five minutes to move through setup and moderation pages; other members' navigation reactions are ignored. Run `/Docs` for the full searchable reference at any time.
 
 ### Command security
 
@@ -112,7 +107,7 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 
 ### Member spam reports
 
-`/Report-Spam @member sent me a scam DM` privately submits suspected friend-request, DM, commission, or scam spam for review. Describe what happened in plain words the way the moderation commands read; the reported account may be mentioned anywhere in the sentence, and the older `reason:` delimiter still works. The description must be 10–300 characters. Irminsul removes the command message before parsing it, verifies that the reporter and target are current members, strips active links and formatting from the reason, and posts only a generic report ID acknowledgement publicly.
+`/Report-Spam @member sent me a scam DM` privately submits suspected friend-request, DM, commission, or scam spam for review. Describe what happened in plain words the way the moderation commands read; the reported account may be mentioned anywhere in the sentence. The description must be 10–300 characters. Irminsul removes the command message before parsing it, verifies that the reporter and target are current members, strips active links and formatting from the reason, and posts only a generic report ID acknowledgement publicly.
 
 The command has its own abuse controls: one attempt per reporter per minute, at most three accepted reports per reporter per server within 24 hours, and one accepted report against the same target per reporter within 24 hours. Three unique reporters against one target within 24 hours raise the review priority. Reports are allegations, not proof, and never create an automatic timeout, deletion, kick, ban, or automod strike.
 
@@ -120,7 +115,7 @@ Irminsul cannot observe private friend requests or DMs between ordinary members.
 
 ### Manual moderation
 
-Reasons are mandatory but are written in plain words — `/Ban @member for spamming and stuff` — and may contain up to 300 characters. The target, the reason, and any option may appear in any order, and the older `reason:`, `delete:`, and `window:` delimiters are still accepted. Commands accept one member mention or one raw user ID. Stoat has no interaction buttons, so Irminsul uses reactions for duration selection, cleanup windows, destructive confirmation, and undo. Every picker and confirmation is answerable only by the moderator who ran the command and expires after two minutes.
+Reasons are mandatory but are written in plain words — `/Ban @member for spamming and stuff` — and may contain up to 300 characters. The target, the reason, and a bare duration or cleanup window may appear in any order before the reason begins. Removed delimiter forms such as `reason:` and `delete:` are rejected with a canonical example. Commands accept one member mention or one raw user ID. Stoat has no interaction buttons, so Irminsul uses reactions for duration selection, cleanup windows, destructive confirmation, and undo. Every picker and confirmation is answerable only by the moderator who ran the command and expires after two minutes.
 
 Because the reason is free text, a mistyped or auto-completed mention would otherwise be indistinguishable from the intended member. `/Ban`, `/Kick`, and `/Mute` therefore post a ✅/❌ confirmation naming the action, target, reason, and any typed cleanup window; nothing reaches Stoat until the invoking moderator reacts ✅. Permissions and the target are verified at that point rather than when the command was typed. `/Automod release` has no confirmation because it only restores access.
 
@@ -136,11 +131,11 @@ Every message a cleanup could not delete is reported by cause rather than as one
 
 ### Audit log
 
-Stoat/Revolt has no built-in audit log, so `/AuditLog here` requests the current channel as the destination and `/AuditLog #channel` requests another text channel. `/AuditLog off` requests disabling it. Every enable, move, or disable—including the older `/Enable-AuditLog` and `/Disable-AuditLog` compatibility forms—requires a fresh ten-minute code sent exclusively to **Enka#4961**. Enka may approve or deny in DM or release the code for `/AuditLog confirm CODE`; the requester or Enka can use `/AuditLog cancel`. `/AuditLog status` and `/Test-AuditLog` are read-only and do not require approval, and a request that would make no change does not generate a code.
+Stoat/Revolt has no built-in audit log, so `/AuditLog here` requests the current channel as the destination and `/AuditLog #channel` requests another text channel. `/AuditLog off` requests disabling it. Every enable, move, or disable requires a fresh ten-minute code sent exclusively to **Enka#4961**. Enka may approve or deny in DM or release the code for `/AuditLog confirm CODE`; the requester or Enka can use `/AuditLog cancel`. `/AuditLog status` and `/AuditLog test` are read-only and do not require approval, and a request that would make no change does not generate a code.
 
 Only one protected audit/privacy request can wait per server. If Enka cannot be reached, the request fails closed and the existing audit destination remains unchanged. Approved moves and disables leave lifecycle notices in the previous protected destination; an approved enable or move records completion in the new destination. The bot relays message edits/deletes (with original content), bulk deletes, channel/role/server changes, member joins/leaves, bans, unbans, timeouts, username changes, nickname/role changes, and emoji changes. Username coverage is live-only while Irminsul is online.
 
-Server-setting monitoring combines live raw gateway events with a persisted REST baseline in `data/server_settings_snapshots.json`. It records detailed before/after changes for server identity and discovery settings, categories and system-message routing, channels, role and channel permission overrides, roles, emoji, invites, and webhooks. A reconciliation runs at startup and about every five minutes, so changes made while the bot was offline are detected after it returns. Webhooks require one request per channel and are scanned in bounded rotating batches; `/Test-AuditLog` reports the current baseline and webhook coverage.
+Server-setting monitoring combines live raw gateway events with a persisted REST baseline in `data/server_settings_snapshots.json`. It records detailed before/after changes for server identity and discovery settings, categories and system-message routing, channels, role and channel permission overrides, roles, emoji, invites, and webhooks. A reconciliation runs at startup and about every five minutes, so changes made while the bot was offline are detected after it returns. Webhooks require one request per channel and are scanned in bounded rotating batches; `/AuditLog test` reports the current baseline and webhook coverage.
 
 Audit configuration and testing commands use the same capability-based moderator policy as other management commands: the owner, **Manage Server**, **Kick Members**, **Ban Members**, **Timeout Members**, or effective **Manage Messages** in the current channel.
 
@@ -152,11 +147,9 @@ The approval protects against a moderator silently changing message privacy. It 
 
 **Attachment evidence.** Stoat removes an attachment with its owning message, and an uploaded file ID cannot be reused by another message. Irminsul therefore copies each qualifying attachment (any type, up to `AUDITLOG_EVIDENCE_MAX_MB` — default 20 MB) immediately into a protected **📎 Attachment Archived** card in the configured Logger. The transfer is RAM-only: the VPS journal keeps the filename, size, Stoat URL, and protected record ID, but never the attachment bytes. Later edit and delete records reply to that Logger card instead of uploading the file again. Set `AUDITLOG_EVIDENCE_MAX_MB=0` for metadata-only notices. The archive worker is bounded to two active transfers plus at most 50 queued source messages.
 
-On the first startup after upgrading, Irminsul deletes direct regular files left in the exact legacy `data/evidence/` directory and marks old descriptors as purged. It does not follow symlinks or traverse subdirectories. VPS snapshots and backups are outside the bot's control and must be cleaned separately if they contain the former evidence cache.
-
 The bot needs the **Ban Members** permission to detect bans (checked when a member leaves) and unbans (ban-list poll every ~5 minutes).
 
-**Troubleshooting:** run `/Test-AuditLog` — it pushes a 🧪 test event through the real delivery pipeline and reports message coverage, the Stoat-hosted attachment mode, the per-file cap, archive-queue activity, and capture failures since startup. For verbose per-event console logging, set `AUDITLOG_DEBUG=1` in `.env`. Deletes of messages sent before audit logging was enabled are logged with "content unknown" (Stoat only transmits the message id on delete).
+**Troubleshooting:** run `/AuditLog test` — it pushes a 🧪 test event through the real delivery pipeline and reports message coverage, the Stoat-hosted attachment mode, the per-file cap, archive-queue activity, and capture failures since startup. For verbose per-event console logging, set `AUDITLOG_DEBUG=1` in `.env`. Deletes of messages sent before audit logging was enabled are logged with "content unknown" (Stoat only transmits the message id on delete).
 
 **Platform limitations that cannot be worked around:**
 
@@ -421,6 +414,25 @@ docker run -d --name hoyofetch --restart unless-stopped \
 ```
 
 ## 📝 Changelog
+
+### v3.2.1 — breaking command cleanup
+
+Deprecated compatibility routes and delimiter syntax have been removed rather than retained as warning aliases. Deployments upgrading from versions older than v3 are unsupported; durable archive readers for legacy attachment shapes remain until a dedicated inventory or migration proves those records are gone.
+
+The repository has no per-command telemetry, so real-world use of the removed aliases cannot be measured. This is an intentional breaking change, not evidence that nobody invoked them.
+
+| Removed command or syntax                                                        | Replacement                                                                           |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `/Enable-AuditLog`, `/EnableAuditLog`                                            | `/AuditLog here` or `/AuditLog #channel`                                              |
+| `/Disable-AuditLog`, `/DisableAuditLog`                                          | `/AuditLog off`                                                                       |
+| `/Test-AuditLog`, `/TestAuditLog`                                                | `/AuditLog test`                                                                      |
+| `/ExcludeChannel`                                                                | `/Exclude-Channel`                                                                    |
+| `/GetInfo`                                                                       | `/Get-Info`                                                                           |
+| `/postgate`                                                                      | `/Post-Gate`                                                                          |
+| `/EnableFetchHoyo`, `/EnableFetchNTE`, `/EnableFetchWuWa`, `/EnableFetchNTEWuWa` | `/EnableFetch hoyo`, `/EnableFetch nte`, `/EnableFetch wuwa`, `/EnableFetch nte-wuwa` |
+| `reason:`, `delete:`, `window:`, `purge:`, `duration:`, `mute:`, `timeout:`      | Plain reasons and bare values, for example `/Ban @member 1d repeated spam`            |
+
+The internal undocumented `postgate` route, retired `moderation_level.json` subsystem, v2 evidence-cache paths, and completed pre-v3 startup migrations were also removed. Existing one-year archive records with legacy attachment shapes and seven-day Post Gate queue entries without an author ID remain readable defensively.
 
 ### v3.2.0
 

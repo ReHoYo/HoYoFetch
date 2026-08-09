@@ -3,6 +3,7 @@ import { randomBytes } from "crypto";
 import {
   BARE_ID_PATTERN,
   buildReason,
+  findRemovedArgumentPrefix,
   findTargetToken,
   tokenizeArgs,
 } from "./command-args.js";
@@ -60,13 +61,20 @@ export function isSpamReportInvocation(content, prefix = "/") {
 /**
  * Parse a report written in plain words, the way the moderation commands are.
  *
- * `/Report-Spam @member sent me an unsolicited commission DM` and the older
- * `/Report-Spam @member reason: ...` both parse. The reported account may be
+ * `/Report-Spam @member sent me an unsolicited commission DM` parses as a
+ * plain sentence. The reported account may be
  * mentioned anywhere in the sentence, or given as a bare ID in the leading
  * position the command has always accepted.
  */
 export function parseSpamReportCommand(rawArgs) {
   const tokens = tokenizeArgs(rawArgs);
+  const removedPrefix = findRemovedArgumentPrefix(tokens);
+  if (removedPrefix) {
+    return {
+      ok: false,
+      error: `The \`${removedPrefix}:\` delimiter was removed. Describe what happened in plain words.`,
+    };
+  }
   const consumed = new Set();
   const found = findTargetToken(tokens);
   let targetId = found?.targetId ?? null;

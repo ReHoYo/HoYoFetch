@@ -35,7 +35,6 @@ const AUTOMOD_STRIKES_PATH = join(DATA_DIR, "automod_strikes.json");
 const MODERATION_ACTIONS_PATH = join(DATA_DIR, "moderation_actions.json");
 const SPAM_REPORTS_PATH = join(DATA_DIR, "spam_reports.json");
 const CHANNEL_EXCLUSIONS_PATH = join(DATA_DIR, "channel_exclusions.json");
-const MODERATION_LEVEL_PATH = join(DATA_DIR, "moderation_level.json");
 const POST_GATE_PATH = join(DATA_DIR, "post_gate.json");
 const POST_GATE_QUEUE_PATH = join(DATA_DIR, "post_gate_queue.json");
 const POST_GATE_USER_HOLDS_PATH = join(DATA_DIR, "post_gate_user_holds.json");
@@ -557,9 +556,6 @@ export function enableAuditLog(serverId, channelId) {
   };
 }
 
-// Unified /AuditLog command name for the same persisted server → channel seam.
-export const setAuditLogChannel = enableAuditLog;
-
 /**
  * Disable audit logging for a server.
  * @param {string} serverId
@@ -962,53 +958,6 @@ export function pruneModerationActions(now = Date.now()) {
 }
 
 // ═══════════════════════════════════════════════════
-//  Legacy moderation posture compatibility
-// ═══════════════════════════════════════════════════
-// { "<serverId>": { level: 1|2|3, tenureDays, updatedAt, updatedBy } }
-// Kept readable so deployments that briefly persisted the retired
-// threshold/kick policy do not lose data during rollback. Runtime enforcement
-// uses the Post Gate configuration below.
-
-export const MODERATION_LEVELS = Object.freeze([1, 2, 3]);
-export const DEFAULT_TENURE_DAYS = 7;
-export const MIN_TENURE_DAYS = 1;
-export const MAX_TENURE_DAYS = 30;
-
-let moderationLevels = readJSON(MODERATION_LEVEL_PATH, {});
-
-function normaliseModerationLevel(value = {}) {
-  const level = Number(value.level);
-  const tenureDays = Number(value.tenureDays);
-  return {
-    level: MODERATION_LEVELS.includes(level) ? level : 1,
-    tenureDays: Number.isFinite(tenureDays)
-      ? Math.max(
-          MIN_TENURE_DAYS,
-          Math.min(MAX_TENURE_DAYS, Math.trunc(tenureDays))
-        )
-      : DEFAULT_TENURE_DAYS,
-    updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : null,
-    updatedBy: typeof value.updatedBy === "string" ? value.updatedBy : null,
-  };
-}
-
-export function getModerationLevel(serverId) {
-  return normaliseModerationLevel(moderationLevels[serverId]);
-}
-
-export function setModerationLevel(serverId, patch = {}) {
-  const previous = getModerationLevel(serverId);
-  const next = normaliseModerationLevel({
-    ...previous,
-    ...patch,
-    updatedAt: new Date().toISOString(),
-  });
-  moderationLevels[serverId] = next;
-  writeJSON(MODERATION_LEVEL_PATH, moderationLevels);
-  return { previous, current: next };
-}
-
-// ═══════════════════════════════════════════════════
 //  Post gate — held first-post review queue (post-gate.js)
 // ═══════════════════════════════════════════════════
 
@@ -1018,28 +967,6 @@ const MAX_HELD_POSTS = 1_000;
 
 let postGateConfigs = readJSON(POST_GATE_PATH, {});
 let postGateQueue = readJSON(POST_GATE_QUEUE_PATH, {});
-
-let migratedLegacyHeldAttachments = false;
-for (const record of Object.values(postGateQueue)) {
-  if (!Array.isArray(record?.attachments)) continue;
-  record.attachments = record.attachments.map((attachment) => {
-    if (typeof attachment?.evidencePath !== "string") return attachment;
-    migratedLegacyHeldAttachments = true;
-    const metadata = { ...attachment };
-    delete metadata.evidencePath;
-    delete metadata.url;
-    return {
-      ...metadata,
-      archiveAttachmentId: null,
-      archiveUrl: null,
-      archiveRecordId: null,
-      skipReason: "legacy_purged",
-    };
-  });
-}
-if (migratedLegacyHeldAttachments) {
-  writeJSON(POST_GATE_QUEUE_PATH, postGateQueue);
-}
 
 function normalisePostGateConfig(value = {}) {
   const mode = POST_GATE_MODES.has(value.mode) ? value.mode : "off";
@@ -1071,16 +998,6 @@ function normalisePostGateConfig(value = {}) {
     updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : null,
   };
 }
-
-let migratedPostGateConfigs = false;
-for (const [serverId, value] of Object.entries(postGateConfigs)) {
-  const normalised = normalisePostGateConfig(value);
-  if (JSON.stringify(value) !== JSON.stringify(normalised)) {
-    postGateConfigs[serverId] = normalised;
-    migratedPostGateConfigs = true;
-  }
-}
-if (migratedPostGateConfigs) writeJSON(POST_GATE_PATH, postGateConfigs);
 
 export function getPostGateConfig(serverId) {
   return normalisePostGateConfig(postGateConfigs[serverId]);
@@ -1169,14 +1086,10 @@ export function getExpiredPendingPosts(now = Date.now()) {
 }
 
 /**
- * Drop resolved entries once they've sat resolved past the retention
- * window. Legacy evidence paths are no longer acted on; callers retain the
- * array return for compatibility with stores written by older releases.
+ * Drop resolved entries once they've sat resolved past the retention window.
  * @param {number} now
- * @return {string[]}
  */
 export function prunePostGateQueue(now = Date.now()) {
-  const evidencePaths = [];
   let changed = false;
   for (const [queueId, record] of Object.entries(postGateQueue)) {
     const resolvedLongAgo =
@@ -1184,17 +1097,11 @@ export function prunePostGateQueue(now = Date.now()) {
       Number.isFinite(record.reviewedAt) &&
       now - record.reviewedAt > RESOLVED_RETENTION_MS;
     if (resolvedLongAgo) {
-      for (const attachment of record.attachments ?? []) {
-        if (typeof attachment?.evidencePath === "string") {
-          evidencePaths.push(attachment.evidencePath);
-        }
-      }
       delete postGateQueue[queueId];
       changed = true;
     }
   }
   if (changed) persistPostGateQueue();
-  return evidencePaths;
 }
 
 // ═══════════════════════════════════════════════════

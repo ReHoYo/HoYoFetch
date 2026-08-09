@@ -75,6 +75,7 @@ import { createSpamReporter } from "./spam-report.js";
 import { createChannelExclusion } from "./channel-exclusion.js";
 import { createPostGate } from "./post-gate.js";
 import { DOCS_URL } from "./command-catalog.js";
+import { getCommandDispatch, parseAutoFetchScope } from "./command-routing.js";
 import { buildLookupProbes, resolveAccountLookup } from "./account-lookup.js";
 import {
   buildUserInfoEmbed,
@@ -185,6 +186,7 @@ const auditLogConfiguration = createAuditLogConfiguration(client, {
   sendProtected: tamperProtection.sendProtected,
   approvalGate,
   prefix: CONFIG.prefix,
+  testAuditLog: handleTestAuditLog,
   configurationChanged: (serverId) => auditLog.configurationChanged(serverId),
 });
 
@@ -262,10 +264,11 @@ client.on("messageCreate", async (message) => {
   const rawBody = raw.slice(CONFIG.prefix.length).trim();
   const [cmdWord = ""] = rawBody.split(/\s+/, 1);
   const cmd = cmdWord.toLowerCase();
+  const dispatch = getCommandDispatch(cmd);
 
   // Safety reports have their own abuse limiter and must remove the invoking
   // message before parsing its target or reason.
-  if (cmd === "report-spam") {
+  if (dispatch === "report_spam") {
     const authorization = authorizeCommand(message, COMMAND_ACCESS.MEMBER);
     if (!authorization.allowed) return;
     await spamReporter.handleCommand(
@@ -277,14 +280,7 @@ client.on("messageCreate", async (message) => {
 
   const cmdArgs = rawBody.slice(cmdWord.length).trim().split(/\s+/);
   if (cmdArgs.length === 1 && cmdArgs[0] === "") cmdArgs.length = 0;
-  const accessKey =
-    cmd === "auditlog" ||
-    cmd === "emojimode" ||
-    cmd === "exclude-channel" ||
-    cmd === "excludechannel"
-      ? cmd
-      : rawBody.toLowerCase();
-  const access = getCommandAccess(accessKey, COMMAND_GAME_MAP);
+  const access = getCommandAccess(rawBody.toLowerCase(), COMMAND_GAME_MAP);
   if (!access) return;
 
   let authorization = authorizeCommand(message, access);
@@ -329,159 +325,90 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
-    // ── Game fetch commands ──────────────────────
-    if (COMMAND_GAME_MAP[cmd]) {
-      await handleFetchCommand(message, COMMAND_GAME_MAP[cmd]);
-      return;
-    }
-
-    // ── EnableFetch ──────────────────────────────
-    if (cmd === "enablefetch") {
-      await handleEnableFetch(message, "all");
-      return;
-    }
-
-    // ── EnableFetchHoyo ──────────────────────────
-    if (cmd === "enablefetchhoyo") {
-      await handleEnableFetch(message, "hoyo");
-      return;
-    }
-
-    // ── EnableFetchNTE ───────────────────────────
-    if (cmd === "enablefetchnte") {
-      await handleEnableFetch(message, "nte");
-      return;
-    }
-
-    // ── EnableFetchWuWa ──────────────────────────
-    if (cmd === "enablefetchwuwa") {
-      await handleEnableFetch(message, "wuwa");
-      return;
-    }
-
-    // ── EnableFetchNTEWuWa ───────────────────────
-    if (cmd === "enablefetchntewuwa") {
-      await handleEnableFetch(message, "nte_wuwa");
-      return;
-    }
-
-    // ── DisableFetch ─────────────────────────────
-    if (cmd === "disablefetch") {
-      await handleDisableFetch(message);
-      return;
-    }
-
-    // ── Restart ──────────────────────────────────
-    if (cmd === "restart") {
-      await handleRestart(message);
-      return;
-    }
-
-    // ── Server-Info ──────────────────────────────
-    if (cmd === "server-info") {
-      await safeSend(message.channel, {
-        embeds: [buildServerInfoEmbed(client, message.server.id)],
-      });
-      return;
-    }
-
-    // ── Enable-AuditLog ──────────────────────────
-    if (cmd === "enable-auditlog" || cmd === "enableauditlog") {
-      await auditLogConfiguration.handleLegacyEnable(message);
-      return;
-    }
-
-    // ── Disable-AuditLog ─────────────────────────
-    if (cmd === "disable-auditlog" || cmd === "disableauditlog") {
-      await auditLogConfiguration.handleLegacyDisable(message);
-      return;
-    }
-
-    // ── Test-AuditLog ────────────────────────────
-    if (cmd === "test-auditlog" || cmd === "testauditlog") {
-      await handleTestAuditLog(message);
-      return;
-    }
-
-    // ── HelpHoyoFetch ────────────────────────────
-    if (cmd === "helphoyofetch") {
-      await handleHelp(message);
-      return;
-    }
-
-    // ── Docs ───────────────────────────────────────
-    if (cmd === "docs") {
-      await handleDocs(message);
-      return;
-    }
-
-    // ── EmojiMode [unicode|custom] ───────────────
-    if (cmd === "emojimode") {
-      await handleEmojiMode(message, cmdArgs.join(" ").toLowerCase());
-      return;
-    }
-
-    // ── AuditLog [status|here|#channel|off] ─────────
-    if (cmd === "auditlog") {
-      await auditLogConfiguration.handleCommand(message, cmdArgs);
-      return;
-    }
-
-    // ── Exclude-Channel [status|here|remove|confirm|cancel] ─
-    if (cmd === "exclude-channel" || cmd === "excludechannel") {
-      await channelExclusion.handleCommand(message, cmdArgs);
-      return;
-    }
-
-    // ── Post-Gate [status|here|off|confirm|cancel|approve|reject] ─
-    if (cmd === "post-gate" || cmd === "postgate") {
-      await postGate.handleCommand(message, cmdArgs);
-      return;
-    }
-
-    // ── Level [status|1|2|3|4 confirm] ────────────
-    if (cmd === "level") {
-      await postGate.handleLevelCommand(message, cmdArgs);
-      return;
-    }
-
-    // ── Automod [status|monitor|enforce|off|quorum|approve] ──
-    if (cmd === "automod") {
-      if (cmdArgs[0]?.toLowerCase() === "release") {
-        await moderation.handleCommand(
-          message,
-          "automod-release",
-          cmdArgs.slice(1)
-        );
-        return;
-      }
-      const embed = await automod.handleCommand(
-        message,
-        cmdArgs,
-        CONFIG.prefix
-      );
-      await safeSend(message.channel, { embeds: [embed] });
-      return;
-    }
-
-    // ── Manual moderation ──────────────────────────
-    if (["ban", "kick", "mute", "purge-user"].includes(cmd)) {
-      await moderation.handleCommand(message, cmd, cmdArgs);
-      return;
-    }
-
-    // ── Get-Info @member ────────────────────────────
-    if (cmd === "get-info" || cmd === "getinfo") {
-      await handleGetInfo(message, cmdArgs);
-      return;
-    }
-
-    // ── HarHar ──────────────────────────────────────
+    // HarHar is intentionally hidden from the public catalog.
     if (cmd === "harhar") {
       await safeSend(message.channel, {
         content: ":01KPK39288XJE44RWR495WSZGR:",
       });
       return;
+    }
+
+    switch (dispatch) {
+      case "fetch":
+        await handleFetchCommand(message, COMMAND_GAME_MAP[cmd]);
+        return;
+      case "enable_fetch": {
+        const parsed = parseAutoFetchScope(cmdArgs);
+        if (!parsed.ok) {
+          await safeSend(message.channel, {
+            embeds: [
+              buildStatusEmbed(
+                "⚠️ Invalid Auto-Fetch Scope",
+                `Use \`${CONFIG.prefix}EnableFetch [all|hoyo|nte|wuwa|nte-wuwa]\`.`,
+                "#E74C3C"
+              ),
+            ],
+          });
+          return;
+        }
+        await handleEnableFetch(message, parsed.scope);
+        return;
+      }
+      case "disable_fetch":
+        await handleDisableFetch(message);
+        return;
+      case "restart":
+        await handleRestart(message);
+        return;
+      case "server_info":
+        await safeSend(message.channel, {
+          embeds: [buildServerInfoEmbed(client, message.server.id)],
+        });
+        return;
+      case "help":
+        await handleHelp(message);
+        return;
+      case "docs":
+        await handleDocs(message);
+        return;
+      case "emoji_mode":
+        await handleEmojiMode(message, cmdArgs.join(" ").toLowerCase());
+        return;
+      case "audit_log":
+        await auditLogConfiguration.handleCommand(message, cmdArgs);
+        return;
+      case "exclude_channel":
+        await channelExclusion.handleCommand(message, cmdArgs);
+        return;
+      case "post_gate":
+        await postGate.handleCommand(message, cmdArgs);
+        return;
+      case "level":
+        await postGate.handleLevelCommand(message, cmdArgs);
+        return;
+      case "automod":
+        if (cmdArgs[0]?.toLowerCase() === "release") {
+          await moderation.handleCommand(
+            message,
+            "automod-release",
+            cmdArgs.slice(1)
+          );
+          return;
+        }
+        await safeSend(message.channel, {
+          embeds: [
+            await automod.handleCommand(message, cmdArgs, CONFIG.prefix),
+          ],
+        });
+        return;
+      case "manual_moderation":
+        await moderation.handleCommand(message, cmd, cmdArgs);
+        return;
+      case "get_info":
+        await handleGetInfo(message, cmdArgs);
+        return;
+      default:
+        return;
     }
   } catch (err) {
     console.error(
@@ -661,7 +588,7 @@ async function handleTestAuditLog(message) {
       embeds: [
         buildStatusEmbed(
           "ℹ️ Audit Log Not Enabled",
-          `Audit logging is not active in this server. Run \`${CONFIG.prefix}Enable-AuditLog\` in the channel that should receive the log.`,
+          `Audit logging is not active in this server. Run \`${CONFIG.prefix}AuditLog here\` in the channel that should receive the log.`,
           "#3498DB"
         ),
       ],
@@ -669,15 +596,17 @@ async function handleTestAuditLog(message) {
     return;
   }
 
-  const evidenceMB = (status.evidenceBytes / (1024 * 1024)).toFixed(1);
-  const evidenceBudgetMB = Math.round(
-    status.evidenceBudgetBytes / (1024 * 1024)
-  );
+  const archiveQueue = status.attachmentArchiveQueue;
+  const captureFailureCount = Object.values(
+    status.attachmentCaptureFailures ?? {}
+  ).reduce((sum, count) => sum + count, 0);
   const lines = [
     `Test event queued — a 🧪 embed should appear in <#${status.channelId}> within a few seconds.`,
     `**Messages currently archived:** ${status.archivedCount}`,
-    `**Attachment evidence stored:** ${status.evidenceFiles} file(s), ${evidenceMB} MB / ${evidenceBudgetMB} MB` +
-      (status.evidenceBudgetBytes === 0 ? " (evidence capture disabled)" : ""),
+    "**Attachment storage:** Stoat-hosted; 0 B retained on VPS",
+    `**Per-file archive cap:** ${(status.evidencePerFileCapBytes / (1024 * 1024)).toFixed(1)} MB`,
+    `**Archive queue:** ${archiveQueue.active} active, ${archiveQueue.queued} waiting, ${archiveQueue.failed} failed, ${archiveQueue.rejected} rejected`,
+    `**Capture failures since startup:** ${captureFailureCount}`,
   ];
   if (status.settings) {
     const settings = status.settings;
@@ -999,19 +928,17 @@ async function seedAllGames() {
 
 async function sendNoPermission(message, access) {
   const description =
-    access === COMMAND_ACCESS.ADMIN
-      ? "Only the server owner or members with Manage Server permission can use this command."
-      : access === COMMAND_ACCESS.BAN_APPROVER
-        ? "Only the server owner or members with Manage Server or Ban Members permission can approve a ban."
-        : access === COMMAND_ACCESS.BAN
-          ? "Only the server owner or members with Manage Server or Ban Members permission can use this command."
-          : access === COMMAND_ACCESS.KICK
-            ? "Only the server owner or members with Manage Server or Kick Members permission can use this command."
-            : access === COMMAND_ACCESS.TIMEOUT
-              ? "Only the server owner or members with Manage Server or Timeout Members permission can use this command."
-              : access === COMMAND_ACCESS.MANAGE_MESSAGES
-                ? "Only the server owner or members with Manage Server or Manage Messages permission can use this command."
-                : "Only server administrators or moderators can use this command.";
+    access === COMMAND_ACCESS.BAN_APPROVER
+      ? "Only the server owner or members with Manage Server or Ban Members permission can approve a ban."
+      : access === COMMAND_ACCESS.BAN
+        ? "Only the server owner or members with Manage Server or Ban Members permission can use this command."
+        : access === COMMAND_ACCESS.KICK
+          ? "Only the server owner or members with Manage Server or Kick Members permission can use this command."
+          : access === COMMAND_ACCESS.TIMEOUT
+            ? "Only the server owner or members with Manage Server or Timeout Members permission can use this command."
+            : access === COMMAND_ACCESS.MANAGE_MESSAGES
+              ? "Only the server owner or members with Manage Server or Manage Messages permission can use this command."
+              : "Only server administrators or moderators can use this command.";
   await safeSend(message.channel, {
     embeds: [buildStatusEmbed("🔒 Permission Denied", description, "#E74C3C")],
   });

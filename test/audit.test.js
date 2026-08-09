@@ -16,7 +16,6 @@ const {
   claimMemberEvent,
   computeSuspects,
   createMessageCache,
-  diffFields,
   emitUserIdentityUpdates,
   formatSuspects,
   getAuditDiagnostics,
@@ -24,6 +23,7 @@ const {
   initAuditLog,
   memberIdsFromRawEvent,
   parseChannelArg,
+  runAuditLogTest,
   truncate,
 } = await import("../auditlog.js");
 const { addProtectedMessage, disableAuditLog, enableAuditLog } =
@@ -46,21 +46,17 @@ test("bounded message cache evicts FIFO and refreshes existing keys", () => {
   assert.equal(cache.get("one").content, "updated");
 });
 
-test("diffFields omits no-ops and reports selected changes", () => {
-  assert.deepEqual(
-    diffFields({ name: "general" }, { name: "general" }, ["name"]),
-    []
-  );
-  assert.deepEqual(
-    diffFields({ name: "general", nsfw: false }, { name: "chat", nsfw: true }, [
-      "name",
-      "nsfw",
-    ]),
-    [
-      { field: "name", before: "general", after: "chat" },
-      { field: "nsfw", before: false, after: true },
-    ]
-  );
+test("AuditLog test diagnostics expose only current finite evidence and queue fields", () => {
+  const status = runAuditLogTest("DIAGNOSTIC_SERVER");
+  assert.equal(status.evidenceMode, "stoat");
+  assert.equal(status.evidenceBytes, 0);
+  assert.ok(Number.isFinite(status.evidencePerFileCapBytes));
+  for (const value of Object.values(status.attachmentArchiveQueue)) {
+    assert.ok(Number.isFinite(value));
+  }
+  assert.equal(Object.hasOwn(status, "evidenceFiles"), false);
+  assert.equal(Object.hasOwn(status, "evidenceBudgetBytes"), false);
+  assert.doesNotMatch(JSON.stringify(status), /undefined|NaN/);
 });
 
 test("audit member hydration enables real SDK nickname and user updates", async () => {

@@ -193,7 +193,6 @@ test("purgeChannelFromArchive removes only one channel and returns Logger record
   });
 
   assert.deepEqual(archive.purgeChannelFromArchive("privacyChannel"), {
-    evidencePaths: [],
     archiveRecordIds: ["LOGGERPRIVATE"],
   });
   assert.equal(archive.getArchivedMessage("privacyOne"), null);

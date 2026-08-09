@@ -255,36 +255,20 @@ function makeHarness({
   return harness;
 }
 
-test("moderation parser still accepts the legacy delimiter contracts", () => {
-  assert.deepEqual(
-    parseModerationCommand("ban", [
-      `<@${TARGET_ID}>`,
-      "delete:1d",
-      "reason:",
-      "spam",
-    ]),
-    {
-      ok: true,
-      command: "ban",
-      targetId: TARGET_ID,
-      reason: "spam",
-      deleteWindow: "1d",
-    }
-  );
-  assert.equal(
-    parseModerationCommand("mute", [TARGET_ID, "1h", "reason:testing"])
-      .duration,
-    "1h"
-  );
-  assert.equal(
-    parseModerationCommand("purge-user", [
-      TARGET_ID,
-      "window:7d",
-      "reason:",
-      "cleanup",
-    ]).window,
-    "7d"
-  );
+test("moderation parser rejects removed delimiter contracts", () => {
+  for (const [command, args] of [
+    ["ban", [TARGET_ID, "delete:1d", "spam"]],
+    ["ban", [TARGET_ID, "reason:spam"]],
+    ["mute", [TARGET_ID, "duration:2h", "noisy"]],
+    ["mute", [TARGET_ID, "mute:2h", "noisy"]],
+    ["mute", [TARGET_ID, "timeout:2h", "noisy"]],
+    ["purge-user", [TARGET_ID, "window:7d", "cleanup"]],
+    ["purge-user", [TARGET_ID, "purge:7d", "cleanup"]],
+  ]) {
+    const parsed = parseModerationCommand(command, args);
+    assert.equal(parsed.ok, false);
+    assert.match(parsed.error, /delimiter was removed/);
+  }
 });
 
 test("moderation parser reads plain sentences in any order", () => {
@@ -417,7 +401,7 @@ test("ban sends a never-joined raw account ID straight to Stoat", async () => {
 test("ban still rejects the moderator, bot, and server owner", async () => {
   for (const targetId of [MOD_ID, BOT_ID, OWNER_ID]) {
     const harness = makeHarness();
-    await harness.run("ban", [`<@${targetId}>`, "reason:", "test"]);
+    await harness.run("ban", [`<@${targetId}>`, "test"]);
     assert.equal(
       harness.requests.some(
         (entry) => entry.method === "PUT" && entry.path.includes("/bans/")
@@ -435,9 +419,7 @@ test("kick, mute, and release remain limited to current members", async () => {
   for (const command of ["kick", "mute", "automod-release"]) {
     const harness = makeHarness({ missingMemberIds: [TARGET_ID] });
     const args =
-      command === "mute"
-        ? [TARGET_ID, "1h", "reason:", "test"]
-        : [TARGET_ID, "reason:", "test"];
+      command === "mute" ? [TARGET_ID, "1h", "test"] : [TARGET_ID, "test"];
     await harness.run(command, args);
 
     assert.equal(
@@ -469,7 +451,7 @@ test("ban can clean archived messages from an account that already left", async 
       },
     ],
   });
-  await harness.run("ban", [TARGET_ID, "delete:1h", "reason:", "raid"]);
+  await harness.run("ban", [TARGET_ID, "1h", "raid"]);
 
   assert.ok(
     harness.requests.some(
@@ -527,7 +509,7 @@ test("declining or ignoring the confirmation leaves the member untouched", async
 
 test("ban records a protected reversible action and authorized reaction unbans", async () => {
   const harness = makeHarness();
-  await harness.run("ban", [TARGET_ID, "reason:", "raid"]);
+  await harness.run("ban", [TARGET_ID, "raid"]);
   assert.ok(
     harness.requests.some(
       (entry) => entry.method === "PUT" && entry.path.includes("/bans/")
@@ -552,7 +534,7 @@ test("ban records a protected reversible action and authorized reaction unbans",
 
 test("mute duration picker is invoker-only and applies the chosen timeout", async () => {
   const harness = makeHarness();
-  await harness.run("mute", [TARGET_ID, "reason:", "cooldown"]);
+  await harness.run("mute", [TARGET_ID, "cooldown"]);
   const pickerId = harness.sent[0].result._id;
   await harness.moderation.handleRawEvent({
     type: "MessageReact",
@@ -581,7 +563,7 @@ test("mute duration picker is invoker-only and applies the chosen timeout", asyn
 
 test("kick is immediate, logged, and intentionally has no undo record", async () => {
   const harness = makeHarness();
-  await harness.run("kick", [TARGET_ID, "reason:", "rules"]);
+  await harness.run("kick", [TARGET_ID, "rules"]);
   assert.ok(
     harness.requests.some(
       (entry) => entry.method === "DELETE" && entry.path.includes("/members/")
@@ -601,7 +583,7 @@ test("confirmed purge batches known messages by channel", async () => {
     createdAt: now - 30 * 60_000,
   }));
   const harness = makeHarness({ messages });
-  await harness.run("purge-user", [TARGET_ID, "window:1h", "reason:", "spam"]);
+  await harness.run("purge-user", [TARGET_ID, "1h", "spam"]);
   const confirmationId = harness.sent[0].result._id;
   await harness.moderation.handleRawEvent({
     type: "MessageReact",
@@ -873,7 +855,7 @@ test("cleanups older than the bulk window delete one message at a time", async (
       },
     ],
   });
-  await harness.run("ban", [TARGET_ID, "delete:1mo", "raid"]);
+  await harness.run("ban", [TARGET_ID, "1mo", "raid"]);
   assert.deepEqual(
     harness.requests
       .filter(
@@ -909,7 +891,7 @@ test("a rejected bulk batch falls back to per-message deletes", async () => {
         ? { ok: false, status: 400 }
         : null,
   });
-  await harness.run("ban", [TARGET_ID, "delete:1h", "spam"]);
+  await harness.run("ban", [TARGET_ID, "1h", "spam"]);
   assert.ok(
     harness.requests.some(
       (entry) => entry.path === `/channels/${CHANNEL_ID}/messages/MESSAGE1`
@@ -931,7 +913,7 @@ test("oversized cleanups stop at the safety cap and report the remainder", async
     createdAt: now - (2_050 - index) * 1_000,
   }));
   const harness = makeHarness({ messages });
-  await harness.run("ban", [TARGET_ID, "delete:1h", "flood"]);
+  await harness.run("ban", [TARGET_ID, "1h", "flood"]);
   const deleted = harness.requests
     .filter((entry) => entry.path.endsWith("/messages/bulk"))
     .reduce((total, entry) => total + entry.body.ids.length, 0);
@@ -945,18 +927,14 @@ test("oversized cleanups stop at the safety cap and report the remainder", async
 test("automod release removes timeout and resets strikes", async () => {
   const harness = makeHarness();
   harness.timeouts.set(TARGET_ID, new Date(1_900_000_600_000).toISOString());
-  await harness.run("automod-release", [
-    TARGET_ID,
-    "reason:",
-    "false positive",
-  ]);
+  await harness.run("automod-release", [TARGET_ID, "false positive"]);
   assert.equal(harness.timeouts.has(TARGET_ID), false);
   assert.equal(harness.store.strikes.has(`${SERVER_ID}:${TARGET_ID}`), false);
 });
 
 test("manual moderation refuses to mutate without an audit logger", async () => {
   const harness = makeHarness({ audit: false });
-  await harness.run("ban", [TARGET_ID, "reason:", "test"]);
+  await harness.run("ban", [TARGET_ID, "test"]);
   assert.equal(
     harness.requests.some((entry) => entry.path.includes("/bans/")),
     false
@@ -978,7 +956,7 @@ test("ban cleanup preflight refuses the ban when Manage Messages is absent", asy
       },
     ],
   });
-  await harness.run("ban", [TARGET_ID, "delete:1h", "reason:", "spam"]);
+  await harness.run("ban", [TARGET_ID, "1h", "spam"]);
   assert.equal(
     harness.requests.some((entry) => entry.path.includes("/bans/")),
     false
@@ -1006,7 +984,7 @@ test("runtime cleanup failures keep the ban and report partial results", async (
         ? { ok: false, status: 403 }
         : null,
   });
-  await harness.run("ban", [TARGET_ID, "delete:1h", "reason:", "spam"]);
+  await harness.run("ban", [TARGET_ID, "1h", "spam"]);
   assert.ok(harness.requests.some((entry) => entry.path.includes("/bans/")));
   const summary = harness.protectedLogs[0].payload.embeds[0].description;
   assert.match(
@@ -1049,7 +1027,7 @@ test("messages already gone from Stoat reconcile instead of failing", async () =
         : { ok: true, status: 204 };
     },
   });
-  await harness.run("purge-user", [TARGET_ID, "window:1h", "reason:", "spam"]);
+  await harness.run("purge-user", [TARGET_ID, "1h", "spam"]);
   await harness.moderation.handleRawEvent({
     type: "MessageReact",
     id: harness.sent.at(-1).result._id,
@@ -1096,7 +1074,7 @@ test("rate-limited messages get one more pass before being reported", async () =
       return seen === 1 ? limited : { ok: true, status: 204 };
     },
   });
-  await harness.run("ban", [TARGET_ID, "delete:1mo", "reason:", "raid"]);
+  await harness.run("ban", [TARGET_ID, "1mo", "raid"]);
   const summary = harness.protectedLogs[0].payload.embeds[0].description;
   assert.match(summary, /1\/2 known message\(s\) deleted/);
   assert.match(
@@ -1116,7 +1094,7 @@ test("Stoat hierarchy rejection fails closed without a success log", async () =>
         ? { ok: false, status: 403 }
         : null,
   });
-  await harness.run("ban", [TARGET_ID, "reason:", "test"]);
+  await harness.run("ban", [TARGET_ID, "test"]);
   assert.equal(harness.protectedLogs.length, 0);
   assert.match(harness.sent.at(-1).payload.embeds[0].title, /Ban Failed/);
 });
@@ -1141,7 +1119,7 @@ test("individual deletes are paced so a long cleanup stays under the limit", asy
       return null;
     },
   });
-  await harness.run("ban", [TARGET_ID, "delete:1mo", "reason:", "raid"]);
+  await harness.run("ban", [TARGET_ID, "1mo", "raid"]);
   assert.equal(stamps.length, 3);
   const gaps = stamps
     .slice(1)
@@ -1206,7 +1184,7 @@ test("purge retries a rate-limited batch", async () => {
         : { ok: true, status: 204 };
     },
   });
-  await harness.run("purge-user", [TARGET_ID, "window:1h", "reason:", "spam"]);
+  await harness.run("purge-user", [TARGET_ID, "1h", "spam"]);
   await harness.moderation.handleRawEvent({
     type: "MessageReact",
     id: harness.sent[0].result._id,

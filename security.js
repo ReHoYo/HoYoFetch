@@ -5,7 +5,6 @@ import { COMMAND_ACCESS_BY_ROUTE } from "./command-catalog.js";
 export const COMMAND_ACCESS = Object.freeze({
   MEMBER: "member",
   FETCH_MANAGER: "fetch_manager",
-  ADMIN: "admin",
   BAN_APPROVER: "ban_approver",
   BAN: "ban",
   KICK: "kick",
@@ -100,12 +99,6 @@ export function authorizeCommand(message, access = COMMAND_ACCESS.MEMBER) {
 
   if (access === COMMAND_ACCESS.MEMBER) {
     return { ...cachedContext, reason: "member" };
-  }
-
-  if (access === COMMAND_ACCESS.ADMIN) {
-    return isAdmin
-      ? { ...cachedContext, reason: isOwner ? "owner" : "admin" }
-      : denied("insufficient_permission", cachedContext);
   }
 
   if (access === COMMAND_ACCESS.BAN_APPROVER) {
@@ -253,14 +246,12 @@ export async function refreshCommandAuthorization(
         ? evaluated.channelPermissions
         : evaluated.serverPermissions;
     const allowed =
-      access === COMMAND_ACCESS.ADMIN
-        ? isAdmin
-        : access === COMMAND_ACCESS.FETCH_MANAGER
-          ? isAdmin || isModerator
-          : access === COMMAND_ACCESS.BAN_APPROVER
-            ? canApproveBan
-            : exactBit !== null &&
-              (isAdmin || hasPermissionBit(exactPermissions, exactBit));
+      access === COMMAND_ACCESS.FETCH_MANAGER
+        ? isAdmin || isModerator
+        : access === COMMAND_ACCESS.BAN_APPROVER
+          ? canApproveBan
+          : exactBit !== null &&
+            (isAdmin || hasPermissionBit(exactPermissions, exactBit));
 
     if (!allowed) {
       return denied("insufficient_permission", {

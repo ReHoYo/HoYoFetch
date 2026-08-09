@@ -119,13 +119,8 @@ function makeMessage({
   };
 }
 
-test("every privileged command and alias uses manager access", () => {
-  for (const command of [
-    "enablefetch",
-    "enablefetchhoyo",
-    "enablefetchnte",
-    "disablefetch",
-  ]) {
+test("every privileged command uses manager access", () => {
+  for (const command of ["enablefetch", "disablefetch"]) {
     assert.equal(
       getCommandAccess(command, GAME_COMMANDS),
       COMMAND_ACCESS.FETCH_MANAGER
@@ -153,12 +148,6 @@ test("every privileged command and alias uses manager access", () => {
     "emojimode",
     "emojimode custom",
     "auditlog",
-    "enable-auditlog",
-    "enableauditlog",
-    "disable-auditlog",
-    "disableauditlog",
-    "test-auditlog",
-    "testauditlog",
   ]) {
     assert.equal(
       getCommandAccess(command, GAME_COMMANDS),
@@ -220,7 +209,7 @@ test("every privileged command and alias uses manager access", () => {
   assert.equal(getCommandAccess("chison now", GAME_COMMANDS), null);
 });
 
-test("ordinary members keep public commands but cannot use manager or admin access", () => {
+test("ordinary members keep public commands but cannot use manager access", () => {
   const message = makeMessage();
 
   assert.equal(authorizeCommand(message, COMMAND_ACCESS.MEMBER).allowed, true);
@@ -230,10 +219,9 @@ test("ordinary members keep public commands but cannot use manager or admin acce
   );
   assert.equal(fetchManagement.allowed, false);
   assert.equal(fetchManagement.reason, "insufficient_permission");
-  assert.equal(authorizeCommand(message, COMMAND_ACCESS.ADMIN).allowed, false);
 });
 
-test("owners and Manage Server administrators pass manager and admin access", () => {
+test("owners and Manage Server administrators pass manager access", () => {
   for (const message of [
     makeMessage({ owner: true }),
     makeMessage({ serverPermissions: ["ManageServer"] }),
@@ -242,20 +230,15 @@ test("owners and Manage Server administrators pass manager and admin access", ()
       authorizeCommand(message, COMMAND_ACCESS.FETCH_MANAGER).allowed,
       true
     );
-    assert.equal(authorizeCommand(message, COMMAND_ACCESS.ADMIN).allowed, true);
   }
 });
 
-test("each server moderation permission passes manager but not admin access", () => {
+test("each server moderation permission passes manager access", () => {
   for (const permission of ["KickMembers", "BanMembers", "TimeoutMembers"]) {
     const message = makeMessage({ serverPermissions: [permission] });
     assert.equal(
       authorizeCommand(message, COMMAND_ACCESS.FETCH_MANAGER).reason,
       "moderator"
-    );
-    assert.equal(
-      authorizeCommand(message, COMMAND_ACCESS.ADMIN).allowed,
-      false
     );
   }
 });
@@ -279,17 +262,7 @@ test("Manage Messages is evaluated against the current channel", () => {
 });
 
 test("audit and privacy commands remain executable by capability-based moderators", () => {
-  const auditCommands = [
-    "auditlog",
-    "enable-auditlog",
-    "enableauditlog",
-    "disable-auditlog",
-    "disableauditlog",
-    "test-auditlog",
-    "testauditlog",
-    "exclude-channel",
-    "excludechannel",
-  ];
+  const auditCommands = ["auditlog", "exclude-channel"];
   const moderators = [
     makeMessage({ owner: true }),
     makeMessage({ serverPermissions: ["ManageServer"] }),
@@ -422,11 +395,11 @@ test("fresh snapshots recover cached Manage Server false denials", async () => {
     },
   });
   const calls = [];
-  const cached = authorizeCommand(makeMessage(), COMMAND_ACCESS.ADMIN);
+  const cached = authorizeCommand(makeMessage(), COMMAND_ACCESS.FETCH_MANAGER);
   const refreshed = await refreshCommandAuthorization(
     makeRefreshClient(snapshots, { calls }),
     cached,
-    COMMAND_ACCESS.ADMIN
+    COMMAND_ACCESS.FETCH_MANAGER
   );
 
   assert.equal(cached.allowed, false);
@@ -491,27 +464,6 @@ test("fresh snapshots authorize every moderator capability for manager commands"
   assert.equal(refreshed.reason, "moderator");
 });
 
-test("the explicit admin tier still rejects moderator-only snapshots", async () => {
-  const snapshots = makePermissionSnapshots({
-    memberRoles: ["MODROLE"],
-    roles: {
-      MODROLE: {
-        name: "Moderator",
-        rank: 1,
-        permissions: { a: PERMISSIONS.BanMembers, d: 0 },
-      },
-    },
-  });
-  const cached = authorizeCommand(makeMessage(), COMMAND_ACCESS.ADMIN);
-  const refreshed = await refreshCommandAuthorization(
-    makeRefreshClient(snapshots),
-    cached,
-    COMMAND_ACCESS.ADMIN
-  );
-  assert.equal(refreshed.allowed, false);
-  assert.equal(refreshed.permissionSource, "refreshed");
-});
-
 test("timeouts, malformed snapshots, cross-server data, and API failures fail closed", async () => {
   const timedOut = makePermissionSnapshots({
     defaultPermissions: PERMISSIONS.ManageServer,
@@ -538,11 +490,11 @@ test("timeouts, malformed snapshots, cross-server data, and API failures fail cl
   );
 
   const output = [];
-  const cached = authorizeCommand(makeMessage(), COMMAND_ACCESS.ADMIN);
+  const cached = authorizeCommand(makeMessage(), COMMAND_ACCESS.FETCH_MANAGER);
   const failed = await refreshCommandAuthorization(
     makeRefreshClient(makePermissionSnapshots(), { fail: true }),
     cached,
-    COMMAND_ACCESS.ADMIN,
+    COMMAND_ACCESS.FETCH_MANAGER,
     { logger: { warn: (message) => output.push(message) } }
   );
   assert.equal(failed.allowed, false);
@@ -553,19 +505,19 @@ test("timeouts, malformed snapshots, cross-server data, and API failures fail cl
 test("cached approvals and member commands never trigger permission refresh", async () => {
   const calls = [];
   const client = makeRefreshClient(makePermissionSnapshots(), { calls });
-  const cachedAdmin = authorizeCommand(
+  const cachedManager = authorizeCommand(
     makeMessage({ serverPermissions: ["ManageServer"] }),
-    COMMAND_ACCESS.ADMIN
+    COMMAND_ACCESS.FETCH_MANAGER
   );
   const cachedMember = authorizeCommand(makeMessage(), COMMAND_ACCESS.MEMBER);
 
   assert.equal(
     await refreshCommandAuthorization(
       client,
-      cachedAdmin,
-      COMMAND_ACCESS.ADMIN
+      cachedManager,
+      COMMAND_ACCESS.FETCH_MANAGER
     ),
-    cachedAdmin
+    cachedManager
   );
   assert.equal(
     await refreshCommandAuthorization(

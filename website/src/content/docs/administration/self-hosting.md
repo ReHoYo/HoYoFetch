@@ -115,5 +115,3 @@ Updating production generally has three separate steps:
 ## Backups
 
 Back up the configured data directory if you need continuity for subscriptions, protected records, audit baselines, automod cases, spam-report correlation, message content, and attachment metadata. Protect backups with the same access controls as the live data.
-
-The first upgraded startup removes direct regular files from the former `data/evidence/` cache. It cannot remove copies already present in VPS snapshots, backup archives, or separately copied data directories; operators must clean those locations according to their retention policy.

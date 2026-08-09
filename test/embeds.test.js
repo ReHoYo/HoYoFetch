@@ -29,5 +29,8 @@ test("in-chat help attributes both Game8 code sources", () => {
 
   assert.match(memberPage.description, /Game8: NTE \+ WuWa/);
   assert.match(memberPage.description, /\/FetchWuWa/);
-  assert.match(setupPage.description, /\/EnableFetchNTEWuWa/);
+  assert.match(
+    setupPage.description,
+    /\/EnableFetch \[all\|hoyo\|nte\|wuwa\|nte-wuwa\]/
+  );
 });

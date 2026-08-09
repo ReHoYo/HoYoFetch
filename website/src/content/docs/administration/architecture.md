@@ -13,6 +13,7 @@ The codebase retains **HoYoFetch** as its internal repository and package name f
 | ---------------------- | --------------------------------------------------------------------- |
 | `bot.js`               | Client startup, command routing, handlers, and auto-fetch scheduling  |
 | `command-catalog.js`   | Shared public command metadata for in-chat and website documentation  |
+| `command-routing.js`   | Enumerable canonical route-to-handler registry                        |
 | `config.js`            | Environment settings, game definitions, and emoji maps                |
 | `api.js`               | Source requests, parsing, normalization, and reward formatting        |
 | `store.js`             | Atomic local JSON persistence                                         |
@@ -23,7 +24,6 @@ The codebase retains **HoYoFetch** as its internal repository and package name f
 | `auditlog.js`          | Message, member, and server event pipeline                            |
 | `settings-monitor.js`  | Persisted REST baselines and offline-change reconciliation            |
 | `message-archive.js`   | Bounded message journal for edit/delete context                       |
-| `evidence-store.js`    | Bounded attachment preservation                                       |
 | `tamper-protection.js` | Protected-message tracking, restore, backoff, and reconciliation      |
 
 ## Code announcement flow

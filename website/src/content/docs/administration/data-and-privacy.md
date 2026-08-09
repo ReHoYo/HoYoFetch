@@ -29,7 +29,7 @@ An approved `/Exclude-Channel` request purges that channel's existing archive en
 
 ## Post Gate queue
 
-A message held at Level 1 or 2 (see [Post Gate](/HoYoFetch/moderation/post-gate/)) is removed from its original channel. Its text and attachment metadata enter the held-post queue, while copied media is attached to the Stoat review card. Approval copies every attachment through RAM to the repost and then deletes the review card. Rejection or 7-day expiry deletes the review card and its Stoat media. Privacy-excluded channels are never queued; Levels 3–4 may still deny messages there without retaining their content.
+A message held at Level 1 or 2 (see [Post Gate](/HoYoFetch/moderation/post-gate/)) is removed from its original channel. Its text and attachment metadata enter the held-post queue, while copied media is attached to the Stoat review card. Approval clears the author but does not republish the held content; the author may post it again. Approval, rejection, or 7-day expiry deletes the review card and its Stoat media. Privacy-excluded channels are never queued; Levels 3–4 may still deny messages there without retaining their content.
 
 The queue entry also records why the message was held and, for a prohibited-term match, the id of the rule that fired. The matched text itself is never stored separately or written to a log line — the original message content on the review card is the only copy.
 
@@ -40,8 +40,6 @@ The prohibited-term list in `prohibited_terms.json` is operator-authored configu
 Qualifying attachments are downloaded into a bounded memory buffer and copied immediately to a protected archive card in the configured Logger. Irminsul persists the filename, size, Stoat URL, and protected record ID in its local message journal, but never persists the attachment bytes. Later edit and delete records reference the existing Logger card.
 
 The default per-file limit is 20 MB; set `AUDITLOG_EVIDENCE_MAX_MB=0` when your community prefers metadata-only records. Two transfers run concurrently and at most 50 source messages may be active or queued.
-
-On upgrade, direct regular files in the exact legacy `data/evidence/` directory are deleted without following symlinks or entering subdirectories. Old journal and held-queue descriptors are marked `legacy_purged`. External backups, filesystem snapshots, and copied data directories are not automatically scrubbed.
 
 ## Account checks
 
