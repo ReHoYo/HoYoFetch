@@ -3,6 +3,7 @@ import { randomBytes } from "crypto";
 import {
   BARE_ID_PATTERN,
   buildReason,
+  findRemovedArgumentPrefix,
   findTargetToken,
   tokenizeArgs,
 } from "./command-args.js";
@@ -192,9 +193,6 @@ export function rateLimitWaitMs(response, attempt = 0) {
   );
 }
 
-const WINDOW_PREFIXES = Object.freeze(["delete:", "window:", "purge:"]);
-const DURATION_PREFIXES = Object.freeze(["duration:", "mute:", "timeout:"]);
-
 // Commands that pause for a ✅/❌ confirmation before touching a member.
 // `/Purge-User` keeps its own count-aware confirmation, and `/Automod release`
 // stays instant because it only restores access.
@@ -233,19 +231,6 @@ const DURATION_HELP = `Use ${Object.keys(MUTE_DURATIONS)
   .map((key) => `\`${key}\``)
   .join(", ")}.`;
 
-function prefixedOption(token, spec) {
-  const lower = token.toLowerCase();
-  if (spec.window) {
-    const prefix = WINDOW_PREFIXES.find((entry) => lower.startsWith(entry));
-    if (prefix) return { kind: "window", value: lower.slice(prefix.length) };
-  }
-  if (spec.duration) {
-    const prefix = DURATION_PREFIXES.find((entry) => lower.startsWith(entry));
-    if (prefix) return { kind: "duration", value: lower.slice(prefix.length) };
-  }
-  return null;
-}
-
 function bareOption(token, spec) {
   const lower = token.toLowerCase();
   if (spec.duration && Object.hasOwn(MUTE_DURATIONS, lower)) {
@@ -261,8 +246,8 @@ function bareOption(token, spec) {
  * Parse a manual moderation command written in any order.
  *
  * The member, the options, and the reason may appear in any arrangement:
- * `/Ban @member for spamming`, `/Mute 1h @member being rude`, and the legacy
- * `/Ban @member delete:1d reason: spam` all parse. Bare option words such as
+ * `/Ban @member for spamming` and `/Mute 1h @member being rude` both parse.
+ * Bare option words such as
  * `1h` are only read as options while they precede the reason; once free text
  * starts, everything that follows belongs to the reason.
  */
@@ -272,6 +257,13 @@ export function parseModerationCommand(command, args = []) {
   if (!spec) return { ok: false, error: "Unknown moderation command." };
 
   const tokens = tokenizeArgs(args);
+  const removedPrefix = findRemovedArgumentPrefix(tokens);
+  if (removedPrefix) {
+    return {
+      ok: false,
+      error: `The \`${removedPrefix}:\` delimiter was removed. Use a plain reason and bare duration or cleanup window, for example \`@member 1d repeated spam\`.`,
+    };
+  }
   const consumed = new Set();
   const found = findTargetToken(tokens);
   let targetId = found?.targetId ?? null;
@@ -281,8 +273,7 @@ export function parseModerationCommand(command, args = []) {
   let leading = true;
   for (const [index, token] of tokens.entries()) {
     if (consumed.has(index)) continue;
-    const option =
-      prefixedOption(token, spec) ?? (leading ? bareOption(token, spec) : null);
+    const option = leading ? bareOption(token, spec) : null;
     if (option) {
       const table = option.kind === "window" ? PURGE_WINDOWS : MUTE_DURATIONS;
       if (!Object.hasOwn(table, option.value)) {
@@ -963,7 +954,7 @@ export function createModeration(
   }
 
   // Offered after a ban, kick, or mute so moderators pick a cleanup window by
-  // reaction instead of remembering `delete:` syntax.
+  // reaction instead of remembering a cleanup-window token.
   async function offerCleanup(
     message,
     { targetId, actionId, actionLabel, auditChannelId }

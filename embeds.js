@@ -2,7 +2,6 @@
 // ────────────────────────────────────────────────────────────────────
 import { GAMES } from "./config.js";
 import { formatRewards } from "./api.js";
-import { isEvidenceEnabled, perFileCapBytes } from "./evidence-store.js";
 import {
   COMMAND_SECTIONS,
   DOCS_URL,
@@ -134,21 +133,13 @@ export function buildHelpEmbeds(prefix) {
       title: `🛡️ Irminsul Help — Moderation (3/${total})`,
       description:
         "🔒 **Moderator-only commands:** regular members cannot use the commands on this page. Each action requires the matching moderation permission shown below.\n\n" +
-        "**Before taking a manual action:** configure an audit channel with `/AuditLog here`. Ban, kick, mute, purge, and release require exactly one member/ID plus a mandatory `reason:` (maximum 300 characters).\n\n" +
+        "**Before taking a manual action:** configure an audit channel with `/AuditLog here`. Ban, kick, mute, purge, and release require exactly one member/ID plus a plain-language reason (maximum 300 characters).\n\n" +
         commandList(moderationCommands) +
         "\n\n_History cleanup is best-effort and only covers messages Irminsul observed. Use ◀️ to return._",
       colour: "#E67E22",
       icon_url: HELP_ICON,
     },
   ];
-}
-
-/**
- * Backwards-compatible single-page helper for consumers that only need the
- * first page. Interactive help should use buildHelpEmbeds().
- */
-export function buildHelpEmbed(prefix) {
-  return buildHelpEmbeds(prefix)[0];
 }
 
 /**
@@ -302,60 +293,6 @@ export function buildAuditMemberEmbed({
     [`**User:** ${user}`, ...lines],
     colour
   );
-}
-
-export function buildAuditChannelEmbed({
-  title,
-  channelId,
-  lines = [],
-  colour = "#3498DB",
-} = {}) {
-  const channelLine = channelId ? [`**Channel:** <#${channelId}>`] : [];
-  return buildAuditEmbed(
-    title ?? "📁 Channel Updated",
-    [...channelLine, ...lines],
-    colour
-  );
-}
-
-export function buildAuditServerUpdateEmbed(lines = []) {
-  return buildAuditEmbed("⚙️ Server Updated", lines, "#9B59B6");
-}
-
-/**
- * Build the confirmation embed shown when audit logging is enabled,
- * including the platform limitations that can't be worked around.
- */
-export function buildAuditLogEnabledEmbed(
-  prefix,
-  { moved = false, previousChannelId = null } = {}
-) {
-  const intro = moved
-    ? `Audit logging has been **moved** here from <#${previousChannelId}>.`
-    : "Audit logging is now **active** in this channel.";
-
-  const evidenceBullet = isEvidenceEnabled()
-    ? `- Attachments up to **${Math.round(perFileCapBytes() / (1024 * 1024))} MB** are copied immediately into this Logger on Stoat. Irminsul keeps only their metadata on the VPS; later delete records reference the Stoat archive card.`
-    : "- Message content is recorded from this moment on and kept for **1 year**, so deletes/edits show the original text even after I restart. Stoat attachment archiving is currently **disabled**.";
-
-  return {
-    title: "✅ Audit Log Enabled",
-    description:
-      `${intro}\n\n` +
-      "I will post a record of server actions here: message edits/deletes, channel/role/server changes, " +
-      "member joins/leaves, bans, timeouts, username changes, nickname and role changes, emoji changes, invites, and webhooks. " +
-      "Server settings are also reconciled after restarts and gateway outages.\n\n" +
-      "**⚠️ Platform limitations (Stoat has no native audit log, so these can't be worked around):**\n" +
-      "- Server, channel, role, member, and user-profile update events do not identify who acted. Those records say **Actor unavailable from Stoat** instead of guessing. Emoji and invite creators are shown when Stoat supplies them.\n" +
-      "- Deletes never say **who** performed them. Delete entries show a clearly labeled heuristic list of the author and members with **Manage Messages**; it is not proof of who acted.\n" +
-      '- Newer Stoat backends may identify a member departure as a leave, kick, or ban. Older backends are logged as "left or was removed".\n' +
-      "- Bans are detected when a member leaves; unbans are detected by periodic polling (up to ~5 min delay).\n" +
-      `${evidenceBullet}\n` +
-      "- Messages sent before enablement or while I was offline can't be recovered.\n" +
-      "- Invites and webhooks have no gateway events, so REST reconciliation detects them later and requires the corresponding bot permissions. Voice participation is not treated as a server-setting change.\n\n" +
-      `Use \`${prefix}AuditLog off\` to turn this off.`,
-    colour: "#2ECC71",
-  };
 }
 
 // ── Helpers ────────────────────────────────────────

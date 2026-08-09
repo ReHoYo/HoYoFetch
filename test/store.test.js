@@ -12,21 +12,6 @@ let dataDir;
 before(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "hoyofetch-test-"));
   process.env.HOYOFETCH_DATA_DIR = dataDir;
-  writeFileSync(
-    join(dataDir, "post_gate.json"),
-    JSON.stringify({
-      "legacy-hold": {
-        mode: "hold",
-        reviewChannelId: "legacy-review",
-        updatedAt: "legacy-time",
-      },
-      "legacy-off": {
-        mode: "off",
-        reviewChannelId: null,
-        updatedAt: "legacy-time",
-      },
-    })
-  );
   // Import AFTER setting the env so the store reads the temp dir.
   store = await import("../store.js");
 });
@@ -115,7 +100,7 @@ test("source cache round-trips through atomic writes", () => {
 });
 
 test("audit log channel configuration round-trips and disables", () => {
-  const result = store.setAuditLogChannel("server-audit", "channel-audit");
+  const result = store.enableAuditLog("server-audit", "channel-audit");
   assert.equal(result.changed, true);
   assert.equal(store.getAuditLogChannel("server-audit"), "channel-audit");
   store.disableAuditLog("server-audit");
@@ -337,34 +322,6 @@ test("reversible moderation actions support message lookup and expiry", () => {
   assert.equal(store.getModerationAction("MDACTION1"), null);
 });
 
-test("moderation level defaults to standard and clamps out-of-range values", () => {
-  assert.deepEqual(store.getModerationLevel("server-level"), {
-    level: 1,
-    tenureDays: 7,
-    updatedAt: null,
-    updatedBy: null,
-  });
-
-  store.setModerationLevel("server-level", { level: 3, updatedBy: "admin-1" });
-  const raised = store.getModerationLevel("server-level");
-  assert.equal(raised.level, 3);
-  assert.equal(raised.updatedBy, "admin-1");
-  assert.ok(raised.updatedAt);
-
-  // An unrecognised level must fall back to 1, never up into lockdown.
-  store.setModerationLevel("server-level", { level: 9 });
-  assert.equal(store.getModerationLevel("server-level").level, 1);
-
-  store.setModerationLevel("server-level", { tenureDays: 500 });
-  assert.equal(store.getModerationLevel("server-level").tenureDays, 30);
-  store.setModerationLevel("server-level", { tenureDays: 0 });
-  assert.equal(store.getModerationLevel("server-level").tenureDays, 1);
-
-  assert.doesNotThrow(() =>
-    JSON.parse(readFileSync(join(dataDir, "moderation_level.json"), "utf-8"))
-  );
-});
-
 test("post-gate configuration defaults off and persists mode + review channel", () => {
   assert.deepEqual(store.getPostGateConfig("server-postgate"), {
     mode: "off",
@@ -401,16 +358,6 @@ test("post-gate configuration defaults off and persists mode + review channel", 
   );
 });
 
-test("legacy post-gate configurations migrate to server levels", () => {
-  assert.equal(store.getPostGateConfig("legacy-hold").level, 1);
-  assert.equal(store.getPostGateConfig("legacy-off").level, 0);
-  const persisted = JSON.parse(
-    readFileSync(join(dataDir, "post_gate.json"), "utf-8")
-  );
-  assert.equal(persisted["legacy-hold"].level, 1);
-  assert.equal(persisted["legacy-off"].level, 0);
-});
-
 test("post-gate queue supports lookup by id and by review message, pending listing, and eviction cleanup", () => {
   const now = Date.now();
   store.createHeldPost({
@@ -439,16 +386,11 @@ test("post-gate queue supports lookup by id and by review message, pending listi
   assert.equal(store.getHeldPost("PG1").status, "approved");
 
   // Resolved entries stick around for a 7-day accountability window, then
-  // their evidence is released.
-  const evidencePaths = store.prunePostGateQueue(now + 6 * 24 * 60 * 60 * 1000);
-  assert.deepEqual(evidencePaths, []);
+  // the queue entry is removed.
+  store.prunePostGateQueue(now + 6 * 24 * 60 * 60 * 1000);
   assert.ok(store.getHeldPost("PG1"));
 
-  store.updateHeldPost("PG1", {
-    attachments: [{ filename: "x.png", evidencePath: "/tmp/pg-evidence.png" }],
-  });
-  const releasedPaths = store.prunePostGateQueue(now + 8 * 24 * 60 * 60 * 1000);
-  assert.deepEqual(releasedPaths, ["/tmp/pg-evidence.png"]);
+  store.prunePostGateQueue(now + 8 * 24 * 60 * 60 * 1000);
   assert.equal(store.getHeldPost("PG1"), null);
 });
 

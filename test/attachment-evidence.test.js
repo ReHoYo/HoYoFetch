@@ -8,12 +8,9 @@ const dataDir = mkdtempSync(join(tmpdir(), "hoyofetch-attachment-stoat-"));
 process.env.HOYOFETCH_DATA_DIR = dataDir;
 
 const {
-  copyArchivedAttachments,
   createAttachmentArchiveQueue,
   finaliseArchiveDescriptors,
   humanReadableSize,
-  metadataOnlyDescriptors,
-  normaliseAttachmentDescriptors,
   prepareAttachmentCopies,
   resolveAttachmentArchive,
   SKIP_REASONS,
@@ -149,37 +146,7 @@ test("delete descriptions resolve the current Logger message and media-loss stat
   assert.match(lost.lines[0], /removed the media/);
 });
 
-test("approved held attachments are copied atomically through RAM", async () => {
-  const descriptors = [
-    {
-      ...source(),
-      archiveAttachmentId: "COPY1",
-      archiveUrl: "https://autumn.test/attachments/COPY1/proof.png",
-      archiveRecordId: "REVIEW1",
-      skipReason: null,
-    },
-  ];
-  assert.deepEqual(
-    await copyArchivedAttachments(client, descriptors, {
-      fetchImpl: transferFetch(),
-    }),
-    ["COPY1"]
-  );
-  await assert.rejects(
-    copyArchivedAttachments(
-      client,
-      metadataOnlyDescriptors(descriptors, SKIP_REASONS.MEDIA_LOST),
-      { fetchImpl: transferFetch() }
-    ),
-    /unavailable/
-  );
-});
-
-test("legacy evidence paths normalize as purged and numeric journals remain readable", () => {
-  const [legacy] = normaliseAttachmentDescriptors([
-    { ...source(), evidencePath: "/data/evidence/old.png" },
-  ]);
-  assert.equal(legacy.skipReason, SKIP_REASONS.LEGACY_PURGED);
+test("numeric legacy attachment journals remain readable", () => {
   const numeric = resolveAttachmentArchive({ attachments: 3 });
   assert.match(numeric.lines[0], /3 attachments/);
 });

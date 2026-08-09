@@ -602,7 +602,7 @@ test("excluded safety reports never enter the message archive or delete log", as
     id: messageId,
     channelId: sourceChannelId,
     authorId: "REPORTER1",
-    content: "/Report-Spam TARGET1 reason: private scam evidence",
+    content: "/Report-Spam TARGET1 private scam evidence",
   });
   assert.equal(getArchivedMessage(messageId), null);
 

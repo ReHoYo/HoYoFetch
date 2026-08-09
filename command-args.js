@@ -13,7 +13,9 @@ export const BARE_ID_PATTERN = /^(?=.{8,})(?=.*[0-9A-Z])[A-Za-z0-9]+$/;
 // Leading filler between the member and the reason, so `/Ban @member for
 // spamming` records "spamming" rather than "for spamming".
 const REASON_PREFIX_PATTERN =
-  /^(?:reason\s*:\s*|(?:because of|because|due to|for|about|over|-|–|—|:)(?:\s+|$))/i;
+  /^(?:(?:because of|because|due to|for|about|over|-|–|—|:)(?:\s+|$))/i;
+const REMOVED_ARGUMENT_PREFIX_PATTERN =
+  /^(reason|delete|window|purge|duration|mute|timeout)\s*:/i;
 
 export function tokenizeArgs(args = []) {
   const values = Array.isArray(args) ? args : String(args ?? "").split(/\s+/);
@@ -41,6 +43,14 @@ export function findTargetToken(tokens) {
 
 export function stripReasonPrefix(text) {
   return String(text ?? "").replace(REASON_PREFIX_PATTERN, "");
+}
+
+export function findRemovedArgumentPrefix(tokens = []) {
+  for (const token of tokens) {
+    const match = String(token ?? "").match(REMOVED_ARGUMENT_PREFIX_PATTERN);
+    if (match) return match[1].toLowerCase();
+  }
+  return null;
 }
 
 /** Join the tokens no other rule claimed into a single reason string. */

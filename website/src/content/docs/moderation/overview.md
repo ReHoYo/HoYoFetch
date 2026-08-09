@@ -15,7 +15,7 @@ Configure an audit destination and test it:
 
 ```text
 /AuditLog here
-/Test-AuditLog
+/AuditLog test
 ```
 
 Manual moderation refuses to mutate a member or messages without a configured audit channel. The protected record captures the actor, target, reason, requested action, and outcome.
@@ -23,7 +23,7 @@ Manual moderation refuses to mutate a member or messages without a configured au
 ## Shared command contract
 
 - Supply exactly one member mention or raw user ID.
-- Add a reason in your own words; it is mandatory. The older `reason:` delimiter still works.
+- Add a reason in your own words; it is mandatory. Removed delimiter forms are rejected.
 - Keep the reason within 300 characters.
 - The member, the reason, and any option may appear in any order.
 - Use only the options documented for that command.

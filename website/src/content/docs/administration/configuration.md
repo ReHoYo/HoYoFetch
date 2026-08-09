@@ -33,7 +33,7 @@ AUDITLOG_EVIDENCE_MAX_MB=20
 POST_GATE_HOLD_REMINDER_HOURS=24
 ```
 
-`AUDITLOG_EVIDENCE_BUDGET_MB` is obsolete because Irminsul no longer retains attachment bytes on disk. It is accepted and ignored for one compatibility release with a startup warning; remove it from existing `.env` files.
+`AUDITLOG_EVIDENCE_BUDGET_MB` has been removed. Delete it from existing `.env` files; only the current per-file cap is supported.
 
 :::danger[Protect the token]
 The bot token grants control of the bot account. Keep it in secret storage on the host, redact it from logs, and rotate it if it is exposed.

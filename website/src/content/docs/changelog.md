@@ -3,6 +3,25 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Version 3.2.1 — breaking command cleanup
+
+Deprecated compatibility routes and delimiter syntax have been removed instead of retained as runtime warning aliases. Upgrades from versions older than v3 are no longer supported.
+
+The repository has no per-command telemetry, so real-world use of the removed aliases cannot be measured. This is an intentional breaking change, not evidence that nobody invoked them.
+
+| Removed command or syntax                                                        | Replacement                                                                           |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `/Enable-AuditLog`, `/EnableAuditLog`                                            | `/AuditLog here` or `/AuditLog #channel`                                              |
+| `/Disable-AuditLog`, `/DisableAuditLog`                                          | `/AuditLog off`                                                                       |
+| `/Test-AuditLog`, `/TestAuditLog`                                                | `/AuditLog test`                                                                      |
+| `/ExcludeChannel`                                                                | `/Exclude-Channel`                                                                    |
+| `/GetInfo`                                                                       | `/Get-Info`                                                                           |
+| `/postgate`                                                                      | `/Post-Gate`                                                                          |
+| `/EnableFetchHoyo`, `/EnableFetchNTE`, `/EnableFetchWuWa`, `/EnableFetchNTEWuWa` | `/EnableFetch hoyo`, `/EnableFetch nte`, `/EnableFetch wuwa`, `/EnableFetch nte-wuwa` |
+| `reason:`, `delete:`, `window:`, `purge:`, `duration:`, `mute:`, `timeout:`      | Plain reasons and bare values, for example `/Ban @member 1d repeated spam`            |
+
+The undocumented internal `postgate` route, retired `moderation_level.json` subsystem, v2 evidence-cache infrastructure, and completed pre-v3 startup migrations were also removed. Defensive readers remain for legacy attachment shapes in the one-year archive and Post Gate queue entries without an author ID until live data proves they are gone.
+
 ## Version 3.2.0
 
 ### Prohibited-term hold filter

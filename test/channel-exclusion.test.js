@@ -60,7 +60,7 @@ function makeHarness({
   dmOpenThrows = false,
   clock = 1_800_000_000_000,
   approverUserId,
-  archivedEvidence = [],
+  archivedRecordIds = [],
   sendProtectedFails = false,
 } = {}) {
   let current = clock;
@@ -70,7 +70,6 @@ function makeHarness({
   const dmPayloads = [];
   const requests = [];
   const purgedChannels = [];
-  const removedEvidence = [];
   const intervalCallbacks = [];
   const channels = new Map([
     [
@@ -145,11 +144,7 @@ function makeHarness({
     requestIdFactory: () => "CE123456",
     purgeArchive: (channelId) => {
       purgedChannels.push(channelId);
-      return archivedEvidence;
-    },
-    removeEvidence: (path) => {
-      removedEvidence.push(path);
-      return true;
+      return { archiveRecordIds: archivedRecordIds };
     },
     scheduleTimeout: () => ({ unref() {} }),
     scheduleInterval: (fn) => {
@@ -167,7 +162,6 @@ function makeHarness({
     dmPayloads,
     requests,
     purgedChannels,
-    removedEvidence,
     intervalCallbacks,
     advance(ms) {
       current += ms;
@@ -196,8 +190,7 @@ function directMessage(authorId, content) {
 }
 
 test("in-server confirmation persists an exclusion and purges its archive", async () => {
-  const evidencePath = "/tmp/channel-exclusion-evidence";
-  const harness = makeHarness({ archivedEvidence: [evidencePath] });
+  const harness = makeHarness();
   const requested = await harness.coordinator.handleCommand(serverMessage(), [
     TARGET_ID,
   ]);
@@ -214,7 +207,6 @@ test("in-server confirmation persists an exclusion and purges its archive", asyn
   assert.equal(result.outcome, "excluded");
   assert.equal(harness.store.isChannelExcluded(TARGET_ID), true);
   assert.deepEqual(harness.purgedChannels, [TARGET_ID]);
-  assert.deepEqual(harness.removedEvidence, [evidencePath]);
   assert.equal(harness.coordinator.getPending(SERVER_ID), null);
   assert.deepEqual(
     harness.protectedLogs.map(({ payload }) => payload.embeds?.[0]?.title),

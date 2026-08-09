@@ -179,7 +179,7 @@ function makeHarness({
   };
 }
 
-test("parser reads plain sentences and keeps the legacy delimiter", () => {
+test("parser reads plain sentences and rejects the removed delimiter", () => {
   assert.deepEqual(
     parseSpamReportCommand("<@TARGET123> sent me a scam DM out of nowhere"),
     {
@@ -194,14 +194,16 @@ test("parser reads plain sentences and keeps the legacy delimiter", () => {
     "a leading preposition is filler, not part of the reason"
   );
   assert.deepEqual(
-    parseSpamReportCommand(
-      "<@TARGET123> reason: unsolicited commission scam message"
-    ),
+    parseSpamReportCommand("<@TARGET123> unsolicited commission scam message"),
     {
       ok: true,
       targetId: TARGET_ONE,
       reason: "unsolicited commission scam message",
     }
+  );
+  assert.equal(
+    parseSpamReportCommand(`${TARGET_ONE} reason: detailed spam report`).ok,
+    false
   );
   assert.equal(
     parseSpamReportCommand(
@@ -245,17 +247,11 @@ test("generated report IDs are opaque, safe, and non-repeating", () => {
 
 test("report invocations can be excluded from the audit message archive", () => {
   assert.equal(
-    isSpamReportInvocation(
-      " /Report-Spam TARGET123 reason: private evidence",
-      "/"
-    ),
+    isSpamReportInvocation(" /Report-Spam TARGET123 private evidence", "/"),
     true
   );
   assert.equal(
-    isSpamReportInvocation(
-      "!REPORT-SPAM TARGET123 reason: private evidence",
-      "!"
-    ),
+    isSpamReportInvocation("!REPORT-SPAM TARGET123 private evidence", "!"),
     true
   );
   assert.equal(isSpamReportInvocation("/Report-Spammer TARGET123", "/"), false);
@@ -266,11 +262,11 @@ test("archive exclusion requires a successful coordinated deletion", async () =>
   const accepted = makeHarness();
   const acceptedMessage = {
     ...accepted.message(),
-    content: `/Report-Spam ${TARGET_ONE} reason: unsolicited commission scam`,
+    content: `/Report-Spam ${TARGET_ONE} unsolicited commission scam`,
   };
   const acceptedOperation = accepted.reporter.handleCommand(
     acceptedMessage,
-    `${TARGET_ONE} reason: unsolicited commission scam`
+    `${TARGET_ONE} unsolicited commission scam`
   );
   const acceptedExclusion =
     accepted.reporter.shouldExcludeMessage(acceptedMessage);
@@ -288,11 +284,11 @@ test("archive exclusion requires a successful coordinated deletion", async () =>
   const failed = makeHarness({ deleteFails: true });
   const failedMessage = {
     ...failed.message(),
-    content: `/Report-Spam ${TARGET_ONE} reason: unsolicited commission scam`,
+    content: `/Report-Spam ${TARGET_ONE} unsolicited commission scam`,
   };
   const failedOperation = failed.reporter.handleCommand(
     failedMessage,
-    `${TARGET_ONE} reason: unsolicited commission scam`
+    `${TARGET_ONE} unsolicited commission scam`
   );
   const failedExclusion = failed.reporter.shouldExcludeMessage(failedMessage);
   const failedDeleteExclusion = failed.reporter.shouldExcludeMessageDelete(
@@ -309,7 +305,7 @@ test("archive exclusion requires a successful coordinated deletion", async () =>
   assert.equal(
     await accepted.reporter.shouldExcludeMessage({
       id: "UNROUTED1",
-      content: `/Report-Spam ${TARGET_ONE} reason: audit bypass attempt`,
+      content: `/Report-Spam ${TARGET_ONE} audit bypass attempt`,
     }),
     false
   );
@@ -329,7 +325,7 @@ test("missing Manage Messages or a failed delete rejects without recording", asy
   const noPermission = makeHarness({ permissionBits: 0 });
   await noPermission.reporter.handleCommand(
     noPermission.message(),
-    `${TARGET_ONE} reason: unsolicited commission scam`
+    `${TARGET_ONE} unsolicited commission scam`
   );
   assert.equal(noPermission.requests.length, 0);
   assert.equal(noPermission.store.reports.length, 0);
@@ -337,7 +333,7 @@ test("missing Manage Messages or a failed delete rejects without recording", asy
   const deleteFailure = makeHarness({ deleteFails: true });
   await deleteFailure.reporter.handleCommand(
     deleteFailure.message(),
-    `${TARGET_ONE} reason: unsolicited commission scam`
+    `${TARGET_ONE} unsolicited commission scam`
   );
   assert.equal(deleteFailure.requests.length, 1);
   assert.equal(deleteFailure.store.reports.length, 0);
@@ -348,7 +344,7 @@ test("missing audit configuration and protected delivery failures fail closed", 
   const noAudit = makeHarness({ audit: false });
   await noAudit.reporter.handleCommand(
     noAudit.message(),
-    `${TARGET_ONE} reason: unsolicited commission scam`
+    `${TARGET_ONE} unsolicited commission scam`
   );
   assert.equal(noAudit.store.reports.length, 0);
   assert.equal(noAudit.protectedLogs.length, 0);
@@ -356,7 +352,7 @@ test("missing audit configuration and protected delivery failures fail closed", 
   const failedDelivery = makeHarness({ protectedFails: true });
   await failedDelivery.reporter.handleCommand(
     failedDelivery.message(),
-    `${TARGET_ONE} reason: unsolicited commission scam`
+    `${TARGET_ONE} unsolicited commission scam`
   );
   assert.equal(failedDelivery.store.reports.length, 0);
   assert.equal(failedDelivery.protectedLogs.length, 1);
@@ -368,7 +364,7 @@ test("fresh membership and protected target exclusions fail closed", async () =>
   });
   await missingTarget.reporter.handleCommand(
     missingTarget.message(),
-    `${TARGET_ONE} reason: unsolicited commission scam`
+    `${TARGET_ONE} unsolicited commission scam`
   );
   assert.equal(missingTarget.store.reports.length, 0);
 
@@ -376,7 +372,7 @@ test("fresh membership and protected target exclusions fail closed", async () =>
     const harness = makeHarness();
     await harness.reporter.handleCommand(
       harness.message(),
-      `${targetId} reason: unsolicited commission scam`
+      `${targetId} unsolicited commission scam`
     );
     assert.equal(harness.store.reports.length, 0);
   }
@@ -386,11 +382,11 @@ test("attempt cooldown, duplicate reports, and daily accepted limits block misus
   const harness = makeHarness();
   await harness.reporter.handleCommand(
     harness.message({ messageId: "COMMAND1" }),
-    `${TARGET_ONE} reason: unsolicited commission scam`
+    `${TARGET_ONE} unsolicited commission scam`
   );
   await harness.reporter.handleCommand(
     harness.message({ messageId: "COMMAND2" }),
-    `${TARGET_TWO} reason: another unsolicited scam message`
+    `${TARGET_TWO} another unsolicited scam message`
   );
   assert.equal(harness.store.reports.length, 1);
   assert.equal(
@@ -401,7 +397,7 @@ test("attempt cooldown, duplicate reports, and daily accepted limits block misus
   harness.advance(SPAM_REPORT_ATTEMPT_COOLDOWN_MS);
   await harness.reporter.handleCommand(
     harness.message({ messageId: "COMMAND3" }),
-    `${TARGET_ONE} reason: repeated unsolicited scam message`
+    `${TARGET_ONE} repeated unsolicited scam message`
   );
   assert.equal(harness.store.reports.length, 1);
 
@@ -409,7 +405,7 @@ test("attempt cooldown, duplicate reports, and daily accepted limits block misus
     harness.advance(SPAM_REPORT_ATTEMPT_COOLDOWN_MS);
     await harness.reporter.handleCommand(
       harness.message({ messageId: `COMMAND${index + 4}` }),
-      `${targetId} reason: unsolicited commission scam message`
+      `${targetId} unsolicited commission scam message`
     );
   }
   assert.equal(harness.store.reports.length, 3);
@@ -417,7 +413,7 @@ test("attempt cooldown, duplicate reports, and daily accepted limits block misus
   harness.advance(SPAM_REPORT_ATTEMPT_COOLDOWN_MS);
   await harness.reporter.handleCommand(
     harness.message({ messageId: "COMMAND6" }),
-    `${TARGET_FOUR} reason: unsolicited commission scam message`
+    `${TARGET_FOUR} unsolicited commission scam message`
   );
   assert.equal(harness.store.reports.length, 3);
   assert.match(harness.sent.at(-1).payload.embeds[0].title, /Limit Reached/);
@@ -436,7 +432,7 @@ test("three unique reporters raise priority without calling moderation endpoints
         reporterId,
         messageId: `COMMAND${index + 1}`,
       }),
-      `${TARGET_ONE} reason: unsolicited commission scam message`
+      `${TARGET_ONE} unsolicited commission scam message`
     );
     assert.equal(result.correlationCount, index + 1);
     assert.equal(result.priority, index === 2);

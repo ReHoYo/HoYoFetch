@@ -31,7 +31,7 @@ import {
   startArchiveMaintenance,
   archiveSize,
 } from "./message-archive.js";
-import { evidenceModeStats, purgeLegacyEvidence } from "./evidence-store.js";
+import { CONFIG } from "./config.js";
 import {
   buildAttachmentArchiveEmbed,
   createAttachmentArchiveQueue,
@@ -196,7 +196,6 @@ function emitAudit(send, serverId, embed, extras) {
 export function runAuditLogTest(serverId) {
   const diagnostics = getAuditDiagnostics(serverId);
   const { channelId } = diagnostics;
-  const evidence = evidenceModeStats();
   const archiveQueue = attachmentArchiveQueue.stats();
   const captureFailures = Object.fromEntries(attachmentCaptureFailures);
   const captureFailureCount = Object.values(captureFailures).reduce(
@@ -207,9 +206,9 @@ export function runAuditLogTest(serverId) {
     ...diagnostics,
     archivedCount: archiveSize(),
     queuedTest: false,
-    evidenceMode: evidence.mode,
-    evidenceBytes: evidence.diskBytes,
-    evidencePerFileCapBytes: evidence.perFileCapBytes,
+    evidenceMode: "stoat",
+    evidenceBytes: 0,
+    evidencePerFileCapBytes: CONFIG.auditLogEvidenceMaxBytes,
     attachmentArchiveQueue: archiveQueue,
     attachmentCaptureFailures: captureFailures,
     settings: settingsMonitorRef?.status(serverId) ?? null,
@@ -266,23 +265,6 @@ export function formatMemberEventDiagnostics(stats) {
 export function truncate(str, max = 700) {
   if (!str) return "*(none)*";
   return str.length > max ? `${str.slice(0, max)}… *(truncated)*` : str;
-}
-
-/**
- * Return user-visible changes for a fixed list of fields.
- * Permission payloads are intentionally treated as opaque values.
- */
-export function diffFields(before = {}, after = {}, fields = []) {
-  return fields
-    .filter(
-      (field) =>
-        JSON.stringify(before?.[field]) !== JSON.stringify(after?.[field])
-    )
-    .map((field) => ({
-      field,
-      before: before?.[field],
-      after: after?.[field],
-    }));
 }
 
 export function createMessageCache(limit = 5_000) {
@@ -606,13 +588,6 @@ export function initAuditLog(
   sendRef = send;
   fetchImplRef = fetchImpl ?? fetch;
   startArchiveMaintenance();
-  const legacyPurge = purgeLegacyEvidence();
-  if (legacyPurge.files || legacyPurge.errors) {
-    console.log(
-      `attachment-archive: purged ${legacyPurge.files} legacy VPS file(s), ` +
-        `${legacyPurge.errors} error(s)`
-    );
-  }
   settingsMonitorRef = createSettingsMonitor(client, {
     request,
     emit: (serverId, embed) => emitAudit(send, serverId, embed),

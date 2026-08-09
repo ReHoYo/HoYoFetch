@@ -41,6 +41,7 @@ export function createAuditLogConfiguration(
     logger = console,
     requestIdFactory = defaultRequestIdFactory,
     configurationChanged = async () => {},
+    testAuditLog = async () => {},
   } = {}
 ) {
   if (typeof send !== "function") {
@@ -586,6 +587,9 @@ export function createAuditLogConfiguration(
     const [first = "status", second, ...extra] = args;
     const action = first.toLowerCase();
     if (!args.length || action === "status") return status(message);
+    if (action === "test" && !second && !extra.length) {
+      return testAuditLog(message);
+    }
     if (action === "cancel" && !second && !extra.length) {
       return cancel(message);
     }
@@ -608,7 +612,7 @@ export function createAuditLogConfiguration(
       await respond(
         channelIdFrom(message),
         "⚠️ Invalid Audit Log Command",
-        `Use \`${commandName()} status\`, \`${commandName()} here\`, \`${commandName()} #channel\`, \`${commandName()} off\`, \`${commandName()} confirm CODE\`, or \`${commandName()} cancel\`.`,
+        `Use \`${commandName()} status\`, \`${commandName()} test\`, \`${commandName()} here\`, \`${commandName()} #channel\`, \`${commandName()} off\`, \`${commandName()} confirm CODE\`, or \`${commandName()} cancel\`.`,
         "#E74C3C"
       );
       return { outcome: "invalid_command" };
@@ -628,18 +632,8 @@ export function createAuditLogConfiguration(
     return requestChange(message, "enable", targetId);
   }
 
-  async function handleLegacyEnable(message) {
-    return requestChange(message, "enable", channelIdFrom(message));
-  }
-
-  async function handleLegacyDisable(message) {
-    return requestChange(message, "disable");
-  }
-
   return {
     handleCommand,
-    handleLegacyEnable,
-    handleLegacyDisable,
     getPending(serverId) {
       const pending = approvalGate.getPending(serverId);
       return pending?.kind === CHALLENGE_KIND ? pending : null;

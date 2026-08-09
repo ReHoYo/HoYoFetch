@@ -24,6 +24,7 @@ function makeHarness({
   let current = clock;
   let auditChannelId = initialChannelId;
   let configurationChanges = 0;
+  let auditTests = 0;
   let targetCanSend = true;
   const responses = [];
   const protectedLogs = [];
@@ -126,6 +127,10 @@ function makeHarness({
     configurationChanged: async () => {
       configurationChanges += 1;
     },
+    testAuditLog: async () => {
+      auditTests += 1;
+      return { outcome: "tested" };
+    },
     logger: { log() {}, warn() {} },
   });
 
@@ -144,6 +149,9 @@ function makeHarness({
     },
     get configurationChanges() {
       return configurationChanges;
+    },
+    get auditTests() {
+      return auditTests;
     },
     setTargetCanSend(value) {
       targetCanSend = value;
@@ -197,28 +205,15 @@ test("canonical enable waits for relayed Enka approval", async () => {
   );
 });
 
-test("legacy enable and disable aliases use fresh challenges", async () => {
+test("test is a read-only canonical AuditLog subcommand", async () => {
   const harness = makeHarness();
   assert.equal(
-    (await harness.coordinator.handleLegacyEnable(serverMessage())).outcome,
-    "requested"
+    (await harness.coordinator.handleCommand(serverMessage(), ["test"]))
+      .outcome,
+    "tested"
   );
-  assert.equal(harness.auditChannelId, null);
-  await harness.gate.handleDirectMessage(
-    directMessage(ENKA_APPROVER_USER_ID, "approve 123456")
-  );
-  assert.equal(harness.auditChannelId, SOURCE_ID);
-
-  assert.equal(
-    (await harness.coordinator.handleLegacyDisable(serverMessage())).outcome,
-    "requested"
-  );
-  assert.equal(harness.auditChannelId, SOURCE_ID);
-  await harness.gate.handleDirectMessage(
-    directMessage(ENKA_APPROVER_USER_ID, "123456")
-  );
-  assert.equal(harness.auditChannelId, null);
-  assert.equal(harness.configurationChanges, 2);
+  assert.equal(harness.auditTests, 1);
+  assert.equal(harness.dmPayloads.length, 0);
 });
 
 test("moving and disabling preserve the old destination until approval", async () => {

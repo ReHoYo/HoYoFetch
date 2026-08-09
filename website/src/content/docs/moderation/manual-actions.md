@@ -15,10 +15,10 @@ account ID; the other member actions require a current member.
 /Ban @member for spamming and stuff
 /Ban 01ABCDEFGHJKMNPQRSTVWXYZ12 for coordinating a raid
 /Mute 1h @member because they argued with staff
-/Ban @member delete:1d reason: raid cleanup
+/Ban @member 1d raid cleanup
 ```
 
-The last form is the older delimiter syntax; it is still accepted. A reason is always required.
+Removed delimiter forms such as `reason:`, `delete:`, and `window:` are rejected with a canonical example. A reason is always required.
 Bare option words such as `1h` or `1y` are only read as options while they come before the reason —
 once the reason starts, everything that follows is part of it, so `/Mute @member for arguing for 3d
 straight` opens the duration picker and keeps the sentence intact.

@@ -11,21 +11,20 @@ Stoat does not provide a native server audit log. Irminsul can relay activity in
 /AuditLog here
 /AuditLog #moderation-log
 /AuditLog status
+/AuditLog test
 /AuditLog off
 /AuditLog confirm 123456
 /AuditLog cancel
 ```
 
-The older `/Enable-AuditLog` and `/Disable-AuditLog` forms remain accepted for compatibility.
-
-Run `/Test-AuditLog` after setup. It sends a test event through the real protected-delivery pipeline and reports message archive coverage, Stoat-hosted attachment mode, queue activity, capture failures since startup, settings baseline, and webhook coverage.
+Run `/AuditLog test` after setup. It sends a test event through the real protected-delivery pipeline and reports message archive coverage, Stoat-hosted attachment mode and per-file cap, queue activity, capture failures since startup, settings baseline, and webhook coverage.
 
 Enabling, moving, or disabling the audit log requires **two steps**:
 
 1. A recognized moderator requests the change.
 2. Irminsul sends a ten-minute, six-digit code exclusively to **Enka#4961**. Enka can reply with `approve CODE`, `deny CODE`, or the bare code, or release it for a recognized moderator to relay with `/AuditLog confirm CODE`.
 
-The requester or Enka can use `/AuditLog cancel`. Three incorrect attempts destroy a request. If Enka cannot be reached by DM, audit logging fails closed in its existing state. Requests to keep the current destination or disable an already-disabled log return immediately without generating a code. `/AuditLog status` and `/Test-AuditLog` are read-only and never require approval.
+The requester or Enka can use `/AuditLog cancel`. Three incorrect attempts destroy a request. If Enka cannot be reached by DM, audit logging fails closed in its existing state. Requests to keep the current destination or disable an already-disabled log return immediately without generating a code. `/AuditLog status` and `/AuditLog test` are read-only and never require approval.
 
 Only one protected audit/privacy request can be pending per server. Moves and disables are recorded in the previous protected destination before it is replaced or disabled; successful enables and moves record completion in the new destination. The destination and Irminsul's Send Messages permission are checked again when approval arrives, and stale requests make no change.
 

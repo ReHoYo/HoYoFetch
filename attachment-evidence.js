@@ -4,11 +4,19 @@
 // from the source Stoat file to a new Stoat upload. Only descriptors, URLs,
 // and protected Logger record ids are persisted locally.
 import { uploadAttachmentBytes } from "./easter-eggs.js";
-import { isEvidenceEnabled, perFileCapBytes } from "./evidence-store.js";
+import { CONFIG } from "./config.js";
 import { buildAuditEmbed } from "./embeds.js";
 
 export const ATTACHMENT_ARCHIVE_CONCURRENCY = 2;
 export const ATTACHMENT_ARCHIVE_MAX_PENDING = 50;
+
+function perFileCapBytes() {
+  return CONFIG.auditLogEvidenceMaxBytes;
+}
+
+function isEvidenceEnabled() {
+  return perFileCapBytes() > 0;
+}
 
 export function humanReadableSize(bytes) {
   if (!bytes || bytes <= 0) return "0 B";
@@ -38,7 +46,6 @@ export const SKIP_REASONS = Object.freeze({
   UPLOAD_FAILED: "upload_failed",
   LOGGER_SEND_FAILED: "logger_send_failed",
   QUEUE_FULL: "queue_full",
-  LEGACY_PURGED: "legacy_purged",
   MEDIA_LOST: "media_lost",
 });
 
@@ -51,12 +58,10 @@ const SKIP_REASON_LABELS = {
   [SKIP_REASONS.LOGGER_SEND_FAILED]:
     "the Logger archive card could not be sent",
   [SKIP_REASONS.QUEUE_FULL]: "the bounded archive queue was full",
-  [SKIP_REASONS.LEGACY_PURGED]: "the former VPS evidence cache was purged",
   [SKIP_REASONS.MEDIA_LOST]: "the Stoat archive card was deleted",
 };
 
 function baseDescriptor(att) {
-  const legacy = typeof att?.evidencePath === "string";
   return {
     id: att?.id ?? null,
     filename: att?.filename || "file",
@@ -65,7 +70,7 @@ function baseDescriptor(att) {
     archiveAttachmentId: att?.archiveAttachmentId ?? null,
     archiveUrl: att?.archiveUrl ?? null,
     archiveRecordId: att?.archiveRecordId ?? null,
-    skipReason: legacy ? SKIP_REASONS.LEGACY_PURGED : (att?.skipReason ?? null),
+    skipReason: att?.skipReason ?? null,
   };
 }
 
@@ -248,38 +253,6 @@ export function resolveAttachmentArchive(
     }
   }
   return { lines, replyMessageIds, recordIds };
-}
-
-/** Copy an already Stoat-hosted archive again for an approved held post. */
-export async function copyArchivedAttachments(
-  client,
-  attachments,
-  { fetchImpl = fetch, debugLog = () => {} } = {}
-) {
-  const descriptors = normaliseAttachmentDescriptors(attachments) ?? [];
-  if (descriptors.some((att) => !att.archiveUrl || att.skipReason)) {
-    throw new Error("One or more held attachments are unavailable.");
-  }
-  const ids = [];
-  for (const att of descriptors) {
-    const bytes = await downloadAttachmentBytes(
-      fetchImpl,
-      att.archiveUrl,
-      perFileCapBytes()
-    );
-    if (!bytes) throw new Error(`Held attachment unavailable: ${att.filename}`);
-    const id = await uploadAttachmentBytes({
-      bytes,
-      filename: att.filename,
-      contentType: att.contentType,
-      autumnUrl: client.configuration?.features?.autumn?.url,
-      authenticationHeader: client.authenticationHeader,
-      fetchImpl,
-    });
-    ids.push(id);
-    debugLog(`held attachment copied to approved post (${bytes.length} bytes)`);
-  }
-  return ids;
 }
 
 export function createAttachmentArchiveQueue({

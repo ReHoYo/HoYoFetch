@@ -15,7 +15,6 @@ const ALLOWED_ENV_KEYS = new Set([
   "HOYOFETCH_DATA_DIR",
   "AUDITLOG_DEBUG",
   "AUDITLOG_EVIDENCE_MAX_MB",
-  "AUDITLOG_EVIDENCE_BUDGET_MB",
   "POST_GATE_HOLD_REMINDER_HOURS",
 ]);
 
@@ -47,12 +46,6 @@ function loadEnv() {
 }
 loadEnv();
 
-if (process.env.AUDITLOG_EVIDENCE_BUDGET_MB) {
-  console.warn(
-    "⚠️  AUDITLOG_EVIDENCE_BUDGET_MB is obsolete: attachment bytes are now Stoat-hosted and never retained on disk."
-  );
-}
-
 // ── Exported config ────────────────────────────────
 const rawInterval = parseInt(process.env.FETCH_INTERVAL || "60", 10);
 const fetchIntervalMinutes =
@@ -71,6 +64,12 @@ const fetchCooldownSeconds =
   Number.isFinite(rawCooldown) && rawCooldown >= 0
     ? Math.min(rawCooldown, 3600)
     : 10;
+
+const rawEvidenceMaxMb = Number(process.env.AUDITLOG_EVIDENCE_MAX_MB ?? "20");
+const auditLogEvidenceMaxBytes =
+  Number.isFinite(rawEvidenceMaxMb) && rawEvidenceMaxMb >= 0
+    ? rawEvidenceMaxMb * 1024 * 1024
+    : 20 * 1024 * 1024;
 
 // How long a member may sit in full Post Gate before Irminsul reminds
 // moderators that the hold is still standing. It never auto-releases.
@@ -97,6 +96,7 @@ export const CONFIG = {
   prefix: process.env.PREFIX || "/",
   fetchIntervalMinutes,
   fetchCooldownSeconds,
+  auditLogEvidenceMaxBytes,
   hoyoApiBase:
     process.env.HOYO_API_BASE || "https://hoyo-codes.seria.moe/codes",
   emergencyServerId: process.env.EMERGENCY_SERVER_ID || "",

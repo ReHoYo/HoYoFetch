@@ -41,15 +41,15 @@ An authorized moderator can enable hourly announcements in the channel where the
 Choose a narrower feed when needed:
 
 ```text
-/EnableFetchHoyo
-/EnableFetchNTE
-/EnableFetchWuWa
-/EnableFetchNTEWuWa
+/EnableFetch hoyo
+/EnableFetch nte
+/EnableFetch wuwa
+/EnableFetch nte-wuwa
 ```
 
 Run `/DisableFetch` in the channel to stop its announcements. Irminsul remembers subscribed channels across restarts.
 
-`/EnableFetch` covers every supported game. The narrower commands select HoYoverse-only, NTE-only, WuWa-only, or the combined NTE + WuWa feed.
+`/EnableFetch` and `/EnableFetch all` cover every supported game. The scope argument selects HoYoverse-only, NTE-only, WuWa-only, or the combined NTE + WuWa feed.
 
 :::tip[No old-code flood]
 On a fresh installation, Irminsul seeds the codes it can already see. Existing codes are not announced as newly discovered codes.
@@ -68,7 +68,7 @@ Irminsul sends this enable request's one-time code exclusively to **Enka#4961**.
 Then verify it through the real delivery path:
 
 ```text
-/Test-AuditLog
+/AuditLog test
 ```
 
 Manual moderation fails closed when Irminsul cannot verify the actor's matching permission or cannot use the configured audit channel.
@@ -78,7 +78,7 @@ Manual moderation fails closed when Irminsul cannot verify the actor's matching 
 - Commands work only for human members in server channels.
 - Direct messages, webhooks, and other bots are ignored.
 - Command names are case-insensitive.
-- Moderation and spam-report reasons are written in plain words and may be up to 300 characters; the older `reason:` delimiter still works.
+- Moderation and spam-report reasons are written in plain words and may be up to 300 characters; removed delimiter forms are rejected.
 - Spam-report reasons must be at least 10 characters, and the command has separate anti-abuse limits.
 - `/Ban`, `/Kick`, and `/Mute` act only after the moderator who ran them reacts ✅ to a confirmation.
 - Each member can trigger up to five recognized commands within 30 seconds.

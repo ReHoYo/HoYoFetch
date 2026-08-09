@@ -20,7 +20,7 @@ Recognized moderator capabilities for management commands are **Kick Members**, 
 
 `/Get-Info` remains available under that recognized-moderator policy. Giving Irminsul **Ban Members** improves non-member results by allowing it to confirm bans and show the stored ban reason; without that permission, the report explicitly says a ban could not be ruled out.
 
-`/AuditLog` configuration, `/Exclude-Channel`, and `/Post-Gate` configuration all use the recognized-moderator policy shown above. Enabling, moving, or disabling any of them still requires a separate one-time code sent exclusively to **Enka#4961**. `/AuditLog status`, `/Test-AuditLog`, `/Post-Gate status`, and reviewing a held post with `/Post-Gate approve|reject` are read-only or immediately reversible and never require that approval.
+`/AuditLog` configuration, `/Exclude-Channel`, and `/Post-Gate` configuration all use the recognized-moderator policy shown above. Enabling, moving, or disabling any of them still requires a separate one-time code sent exclusively to **Enka#4961**. `/AuditLog status`, `/AuditLog test`, `/Post-Gate status`, and reviewing a held post with `/Post-Gate approve|reject` are read-only or immediately reversible and never require that approval.
 
 Once the Post Gate review channel is approved, the same recognized-moderator policy may select server Levels 1–3 and start `/Level 4 confirm`. Level 4 still requires the requester's second ✅ reaction, plus a fresh check of the requester and Irminsul's Ban Members permission.
 
