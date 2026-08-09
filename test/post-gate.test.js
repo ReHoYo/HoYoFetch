@@ -41,7 +41,18 @@ function makeStore() {
   const config = new Map();
   const queue = new Map();
   const strikes = new Map();
+  const holds = new Map();
   const excludedChannels = new Set([EXCLUDED_CHANNEL_ID]);
+  // Mutable so a test can hand the gate an operator list mid-run.
+  const termList = {
+    terms: [],
+    allowlist: [],
+    status: "missing",
+    error: null,
+    skipped: 0,
+    loadedAt: 0,
+  };
+  let lastTermSignature = null;
   return {
     config,
     queue,
@@ -128,6 +139,108 @@ function makeStore() {
     clearAutomodStrike(serverId, userId) {
       return strikes.delete(`${serverId}:${userId}`);
     },
+
+    // ── Full-user Post Gate holds ──────────────────────────────
+    holds,
+    isUserHeld(serverId, userId) {
+      return holds.get(`${serverId}:${userId}`)?.active === true;
+    },
+    getUserHold(serverId, userId) {
+      const record = holds.get(`${serverId}:${userId}`);
+      return record ? structuredClone(record) : null;
+    },
+    createUserHold(record) {
+      const key = `${record.serverId}:${record.userId}`;
+      const existing = holds.get(key);
+      if (existing?.active) {
+        return { created: false, record: structuredClone(existing) };
+      }
+      const stored = {
+        reminderCount: 0,
+        lastReminderMessageId: null,
+        releasedAt: null,
+        releasedBy: null,
+        releaseReason: null,
+        ...structuredClone(record),
+        active: true,
+      };
+      holds.set(key, stored);
+      return { created: true, record: structuredClone(stored) };
+    },
+    updateUserHold(serverId, userId, patch) {
+      const key = `${serverId}:${userId}`;
+      const record = holds.get(key);
+      if (!record) return null;
+      const updated = { ...record, ...structuredClone(patch) };
+      holds.set(key, updated);
+      return structuredClone(updated);
+    },
+    releaseUserHold(serverId, userId, { releasedBy, releasedAt, reason } = {}) {
+      const key = `${serverId}:${userId}`;
+      const record = holds.get(key);
+      if (!record?.active) {
+        return {
+          released: false,
+          record: record ? structuredClone(record) : null,
+        };
+      }
+      const updated = {
+        ...record,
+        active: false,
+        releasedBy: releasedBy ?? null,
+        releasedAt: releasedAt ?? null,
+        releaseReason: reason ?? null,
+        reminderAt: null,
+      };
+      holds.set(key, updated);
+      return { released: true, record: structuredClone(updated) };
+    },
+    findUserHoldByCardMessage(messageId) {
+      for (const record of holds.values()) {
+        if (!record.active) continue;
+        if (record.cardMessageId === messageId) {
+          return { record: structuredClone(record), cardKind: "control" };
+        }
+        if (record.lastReminderMessageId === messageId) {
+          return { record: structuredClone(record), cardKind: "reminder" };
+        }
+      }
+      return null;
+    },
+    getActiveUserHolds(serverId) {
+      return [...holds.values()]
+        .filter(
+          (record) =>
+            record.active &&
+            (serverId === undefined || record.serverId === serverId)
+        )
+        .map((record) => structuredClone(record));
+    },
+    getDueUserHoldReminders(now) {
+      return [...holds.values()]
+        .filter(
+          (record) =>
+            record.active &&
+            Number.isFinite(record.reminderAt) &&
+            record.reminderAt <= now
+        )
+        .map((record) => structuredClone(record));
+    },
+    prunePostGateUserHolds() {
+      return false;
+    },
+
+    // ── Operator prohibited-term list ──────────────────────────
+    termList,
+    getProhibitedTermList() {
+      return structuredClone(termList);
+    },
+    reloadProhibitedTermList({ force = false } = {}) {
+      const signature = JSON.stringify(termList);
+      const changed = force || signature !== lastTermSignature;
+      lastTermSignature = signature;
+      return { changed, ...structuredClone(termList) };
+    },
   };
 }
 
@@ -147,6 +260,7 @@ function makeHarness({
   runPermissionEventImmediately = false,
   lockdownDeleteFails = false,
   lockdownBanFails = false,
+  holdReminderMs = 24 * 60 * 60 * 1_000,
   onMessageDeleted = () => {},
 } = {}) {
   let current = clock;
@@ -160,6 +274,7 @@ function makeHarness({
   const permissionWrites = [];
   const deletedMessageIds = [];
   const removedEvidencePaths = [];
+  const logLines = [];
   let attachmentUploads = 0;
   let serverDefaultPermissions = initialDefaultPermissions;
 
@@ -360,12 +475,17 @@ function makeHarness({
       return { unref() {} };
     },
     scheduleInterval: () => ({ unref() {} }),
-    logger: { log() {}, warn() {} },
+    holdReminderMs,
+    logger: {
+      log: (line) => logLines.push(line),
+      warn: (line) => logLines.push(line),
+    },
   });
 
   return {
     postGate,
     store,
+    logLines,
     responses,
     protectedLogs,
     dmPayloads,
@@ -480,10 +600,13 @@ test("holds a first-post link from a brand-new account", async () => {
     harness.protectedLogs[0].payload.embeds[0].title,
     /Held First Post/
   );
-  assert.equal(harness.reactionPuts.length, 2);
+  // Approve, deny, and deny + hold user are all offered on the card.
+  assert.equal(harness.reactionPuts.length, 3);
   const [record] = [...harness.store.queue.values()];
   assert.equal(record.status, "pending");
   assert.equal(record.userId, NEW_USER_ID);
+  assert.equal(record.trigger, "first_post");
+  assert.equal(record.ruleId, null);
 });
 
 test("levels 1 and 2 hold common obfuscated link forms without rewriting evidence", async () => {
@@ -1419,4 +1542,988 @@ test("enabling the post gate via a valid Enka code changes configuration", async
   const config = harness.store.getPostGateConfig(SERVER_ID);
   assert.equal(config.mode, "hold");
   assert.equal(config.reviewChannelId, SOURCE_CHANNEL_ID);
+});
+
+// ══════════════════════════════════════════════════════════════
+//  Prohibited-term holds
+// ══════════════════════════════════════════════════════════════
+
+// A stand-in operator term, so the tests never have to spell a real slur out.
+const OPERATOR_TERM = "flurbex";
+
+function establishedMessage({ id, content, authorId = ESTABLISHED_USER_ID }) {
+  return newAccountMessage({
+    id,
+    authorId,
+    content,
+    createdAt: new Date(1_800_000_000_000 - 400 * 24 * 60 * 60 * 1000),
+    joinedAt: new Date(1_800_000_000_000 - 200 * 24 * 60 * 60 * 1000),
+  });
+}
+
+function useOperatorTerms(harness, { terms = [], allowlist = [] } = {}) {
+  Object.assign(harness.store.termList, {
+    terms,
+    allowlist,
+    status: "ok",
+    error: null,
+    skipped: 0,
+  });
+  harness.postGate.reloadProhibitedTerms();
+}
+
+const reviewCommandMessage = (authorId = MOD_USER_ID) => ({
+  server: { id: SERVER_ID },
+  channelId: REVIEW_CHANNEL_ID,
+  authorId,
+});
+
+test("holds a message containing a prohibited term even from an established member", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  recordMessage({
+    id: "TERMPRIOR1",
+    channelId: SOURCE_CHANNEL_ID,
+    serverId: SERVER_ID,
+    authorId: ESTABLISHED_USER_ID,
+    content: "a long history of ordinary messages",
+    createdAt: Date.now() - 90 * 24 * 60 * 60 * 1000,
+  });
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+
+  await harness.postGate.handleMessage(
+    establishedMessage({
+      id: "MSGTERM1",
+      content: `you absolute ${OPERATOR_TERM}`,
+    })
+  );
+
+  assert.deepEqual(harness.deletedMessageIds, ["MSGTERM1"]);
+  const [record] = [...harness.store.queue.values()];
+  assert.equal(record.trigger, "prohibited_term");
+  assert.equal(record.status, "pending");
+  // The trigger is entirely independent of links, media, and tenure.
+  assert.equal(record.userId, ESTABLISHED_USER_ID);
+});
+
+test("a prohibited-term hold names the rule id on the review card and in the log, never the matched text", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, {
+    terms: [{ id: "local:sample", term: OPERATOR_TERM }],
+  });
+
+  await harness.postGate.handleMessage(
+    newAccountMessage({ id: "MSGTERM2", content: `a ${OPERATOR_TERM} appears` })
+  );
+
+  const [record] = [...harness.store.queue.values()];
+  assert.equal(record.ruleId, "local:sample");
+  const card = harness.protectedLogs[0].payload.embeds[0];
+  const cardText = JSON.stringify(card);
+  assert.match(cardText, /prohibited-term filter/);
+  assert.match(cardText, /local:sample/);
+
+  const heldLine = harness.logLines.find((line) =>
+    line.includes("post-gate held")
+  );
+  assert.match(heldLine, /trigger=prohibited_term/);
+  assert.match(heldLine, /rule=local:sample/);
+  assert.equal(
+    heldLine.includes(OPERATOR_TERM),
+    false,
+    "the log line must not repeat the matched term"
+  );
+});
+
+test("an allowlisted false positive is not held", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, {
+    terms: ["flurb"],
+    allowlist: ["flurb sauce"],
+  });
+
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGTERM3",
+      content: "please pass the flurb sauce",
+    })
+  );
+
+  assert.equal(harness.deletedMessageIds.length, 0);
+  assert.equal(harness.store.queue.size, 0);
+
+  // The same term outside the allowlisted phrase is still held.
+  await harness.postGate.handleMessage(
+    newAccountMessage({ id: "MSGTERM4", content: "you flurb" })
+  );
+  assert.deepEqual(harness.deletedMessageIds, ["MSGTERM4"]);
+});
+
+test("a zero-width and homoglyph spelling of a prohibited term is still held", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+
+  const evasions = [
+    "flu​rbex", // zero-width space
+    "flurbеx", // Cyrillic е
+    "ｆｌｕｒｂｅｘ", // fullwidth
+    "f l u r b e x", // separated letters
+    "fllllurbeeeex", // stretched letters
+    "flurb3x", // leetspeak
+  ];
+  for (const [index, content] of evasions.entries()) {
+    await harness.postGate.handleMessage(
+      newAccountMessage({ id: `MSGEVADE${index}`, content })
+    );
+  }
+
+  assert.equal(harness.deletedMessageIds.length, evasions.length);
+  assert.equal(harness.store.queue.size, evasions.length);
+});
+
+test("an operator term list extends the built-in list without replacing it", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+
+  const status = await harness.postGate.handleCommand(reviewCommandMessage(), [
+    "terms",
+  ]);
+  assert.equal(status.status, "ok");
+  const description = JSON.stringify(harness.sendCalls.at(-1).payload);
+  assert.match(description, /built-in/);
+  assert.match(description, /1 custom/);
+});
+
+test("a malformed operator term list leaves the built-in list active and is reported in status", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  Object.assign(harness.store.termList, {
+    terms: [],
+    allowlist: [],
+    status: "malformed",
+    error: "Unexpected token } in JSON",
+  });
+
+  const result = await harness.postGate.handleCommand(reviewCommandMessage(), [
+    "terms",
+  ]);
+  assert.equal(result.status, "malformed");
+  const description = JSON.stringify(harness.sendCalls.at(-1).payload);
+  assert.match(description, /could not be parsed/);
+  // The built-in rules are still compiled and still counted.
+  assert.match(description, /built-in/);
+});
+
+test("prohibited-term matching never punishes on its own — no strike is recorded at hold time", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+
+  await harness.postGate.handleMessage(
+    newAccountMessage({ id: "MSGTERM5", content: `${OPERATOR_TERM}!` })
+  );
+
+  assert.equal(harness.store.queue.size, 1);
+  assert.equal(harness.store.getAutomodStrike(SERVER_ID, NEW_USER_ID), null);
+  assert.equal(harness.bans.length, 0);
+  assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), false);
+});
+
+// ══════════════════════════════════════════════════════════════
+//  Full-user Post Gate: deny + hold, release, reminders
+// ══════════════════════════════════════════════════════════════
+
+async function holdUserViaDenyHold(harness, { userId = NEW_USER_ID } = {}) {
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: `MSGORIGIN${userId}`,
+      authorId: userId,
+      content: "https://example.com/first",
+    })
+  );
+  const record = [...harness.store.queue.values()].at(-1);
+  const result = await harness.postGate.denyHold(record.queueId, MOD_USER_ID);
+  return { record, result };
+}
+
+test("deny and hold posts one control card, advances the strike, and records who held the author and when", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  const { record, result } = await holdUserViaDenyHold(harness);
+
+  assert.equal(result.outcome, "rejected");
+  assert.equal(result.strikeLevel, 1);
+  assert.equal(result.userHold, "held");
+  assert.equal(harness.store.getHeldPost(record.queueId).status, "rejected");
+  assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), true);
+
+  const hold = harness.store.getUserHold(SERVER_ID, NEW_USER_ID);
+  assert.equal(hold.heldBy, MOD_USER_ID);
+  assert.equal(hold.heldAt, 1_800_000_000_000);
+  assert.equal(hold.originQueueId, record.queueId);
+  assert.equal(hold.reminderAt, 1_800_000_000_000 + 24 * 60 * 60 * 1_000);
+
+  const control = harness.protectedLogs.find((entry) =>
+    /User Held/.test(entry.payload.embeds[0].title)
+  );
+  assert.ok(
+    control,
+    "a persistent control card is posted to the review channel"
+  );
+  assert.equal(control.channelId, REVIEW_CHANNEL_ID);
+  assert.equal(hold.cardMessageId, control.payload ? hold.cardMessageId : null);
+  const controlText = JSON.stringify(control.payload);
+  assert.match(controlText, /Held by/);
+  assert.match(controlText, /Held since/);
+  assert.match(controlText, /🔓/);
+
+  // Exactly one combined audit card describes the denial and the new hold.
+  const denials = harness.protectedLogs.filter((entry) =>
+    /Author Placed in Post Gate/.test(entry.payload.embeds[0].title)
+  );
+  assert.equal(denials.length, 1);
+  assert.match(JSON.stringify(denials[0].payload), /Hold began/);
+
+  const auditLine = harness.logLines.find((line) => line.includes("deny-hold"));
+  assert.match(auditLine, /hold=held/);
+});
+
+test("reacting 🔒 twice does not duplicate the user hold or repost the control card", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await holdUserViaDenyHold(harness);
+  const firstHold = harness.store.getUserHold(SERVER_ID, NEW_USER_ID);
+  const controlCards = () =>
+    harness.protectedLogs.filter((entry) =>
+      /User Held/.test(entry.payload.embeds[0].title)
+    ).length;
+  assert.equal(controlCards(), 1);
+
+  harness.advance(60_000);
+  // A second held message from the same author, denied and held again.
+  await harness.postGate.handleMessage(
+    newAccountMessage({ id: "MSGORIGIN2", content: "another message" })
+  );
+  const second = [...harness.store.queue.values()].at(-1);
+  const result = await harness.postGate.denyHold(second.queueId, OWNER_ID);
+
+  assert.equal(result.userHold, "already_held");
+  assert.equal(controlCards(), 1, "no second control card");
+  const hold = harness.store.getUserHold(SERVER_ID, NEW_USER_ID);
+  assert.equal(hold.heldBy, firstHold.heldBy);
+  assert.equal(hold.heldAt, firstHold.heldAt);
+  assert.equal(harness.store.getActiveUserHolds(SERVER_ID).length, 1);
+});
+
+test("deny and hold on a legacy record with no author id resolves the queue entry without creating a phantom hold", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  harness.store.createHeldPost({
+    queueId: "PGLEGACYHOLD",
+    serverId: SERVER_ID,
+    channelId: SOURCE_CHANNEL_ID,
+    userId: undefined,
+    messageId: "LEGACYMSG",
+    content: "legacy content",
+    attachments: [],
+    reviewChannelId: REVIEW_CHANNEL_ID,
+    reviewMessageId: "LEGACYREVIEW",
+    status: "pending",
+    createdAt: 1_800_000_000_000,
+    expiresAt: 1_800_000_000_000 + 1_000,
+  });
+
+  const result = await harness.postGate.denyHold("PGLEGACYHOLD", MOD_USER_ID);
+
+  assert.equal(result.outcome, "rejected");
+  assert.equal(result.userHold, "skipped_legacy");
+  assert.equal(harness.store.getHeldPost("PGLEGACYHOLD").status, "rejected");
+  assert.equal(harness.store.getActiveUserHolds(SERVER_ID).length, 0);
+  assert.equal(harness.store.strikes.size, 0);
+});
+
+test("a user held while sending several messages gets each message held individually and only one control card", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await holdUserViaDenyHold(harness);
+  const queuedBefore = harness.store.queue.size;
+
+  // Plain text, no link, no attachment, and the account is no longer "new"
+  // by tenure — the hold alone must be enough.
+  for (const id of ["MSGHELD1", "MSGHELD2", "MSGHELD3"]) {
+    await harness.postGate.handleMessage(
+      establishedMessage({
+        id,
+        content: "just chatting",
+        authorId: NEW_USER_ID,
+      })
+    );
+  }
+
+  assert.equal(harness.store.queue.size, queuedBefore + 3);
+  const pending = harness.store
+    .getPendingHeldPosts(SERVER_ID)
+    .filter((entry) => entry.userId === NEW_USER_ID);
+  assert.equal(pending.length, 3);
+  assert.ok(pending.every((entry) => entry.trigger === "user_hold"));
+  assert.equal(
+    harness.protectedLogs.filter((entry) =>
+      /User Held/.test(entry.payload.embeds[0].title)
+    ).length,
+    1
+  );
+});
+
+test("a fully held user is still not gated in the review channel or a privacy-excluded channel", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await holdUserViaDenyHold(harness);
+  const before = harness.deletedMessageIds.length;
+
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGEXCLUDED",
+      channelId: EXCLUDED_CHANNEL_ID,
+      content: "in an excluded channel",
+    })
+  );
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGINREVIEW",
+      channelId: REVIEW_CHANNEL_ID,
+      content: "in the review channel",
+    })
+  );
+
+  assert.equal(harness.deletedMessageIds.length, before);
+});
+
+test("a recognized moderator is exempt even while a hold record exists for them", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  harness.store.createUserHold({
+    serverId: SERVER_ID,
+    userId: MOD_USER_ID,
+    heldAt: 1_800_000_000_000,
+    heldBy: OWNER_ID,
+  });
+
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGMODHELD",
+      authorId: MOD_USER_ID,
+      content: "hello",
+    })
+  );
+
+  assert.equal(harness.deletedMessageIds.length, 0);
+  assert.equal(harness.store.queue.size, 0);
+});
+
+test("level 3 lockdown takes precedence over a user hold", async () => {
+  const harness = makeHarness();
+  harness.store.setPostGateConfig(SERVER_ID, {
+    mode: "hold",
+    level: 3,
+    reviewChannelId: REVIEW_CHANNEL_ID,
+  });
+  harness.store.createUserHold({
+    serverId: SERVER_ID,
+    userId: NEW_USER_ID,
+    heldAt: 1_800_000_000_000,
+    heldBy: MOD_USER_ID,
+  });
+
+  await harness.postGate.handleMessage(
+    newAccountMessage({ id: "MSGLOCKHELD", content: "hello" })
+  );
+
+  // Deleted by lockdown, not queued for review.
+  assert.deepEqual(harness.deletedMessageIds, ["MSGLOCKHELD"]);
+  assert.equal(harness.store.queue.size, 0);
+});
+
+test("reacting 🔓 on the control card releases the user and restores normal posting immediately", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await holdUserViaDenyHold(harness);
+  const hold = harness.store.getUserHold(SERVER_ID, NEW_USER_ID);
+  assert.ok(hold.cardMessageId);
+
+  harness.advance(60_000);
+  await harness.postGate.handleRawEvent({
+    type: "MessageReact",
+    id: hold.cardMessageId,
+    user_id: MOD_USER_ID,
+    emoji_id: "🔓",
+  });
+
+  assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), false);
+  assert.ok(harness.deletedMessageIds.includes(hold.cardMessageId));
+  const notice = harness.protectedLogs.find((entry) =>
+    /User Released/.test(entry.payload.embeds[0].title)
+  );
+  assert.ok(notice);
+  assert.match(JSON.stringify(notice.payload), /Released by/);
+
+  // Posting works normally again: a plain established message is untouched.
+  const before = harness.deletedMessageIds.length;
+  await harness.postGate.handleMessage(
+    establishedMessage({
+      id: "MSGAFTERRELEASE",
+      content: "back to normal",
+      authorId: NEW_USER_ID,
+    })
+  );
+  assert.equal(harness.deletedMessageIds.length, before);
+});
+
+test("released users' queued messages stay pending and the release notice states how many", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await holdUserViaDenyHold(harness);
+  for (const id of ["MSGQUEUED1", "MSGQUEUED2"]) {
+    await harness.postGate.handleMessage(
+      establishedMessage({
+        id,
+        content: "held while gated",
+        authorId: NEW_USER_ID,
+      })
+    );
+  }
+  assert.equal(
+    harness.store
+      .getPendingHeldPosts(SERVER_ID)
+      .filter((e) => e.userId === NEW_USER_ID).length,
+    2
+  );
+
+  const result = await harness.postGate.releaseUser(
+    SERVER_ID,
+    NEW_USER_ID,
+    MOD_USER_ID
+  );
+
+  assert.equal(result.outcome, "released");
+  assert.equal(result.pending, 2);
+  const notice = harness.protectedLogs.find((entry) =>
+    /User Released/.test(entry.payload.embeds[0].title)
+  );
+  assert.match(JSON.stringify(notice.payload), /2 held message\(s\)/);
+  // Release stops future holds only — nothing already queued is resolved.
+  const stillPending = harness.store
+    .getPendingHeldPosts(SERVER_ID)
+    .filter((entry) => entry.userId === NEW_USER_ID);
+  assert.equal(stillPending.length, 2);
+  assert.ok(stillPending.every((entry) => entry.status === "pending"));
+});
+
+test("/Post-Gate release @member releases by command and reports not_held for a user who was never held", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await holdUserViaDenyHold(harness);
+
+  const released = await harness.postGate.handleCommand(
+    reviewCommandMessage(),
+    ["release", `<@${NEW_USER_ID}>`]
+  );
+  assert.equal(released.outcome, "released");
+  assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), false);
+
+  const again = await harness.postGate.handleCommand(reviewCommandMessage(), [
+    "release",
+    `<@${NEW_USER_ID}>`,
+  ]);
+  assert.equal(again.outcome, "not_held");
+
+  const noTarget = await harness.postGate.handleCommand(
+    reviewCommandMessage(),
+    ["release"]
+  );
+  assert.equal(noTarget.outcome, "invalid_target");
+});
+
+test("release requires fresh Manage Messages verification in the review channel", async () => {
+  const harness = makeHarness({ reviewChannelGrantsManageMessages: false });
+  await enableHold(harness);
+  harness.store.createUserHold({
+    serverId: SERVER_ID,
+    userId: NEW_USER_ID,
+    heldAt: 1_800_000_000_000,
+    heldBy: OWNER_ID,
+  });
+
+  const result = await harness.postGate.releaseUser(
+    SERVER_ID,
+    NEW_USER_ID,
+    MOD_USER_ID
+  );
+
+  assert.equal(result.outcome, "unauthorized");
+  assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), true);
+});
+
+test("the hourly sweep reminds moderators about a hold older than the reminder window", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await holdUserViaDenyHold(harness);
+  const reminders = () =>
+    harness.protectedLogs.filter((entry) =>
+      /User Still Held/.test(entry.payload.embeds[0].title)
+    );
+
+  harness.advance(23 * 60 * 60 * 1_000);
+  await harness.postGate.maintainQueue();
+  assert.equal(reminders().length, 0, "not due yet");
+
+  harness.advance(2 * 60 * 60 * 1_000);
+  await harness.postGate.maintainQueue();
+  assert.equal(reminders().length, 1);
+  const text = JSON.stringify(reminders()[0].payload);
+  assert.match(text, /Held by/);
+  assert.match(text, /🔓/);
+  assert.match(text, /⏳/);
+  assert.match(text, /never releases a hold by itself/);
+  // The user is still held — a reminder is not a deadline.
+  assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), true);
+});
+
+test("an ignored reminder repeats once per window, not once per sweep", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await holdUserViaDenyHold(harness);
+  const reminderCount = () =>
+    harness.protectedLogs.filter((entry) =>
+      /User Still Held/.test(entry.payload.embeds[0].title)
+    ).length;
+
+  harness.advance(25 * 60 * 60 * 1_000);
+  await harness.postGate.maintainQueue();
+  assert.equal(reminderCount(), 1);
+
+  // Three more hourly sweeps inside the same window produce nothing new.
+  for (let i = 0; i < 3; i += 1) {
+    harness.advance(60 * 60 * 1_000);
+    await harness.postGate.maintainQueue();
+  }
+  assert.equal(reminderCount(), 1);
+
+  harness.advance(22 * 60 * 60 * 1_000);
+  await harness.postGate.maintainQueue();
+  assert.equal(reminderCount(), 2);
+  assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), true);
+});
+
+test("reacting ⏳ re-arms the reminder without releasing the user", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await holdUserViaDenyHold(harness);
+  harness.advance(25 * 60 * 60 * 1_000);
+  await harness.postGate.maintainQueue();
+  const reminderId = harness.store.getUserHold(
+    SERVER_ID,
+    NEW_USER_ID
+  ).lastReminderMessageId;
+  assert.ok(reminderId);
+
+  await harness.postGate.handleRawEvent({
+    type: "MessageReact",
+    id: reminderId,
+    user_id: MOD_USER_ID,
+    emoji_id: "⏳",
+  });
+
+  const hold = harness.store.getUserHold(SERVER_ID, NEW_USER_ID);
+  assert.equal(hold.active, true);
+  assert.equal(
+    hold.reminderAt,
+    harness.store.getUserHold(SERVER_ID, NEW_USER_ID).reminderAt
+  );
+  assert.ok(hold.reminderAt > 1_800_000_000_000 + 25 * 60 * 60 * 1_000);
+  assert.ok(harness.deletedMessageIds.includes(reminderId));
+  assert.ok(
+    harness.protectedLogs.some((entry) =>
+      /Hold Continued/.test(entry.payload.embeds[0].title)
+    )
+  );
+});
+
+test("⏳ on the control card is ignored — continue holding is only offered on a reminder", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await holdUserViaDenyHold(harness);
+  const hold = harness.store.getUserHold(SERVER_ID, NEW_USER_ID);
+  const before = harness.protectedLogs.length;
+
+  await harness.postGate.handleRawEvent({
+    type: "MessageReact",
+    id: hold.cardMessageId,
+    user_id: MOD_USER_ID,
+    emoji_id: "⏳",
+  });
+
+  assert.equal(harness.protectedLogs.length, before);
+  assert.equal(
+    harness.store.getUserHold(SERVER_ID, NEW_USER_ID).reminderAt,
+    hold.reminderAt
+  );
+});
+
+test("a hold is never auto-released, even after many reminder windows", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await holdUserViaDenyHold(harness);
+
+  for (let day = 0; day < 30; day += 1) {
+    harness.advance(24 * 60 * 60 * 1_000 + 1);
+    await harness.postGate.maintainQueue();
+  }
+
+  assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), true);
+  assert.equal(
+    harness.store.getUserHold(SERVER_ID, NEW_USER_ID).releasedAt,
+    null
+  );
+});
+
+// ══════════════════════════════════════════════════════════════
+//  Concurrency, restart, and membership edge cases
+// ══════════════════════════════════════════════════════════════
+
+test("two simultaneous reactions on the same held post produce exactly one decision", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await harness.postGate.handleMessage(
+    newAccountMessage({ id: "MSGRACE1", content: "https://example.com/race" })
+  );
+  const [record] = [...harness.store.queue.values()];
+  const reviewCardDeletes = () =>
+    harness.deletedMessageIds.filter((id) => id === record.reviewMessageId)
+      .length;
+
+  // Two moderators react in the same tick, before either decision is written.
+  // Without the per-queue lock both would pass the "pending" check, because
+  // the permission refresh between the check and the write is asynchronous.
+  await Promise.all([
+    harness.postGate.handleRawEvent({
+      type: "MessageReact",
+      id: record.reviewMessageId,
+      user_id: MOD_USER_ID,
+      emoji_id: "✅",
+    }),
+    harness.postGate.handleRawEvent({
+      type: "MessageReact",
+      id: record.reviewMessageId,
+      user_id: OWNER_ID,
+      emoji_id: "❌",
+    }),
+  ]);
+
+  // Exactly one of them actually acted: one final status, one review-card
+  // deletion, and one accountability card.
+  const stored = harness.store.getHeldPost(record.queueId);
+  assert.ok(["approved", "rejected"].includes(stored.status));
+  assert.equal(reviewCardDeletes(), 1);
+  const outcomeCards = harness.protectedLogs.filter((entry) =>
+    /Held Post (Approved|Rejected)/.test(entry.payload.embeds[0].title)
+  );
+  assert.equal(outcomeCards.length, 1);
+  // The strike store reflects that one decision, never both.
+  const strike = harness.store.getAutomodStrike(SERVER_ID, NEW_USER_ID);
+  assert.equal(
+    stored.status === "rejected" ? strike?.level : strike,
+    stored.status === "rejected" ? 1 : null
+  );
+});
+
+test("two simultaneous deny + hold reactions create exactly one user hold", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await harness.postGate.handleMessage(
+    newAccountMessage({ id: "MSGRACE3", content: "https://example.com/race3" })
+  );
+  const [record] = [...harness.store.queue.values()];
+
+  await Promise.all([
+    harness.postGate.handleRawEvent({
+      type: "MessageReact",
+      id: record.reviewMessageId,
+      user_id: MOD_USER_ID,
+      emoji_id: "🔒",
+    }),
+    harness.postGate.handleRawEvent({
+      type: "MessageReact",
+      id: record.reviewMessageId,
+      user_id: OWNER_ID,
+      emoji_id: "🔒",
+    }),
+  ]);
+
+  assert.equal(harness.store.getActiveUserHolds(SERVER_ID).length, 1);
+  assert.equal(
+    harness.protectedLogs.filter((entry) =>
+      /User Held/.test(entry.payload.embeds[0].title)
+    ).length,
+    1
+  );
+  assert.equal(harness.store.getAutomodStrike(SERVER_ID, NEW_USER_ID).level, 1);
+});
+
+test("approving after another moderator denied reports the already-resolved status and takes no action", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await harness.postGate.handleMessage(
+    newAccountMessage({ id: "MSGRACE2", content: "https://example.com/race2" })
+  );
+  const [record] = [...harness.store.queue.values()];
+
+  await harness.postGate.handleCommand(reviewCommandMessage(), [
+    "reject",
+    record.queueId,
+  ]);
+  const cardsAfterReject = harness.protectedLogs.length;
+  const strikeAfterReject = harness.store.getAutomodStrike(
+    SERVER_ID,
+    NEW_USER_ID
+  );
+
+  const late = await harness.postGate.handleCommand(
+    reviewCommandMessage(OWNER_ID),
+    ["approve", record.queueId]
+  );
+
+  assert.equal(late.outcome, "rejected");
+  assert.match(
+    JSON.stringify(harness.sendCalls.at(-1).payload),
+    /already resolved as rejected/
+  );
+  // Nothing changed: no extra audit card, and the strike was not cleared.
+  assert.equal(harness.protectedLogs.length, cardsAfterReject);
+  assert.deepEqual(
+    harness.store.getAutomodStrike(SERVER_ID, NEW_USER_ID),
+    strikeAfterReject
+  );
+});
+
+test("a hold survives a restart with its control card id and reminder timing intact", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await holdUserViaDenyHold(harness);
+  const before = harness.store.getUserHold(SERVER_ID, NEW_USER_ID);
+
+  // Restart: a fresh gate over the same persisted store contents.
+  const restarted = makeHarness();
+  restarted.store.config.set(
+    SERVER_ID,
+    harness.store.getPostGateConfig(SERVER_ID)
+  );
+  for (const [key, value] of harness.store.holds) {
+    restarted.store.holds.set(key, structuredClone(value));
+  }
+  restarted.setClock(1_800_000_000_000 + 60_000);
+
+  const after = restarted.store.getUserHold(SERVER_ID, NEW_USER_ID);
+  assert.equal(after.active, true);
+  assert.equal(after.heldBy, before.heldBy);
+  assert.equal(after.heldAt, before.heldAt);
+  assert.equal(after.cardMessageId, before.cardMessageId);
+  assert.equal(after.reminderAt, before.reminderAt);
+
+  // The hold still holds after the restart...
+  await restarted.postGate.handleMessage(
+    establishedMessage({
+      id: "MSGAFTERRESTART",
+      content: "plain text",
+      authorId: NEW_USER_ID,
+    })
+  );
+  assert.deepEqual(restarted.deletedMessageIds, ["MSGAFTERRESTART"]);
+
+  // ...and the reminder still fires on the original schedule.
+  restarted.setClock(before.reminderAt + 1);
+  await restarted.postGate.maintainQueue();
+  assert.ok(
+    restarted.protectedLogs.some((entry) =>
+      /User Still Held/.test(entry.payload.embeds[0].title)
+    )
+  );
+
+  // The control card the pre-restart gate posted still resolves a reaction.
+  await restarted.postGate.handleRawEvent({
+    type: "MessageReact",
+    id: after.cardMessageId,
+    user_id: MOD_USER_ID,
+    emoji_id: "🔓",
+  });
+  assert.equal(restarted.store.isUserHeld(SERVER_ID, NEW_USER_ID), false);
+});
+
+test("a hold survives the user leaving and rejoining the server", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await holdUserViaDenyHold(harness);
+
+  // A rejoin looks like a brand-new member record with a fresh join date; the
+  // hold is keyed on server + user, so none of that matters.
+  harness.advance(7 * 24 * 60 * 60 * 1_000);
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGREJOINED",
+      content: "hello again",
+      joinedAt: new Date(1_800_000_000_000 + 7 * 24 * 60 * 60 * 1_000),
+    })
+  );
+
+  assert.ok(harness.deletedMessageIds.includes("MSGREJOINED"));
+  const held = harness.store
+    .getPendingHeldPosts(SERVER_ID)
+    .find((entry) => entry.messageId === "MSGREJOINED");
+  assert.equal(held.trigger, "user_hold");
+});
+
+test("turning the post gate off leaves hold records inert and honours them again when it is re-enabled", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await holdUserViaDenyHold(harness);
+
+  harness.store.setPostGateConfig(SERVER_ID, {
+    mode: "off",
+    level: 0,
+    reviewChannelId: null,
+  });
+  const before = harness.deletedMessageIds.length;
+  await harness.postGate.handleMessage(
+    establishedMessage({
+      id: "MSGGATEOFF",
+      content: "hi",
+      authorId: NEW_USER_ID,
+    })
+  );
+  assert.equal(
+    harness.deletedMessageIds.length,
+    before,
+    "nothing is held while off"
+  );
+  assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), true);
+
+  await enableHold(harness);
+  await harness.postGate.handleMessage(
+    establishedMessage({
+      id: "MSGGATEON",
+      content: "hi again",
+      authorId: NEW_USER_ID,
+    })
+  );
+  assert.ok(harness.deletedMessageIds.includes("MSGGATEON"));
+});
+
+test("shouldExcludeMessage covers user holds and prohibited-term holds, not just links", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+
+  const termMessage = establishedMessage({
+    id: "MSGEXCLTERM",
+    content: `an ${OPERATOR_TERM} here`,
+  });
+  const [excluded] = await Promise.all([
+    harness.postGate.shouldExcludeMessage(termMessage),
+    harness.postGate.handleMessage(termMessage),
+  ]);
+  assert.equal(excluded, true);
+  assert.equal(
+    await harness.postGate.shouldExcludeMessageDelete("MSGEXCLTERM"),
+    false
+  );
+
+  // Ordinary prose in a gated server is still cheap and still not excluded.
+  assert.equal(
+    await harness.postGate.shouldExcludeMessage(
+      establishedMessage({ id: "MSGEXCLPLAIN", content: "good morning" })
+    ),
+    false
+  );
+});
+
+test("/Post-Gate holds lists who is currently gated and since when", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+
+  const empty = await harness.postGate.handleCommand(reviewCommandMessage(), [
+    "holds",
+  ]);
+  assert.equal(empty.count, 0);
+  assert.match(
+    JSON.stringify(harness.sendCalls.at(-1).payload),
+    /No members are currently in Post Gate/
+  );
+
+  await holdUserViaDenyHold(harness);
+  const listed = await harness.postGate.handleCommand(reviewCommandMessage(), [
+    "holds",
+  ]);
+  assert.equal(listed.count, 1);
+  const text = JSON.stringify(harness.sendCalls.at(-1).payload);
+  assert.match(text, new RegExp(NEW_USER_ID));
+  assert.match(text, new RegExp(MOD_USER_ID));
+});
+
+test("the in-memory test store implements the same surface the real store exports", async () => {
+  // The gate is dependency-injected, so every test above runs against a fake.
+  // That fake is only meaningful if store.js actually provides the same names:
+  // without this check, a store function could be renamed (or a new one added
+  // to the fake alone) and the whole suite would keep passing against a store
+  // shape production never sees.
+  const realStore = await import("../store.js");
+  const fake = makeStore();
+  const inspectionOnly = new Set([
+    "config",
+    "queue",
+    "strikes",
+    "holds",
+    "termList",
+  ]);
+
+  const fakeFunctions = Object.keys(fake)
+    .filter((key) => !inspectionOnly.has(key))
+    .filter((key) => typeof fake[key] === "function");
+
+  assert.ok(fakeFunctions.length > 20);
+  for (const name of fakeFunctions) {
+    assert.equal(
+      typeof realStore[name],
+      "function",
+      `store.js must export ${name}, which the post-gate test store fakes`
+    );
+  }
+
+  // And the new user-hold + term-list surface specifically is all present.
+  for (const name of [
+    "isUserHeld",
+    "getUserHold",
+    "createUserHold",
+    "updateUserHold",
+    "releaseUserHold",
+    "findUserHoldByCardMessage",
+    "getActiveUserHolds",
+    "getDueUserHoldReminders",
+    "prunePostGateUserHolds",
+    "getProhibitedTermList",
+    "reloadProhibitedTermList",
+  ]) {
+    assert.equal(
+      typeof realStore[name],
+      "function",
+      `store.js must export ${name}`
+    );
+    assert.equal(
+      typeof fake[name],
+      "function",
+      `the test store must fake ${name}`
+    );
+  }
 });

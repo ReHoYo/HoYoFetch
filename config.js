@@ -16,6 +16,7 @@ const ALLOWED_ENV_KEYS = new Set([
   "AUDITLOG_DEBUG",
   "AUDITLOG_EVIDENCE_MAX_MB",
   "AUDITLOG_EVIDENCE_BUDGET_MB",
+  "POST_GATE_HOLD_REMINDER_HOURS",
 ]);
 
 function loadEnv() {
@@ -71,6 +72,26 @@ const fetchCooldownSeconds =
     ? Math.min(rawCooldown, 3600)
     : 10;
 
+// How long a member may sit in full Post Gate before Irminsul reminds
+// moderators that the hold is still standing. It never auto-releases.
+const rawHoldReminder = parseInt(
+  process.env.POST_GATE_HOLD_REMINDER_HOURS || "24",
+  10
+);
+const postGateHoldReminderHours =
+  Number.isFinite(rawHoldReminder) && rawHoldReminder >= 1
+    ? Math.min(rawHoldReminder, 168)
+    : 24;
+
+if (
+  process.env.POST_GATE_HOLD_REMINDER_HOURS &&
+  postGateHoldReminderHours !== rawHoldReminder
+) {
+  console.warn(
+    `⚠️  POST_GATE_HOLD_REMINDER_HOURS clamped to ${postGateHoldReminderHours} (was ${process.env.POST_GATE_HOLD_REMINDER_HOURS})`
+  );
+}
+
 export const CONFIG = {
   token: process.env.BOT_TOKEN || "",
   prefix: process.env.PREFIX || "/",
@@ -80,6 +101,7 @@ export const CONFIG = {
     process.env.HOYO_API_BASE || "https://hoyo-codes.seria.moe/codes",
   emergencyServerId: process.env.EMERGENCY_SERVER_ID || "",
   stoatApiBase: process.env.STOAT_API_BASE || "https://api.stoat.chat",
+  postGateHoldReminderMs: postGateHoldReminderHours * 60 * 60 * 1_000,
 };
 
 // ═══════════════════════════════════════════════════

@@ -485,3 +485,197 @@ test("privacy digest state round-trips per server and defaults to null", () => {
     JSON.parse(readFileSync(join(dataDir, "privacy_digest.json"), "utf-8"))
   );
 });
+
+test("user holds normalise ids, timestamps, and the active flag on load", () => {
+  const created = store.createUserHold({
+    serverId: "HOLDSERVER1",
+    userId: "HOLDUSER1",
+    heldAt: 1_000,
+    heldBy: "HOLDMOD1",
+    originQueueId: "PGHOLD1",
+    originMessageId: "HOLDMSG1",
+    cardChannelId: "HOLDCHANNEL1",
+    reminderAt: 2_000,
+    // Hostile/garbage values must be dropped rather than persisted.
+    releasedAt: "not-a-number",
+    reminderCount: -5,
+    lastReminderMessageId: "bad id with spaces",
+  });
+  assert.equal(created.created, true);
+  assert.equal(created.record.active, true);
+  assert.equal(created.record.releasedAt, null);
+  assert.equal(created.record.reminderCount, 0);
+  assert.equal(created.record.lastReminderMessageId, null);
+  assert.equal(created.record.heldBy, "HOLDMOD1");
+
+  assert.equal(store.isUserHeld("HOLDSERVER1", "HOLDUSER1"), true);
+  assert.equal(store.isUserHeld("HOLDSERVER1", "SOMEONEELSE"), false);
+
+  // A record with no usable server/user id is refused outright.
+  assert.deepEqual(store.createUserHold({ serverId: "", userId: "" }), {
+    created: false,
+    record: null,
+  });
+});
+
+test("creating a user hold twice returns the existing record without duplicating it", () => {
+  store.createUserHold({
+    serverId: "HOLDSERVER2",
+    userId: "HOLDUSER2",
+    heldAt: 5_000,
+    heldBy: "FIRSTMOD",
+  });
+  const again = store.createUserHold({
+    serverId: "HOLDSERVER2",
+    userId: "HOLDUSER2",
+    heldAt: 9_999,
+    heldBy: "SECONDMOD",
+  });
+  assert.equal(again.created, false);
+  // Who placed the hold and when must survive a repeat attempt.
+  assert.equal(again.record.heldBy, "FIRSTMOD");
+  assert.equal(again.record.heldAt, 5_000);
+  assert.equal(store.getActiveUserHolds("HOLDSERVER2").length, 1);
+});
+
+test("finding a user hold by card message resolves both the control card and the latest reminder", () => {
+  store.createUserHold({
+    serverId: "HOLDSERVER3",
+    userId: "HOLDUSER3",
+    heldAt: 1,
+    heldBy: "HOLDMOD3",
+  });
+  store.updateUserHold("HOLDSERVER3", "HOLDUSER3", {
+    cardMessageId: "CONTROLCARD3",
+    lastReminderMessageId: "REMINDERCARD3",
+  });
+
+  assert.equal(
+    store.findUserHoldByCardMessage("CONTROLCARD3").cardKind,
+    "control"
+  );
+  assert.equal(
+    store.findUserHoldByCardMessage("REMINDERCARD3").cardKind,
+    "reminder"
+  );
+  assert.equal(store.findUserHoldByCardMessage("UNKNOWNCARD"), null);
+  assert.equal(store.findUserHoldByCardMessage(undefined), null);
+});
+
+test("reminders come due on the stored absolute timestamp", () => {
+  store.createUserHold({
+    serverId: "HOLDSERVER4",
+    userId: "HOLDUSER4",
+    heldAt: 0,
+    heldBy: "HOLDMOD4",
+    reminderAt: 10_000,
+  });
+  const due = (now) =>
+    store
+      .getDueUserHoldReminders(now)
+      .filter((record) => record.serverId === "HOLDSERVER4");
+  assert.equal(due(9_999).length, 0);
+  assert.equal(due(10_000).length, 1);
+
+  store.updateUserHold("HOLDSERVER4", "HOLDUSER4", { reminderAt: 30_000 });
+  assert.equal(due(10_000).length, 0);
+});
+
+test("releasing a user hold preserves the record for audit and prunes after the retention window", () => {
+  store.createUserHold({
+    serverId: "HOLDSERVER5",
+    userId: "HOLDUSER5",
+    heldAt: 100,
+    heldBy: "HOLDMOD5",
+    reminderAt: 200,
+  });
+  const released = store.releaseUserHold("HOLDSERVER5", "HOLDUSER5", {
+    releasedBy: "RELEASEMOD5",
+    releasedAt: 500,
+    reason: "reaction",
+  });
+  assert.equal(released.released, true);
+  assert.equal(released.record.active, false);
+  assert.equal(released.record.releasedBy, "RELEASEMOD5");
+  assert.equal(released.record.releaseReason, "reaction");
+  // A released hold must stop holding, stop reminding, and stop answering
+  // reaction lookups.
+  assert.equal(store.isUserHeld("HOLDSERVER5", "HOLDUSER5"), false);
+  assert.equal(
+    store.getDueUserHoldReminders(1_000).some((r) => r.userId === "HOLDUSER5"),
+    false
+  );
+  // Releasing twice is a no-op rather than an error.
+  assert.equal(
+    store.releaseUserHold("HOLDSERVER5", "HOLDUSER5").released,
+    false
+  );
+  assert.equal(store.releaseUserHold("NOSUCH", "NOBODY").released, false);
+
+  // The record stays readable for audit until the retention window elapses.
+  assert.equal(store.getUserHold("HOLDSERVER5", "HOLDUSER5").releasedAt, 500);
+  store.prunePostGateUserHolds(500 + 24 * 60 * 60 * 1_000);
+  assert.ok(store.getUserHold("HOLDSERVER5", "HOLDUSER5"));
+  store.prunePostGateUserHolds(500 + 8 * 24 * 60 * 60 * 1_000);
+  assert.equal(store.getUserHold("HOLDSERVER5", "HOLDUSER5"), null);
+});
+
+test("a missing prohibited-term file reports missing without throwing, and a malformed one reports malformed", () => {
+  const termsPath = join(dataDir, "prohibited_terms.json");
+  assert.equal(existsSync(termsPath), false);
+  const absent = store.reloadProhibitedTermList({ force: true });
+  assert.equal(absent.status, "missing");
+  assert.deepEqual(absent.terms, []);
+  assert.deepEqual(absent.allowlist, []);
+
+  writeFileSync(termsPath, "{ this is not json");
+  const broken = store.reloadProhibitedTermList({ force: true });
+  assert.equal(broken.status, "malformed");
+  assert.ok(broken.error);
+  // Falling back to an empty operator list keeps the built-in list active
+  // rather than taking the filter offline.
+  assert.deepEqual(broken.terms, []);
+
+  writeFileSync(
+    termsPath,
+    JSON.stringify({
+      version: 1,
+      terms: [
+        "plainterm",
+        { id: "local:one", term: "phrase term", tolerant: false },
+        { term: "   " },
+        42,
+        null,
+      ],
+      allowlist: ["scunthorpe", "", { term: "objects not allowed here" }],
+      unknownKey: "ignored",
+    })
+  );
+  const loaded = store.reloadProhibitedTermList({ force: true });
+  assert.equal(loaded.status, "ok");
+  assert.deepEqual(loaded.terms, [
+    "plainterm",
+    { term: "phrase term", id: "local:one", tolerant: false },
+  ]);
+  assert.deepEqual(loaded.allowlist, ["scunthorpe"]);
+  assert.equal(loaded.skipped, 5);
+});
+
+test("reloading the prohibited-term list only re-reads when the file changed", () => {
+  const termsPath = join(dataDir, "prohibited_terms.json");
+  writeFileSync(termsPath, JSON.stringify({ terms: ["stableterm"] }));
+  const first = store.reloadProhibitedTermList({ force: true });
+  assert.equal(first.changed, true);
+
+  const second = store.reloadProhibitedTermList();
+  assert.equal(second.changed, false);
+  assert.deepEqual(second.terms, ["stableterm"]);
+
+  writeFileSync(
+    termsPath,
+    JSON.stringify({ terms: ["stableterm", "anotherterm"] })
+  );
+  const third = store.reloadProhibitedTermList();
+  assert.equal(third.changed, true);
+  assert.deepEqual(third.terms, ["stableterm", "anotherterm"]);
+});

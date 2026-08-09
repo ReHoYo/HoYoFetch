@@ -31,6 +31,7 @@ import {
 } from "./attachment-evidence.js";
 import { AUTOMOD_LIMITS, nextStrikeLevel } from "./automod.js";
 import { parseChannelArg } from "./auditlog.js";
+import { findTargetToken, tokenizeArgs } from "./command-args.js";
 import { buildAuditEmbed, buildStatusEmbed } from "./embeds.js";
 import { countArchivedMessages } from "./message-archive.js";
 import {
@@ -39,22 +40,40 @@ import {
   removePermission,
   toPermissionBits,
 } from "./permission-bits.js";
+import {
+  BUILT_IN_PROHIBITED_TERMS,
+  BUILT_IN_TERM_ALLOWLIST,
+  compileProhibitedTerms,
+  describeProhibitedTermList,
+  matchProhibitedTerm,
+} from "./prohibited-terms.js";
 import { deriveAccountCreatedAt } from "./user-info.js";
 import {
   clearAutomodStrike,
   createHeldPost,
+  createUserHold,
   findHeldPostByReviewMessage,
+  findUserHoldByCardMessage,
+  getActiveUserHolds,
   getAutomodStrike,
+  getDueUserHoldReminders,
   getExpiredPendingPosts,
   getHeldPost,
   getAllPostGateConfigs,
   getPendingHeldPosts,
   getPostGateConfig,
+  getProhibitedTermList,
+  getUserHold,
   isChannelExcluded,
+  isUserHeld,
   prunePostGateQueue,
+  prunePostGateUserHolds,
+  releaseUserHold,
+  reloadProhibitedTermList,
   setAutomodStrike,
   setPostGateConfig,
   updateHeldPost,
+  updateUserHold,
 } from "./store.js";
 import {
   auditAlias,
@@ -76,8 +95,28 @@ export const DEGRADED_NOTICE_WINDOW_MS = 10 * 60 * 1_000;
 export const PERMISSION_RECONCILE_INTERVAL_MS = 5 * 60 * 1_000;
 const QUEUE_PRUNE_INTERVAL_MS = 60 * 60 * 1_000;
 const MAX_LOCKDOWN_ACTORS = 5_000;
+export const USER_HOLD_REMINDER_MS = 24 * 60 * 60 * 1_000;
+const MIN_HOLD_REMINDER_MS = 60 * 60 * 1_000;
+const MAX_HOLD_REMINDER_MS = 168 * 60 * 60 * 1_000;
+// Stoat has no interactive components, so every moderator control in this file
+// is a reaction the bot seeds on a card it posted, plus an equivalent command.
 const APPROVE_EMOJI = "✅";
 const REJECT_EMOJI = "❌";
+const DENY_HOLD_EMOJI = "🔒";
+const RELEASE_EMOJI = "🔓";
+const CONTINUE_EMOJI = "⏳";
+const REVIEW_EMOJI = new Set([
+  APPROVE_EMOJI,
+  REJECT_EMOJI,
+  DENY_HOLD_EMOJI,
+  RELEASE_EMOJI,
+  CONTINUE_EMOJI,
+]);
+const TRIGGER_LABELS = Object.freeze({
+  first_post: "link or attachment from a new or first-time poster",
+  prohibited_term: "prohibited-term filter",
+  user_hold: "author is currently in Post Gate",
+});
 const LOCKDOWN_BAN_REASON =
   "Irminsul Level 4 lockdown: posted through the server permission lock while automatic bans were enabled";
 // Stoat messages are much shorter than this, but keep normalization bounded
@@ -140,18 +179,29 @@ function hasLinkOrAttachment(message) {
 const DEFAULT_STORE = Object.freeze({
   clearAutomodStrike,
   createHeldPost,
+  createUserHold,
   findHeldPostByReviewMessage,
+  findUserHoldByCardMessage,
+  getActiveUserHolds,
   getAutomodStrike,
+  getDueUserHoldReminders,
   getExpiredPendingPosts,
   getHeldPost,
   getAllPostGateConfigs,
   getPendingHeldPosts,
   getPostGateConfig,
+  getProhibitedTermList,
+  getUserHold,
   isChannelExcluded,
+  isUserHeld,
   prunePostGateQueue,
+  prunePostGateUserHolds,
+  releaseUserHold,
+  reloadProhibitedTermList,
   setAutomodStrike,
   setPostGateConfig,
   updateHeldPost,
+  updateUserHold,
 });
 
 function defaultQueueIdFactory() {
@@ -189,6 +239,7 @@ export function createPostGate(
     runIntentionalDelete,
     scheduleTimeout = setTimeout,
     scheduleInterval = setInterval,
+    holdReminderMs = USER_HOLD_REMINDER_MS,
   } = {}
 ) {
   if (typeof send !== "function") {
@@ -212,6 +263,13 @@ export function createPostGate(
       scheduleTimeout,
     });
 
+  const reminderMs = Number.isFinite(holdReminderMs)
+    ? Math.min(
+        Math.max(holdReminderMs, MIN_HOLD_REMINDER_MS),
+        MAX_HOLD_REMINDER_MS
+      )
+    : USER_HOLD_REMINDER_MS;
+
   let pruneStarted = false;
   const pendingDecisions = new Map();
   const pendingLevelPrompts = new Map();
@@ -219,6 +277,50 @@ export function createPostGate(
   const degradedNotices = new Map();
   const permissionReconcileLocks = new Set();
   const permissionEventTimers = new Map();
+  // Serialise decisions per held post and per held user, so two moderators
+  // acting in the same instant produce one outcome rather than two.
+  const reviewLocks = new Map();
+  const userHoldLocks = new Map();
+  let compiledTerms = null;
+
+  /**
+   * Run `operation` after any operation already queued for `key`, and clean the
+   * queue up once it drains. The previous tail is awaited with the same handler
+   * for both settle paths, so one failure cannot wedge the key forever.
+   */
+  function withLock(locks, key, operation) {
+    const previous = locks.get(key) ?? Promise.resolve();
+    const run = () => operation();
+    const result = previous.then(run, run);
+    const cleaned = result.then(
+      () => {
+        if (locks.get(key) === cleaned) locks.delete(key);
+      },
+      () => {
+        if (locks.get(key) === cleaned) locks.delete(key);
+      }
+    );
+    locks.set(key, cleaned);
+    return result;
+  }
+
+  /**
+   * The operator's data/prohibited_terms.json *extends* the built-in seed list;
+   * it never replaces it, so an operator allowlist entry is the only way to
+   * soften a built-in rule. Deliberately no file watcher: data/ is edited over
+   * SSH and reloadProhibitedTermList costs one stat() unless the file changed.
+   */
+  function ensureCompiledTerms(force = false) {
+    const list = store.reloadProhibitedTermList(force ? { force: true } : {});
+    if (!compiledTerms || list.changed) {
+      compiledTerms = compileProhibitedTerms({
+        terms: [...BUILT_IN_PROHIBITED_TERMS, ...(list.terms ?? [])],
+        allowlist: [...BUILT_IN_TERM_ALLOWLIST, ...(list.allowlist ?? [])],
+      });
+      compiledTerms.list = list;
+    }
+    return compiledTerms;
+  }
 
   function commandName() {
     return `${prefix}Post-Gate`;
@@ -307,6 +409,7 @@ export function createPostGate(
     const pending = gate.getPending(serverId);
     const gatePending = pending?.kind === CHALLENGE_KIND ? pending : null;
     const heldCount = store.getPendingHeldPosts(serverId).length;
+    const terms = ensureCompiledTerms();
     const lines = [
       `**Mode:** ${config.mode}`,
       `**Server level:** ${config.level || "off"}`,
@@ -317,6 +420,8 @@ export function createPostGate(
           : "not configured"
       }`,
       `**Currently held for review:** ${heldCount}`,
+      `**Users in Post Gate:** ${store.getActiveUserHolds(serverId).length}`,
+      `**Prohibited terms:** ${describeProhibitedTermList(terms, terms.list ?? {})}`,
     ];
     if (gatePending) {
       lines.push(
@@ -968,6 +1073,15 @@ export function createPostGate(
     });
     clearLockdownActors(challenge.serverId);
     const updatedConfig = store.getPostGateConfig(challenge.serverId);
+    // A control card left behind in the old review channel is a control nobody
+    // sees. Hold records themselves are untouched by a config change — turning
+    // the gate off leaves them inert, and re-enabling it honours them again.
+    if (
+      action !== "off" &&
+      previousConfig.reviewChannelId !== updatedConfig.reviewChannelId
+    ) {
+      await repostUserHoldCards(challenge.serverId);
+    }
 
     const title = terminalTitle(action);
     const description =
@@ -1210,6 +1324,31 @@ export function createPostGate(
   // ── Detection ────────────────────────────────────────────────
 
   /**
+   * Decide *why* a message would be held, or null for "leave it alone".
+   * Synchronous by contract and free of archive reads, so handleMessage can
+   * call it before its first await and shouldExcludeMessage can share it —
+   * the two must never disagree about whether a message is being held.
+   *
+   * Order matters:
+   *  - a full-user hold wins first: it is a plain lookup, and it is the one
+   *    trigger that must ignore link, attachment, and tenure signals entirely;
+   *  - a prohibited term comes next, ahead of the first-post gate, because a
+   *    slur has to be reviewable no matter how long the author has been here,
+   *    so it deliberately never consults isFirstPostCandidate;
+   *  - links and attachments stay last, unchanged.
+   */
+  function classifyTrigger(message, config, { serverId, channelId, authorId }) {
+    if (config.level >= 3) return { trigger: "lockdown" };
+    if (channelId === config.reviewChannelId) return null;
+    if (store.isChannelExcluded(channelId)) return null;
+    if (store.isUserHeld(serverId, authorId)) return { trigger: "user_hold" };
+    const match = matchProhibitedTerm(message?.content, ensureCompiledTerms());
+    if (match) return { trigger: "prohibited_term", match };
+    if (hasLinkOrAttachment(message)) return { trigger: "first_post" };
+    return null;
+  }
+
+  /**
    * Called synchronously (before any await in handleMessage) so the archive
    * snapshot it reads predates any interleaving from other messageCreate
    * listeners — in particular auditlog.js's own archive write for this same
@@ -1244,8 +1383,15 @@ export function createPostGate(
       `**Queue ID:** \`${record.queueId}\``,
       `**Author:** ${actorLabel(record.userId)}`,
       `**Channel:** ${channelLabel(record.channelId)}`,
-      `**Content:** ${record.content ? record.content.slice(0, 1000) : "*(no text — attachment/link only)*"}`,
+      `**Reason:** ${TRIGGER_LABELS[record.trigger] ?? TRIGGER_LABELS.first_post}`,
     ];
+    // The rule id, never the matched text: a review card is posted to a
+    // channel, and repeating the term there would republish the very thing the
+    // hold removed.
+    if (record.ruleId) lines.push(`**Matched rule:** \`${record.ruleId}\``);
+    lines.push(
+      `**Content:** ${record.content ? record.content.slice(0, 1000) : "*(no text — attachment/link only)*"}`
+    );
     if (record.attachments.length) {
       lines.push(
         "",
@@ -1255,7 +1401,8 @@ export function createPostGate(
     }
     lines.push(
       "",
-      `React ${APPROVE_EMOJI} to clear the author and reset their automod strike, ${REJECT_EMOJI} to discard and strike, or use \`${commandName()} approve ${record.queueId}\` / \`${commandName()} reject ${record.queueId}\`.`,
+      `React ${APPROVE_EMOJI} to clear the author and reset their automod strike, ${REJECT_EMOJI} to discard and strike, or ${DENY_HOLD_EMOJI} to discard, strike, and hold every later message from this author for review.`,
+      `Or use \`${commandName()} approve ${record.queueId}\`, \`${commandName()} reject ${record.queueId}\`, or \`${commandName()} deny-hold ${record.queueId}\`.`,
       "Approving does not repost the content — the author may post it again themselves.",
       `This request expires in 7 days if left unreviewed.`
     );
@@ -1266,8 +1413,12 @@ export function createPostGate(
     );
   }
 
-  async function seedReviewReactions(channelId, messageId) {
-    for (const emoji of [APPROVE_EMOJI, REJECT_EMOJI]) {
+  async function seedReviewReactions(
+    channelId,
+    messageId,
+    emojis = [APPROVE_EMOJI, REJECT_EMOJI]
+  ) {
+    for (const emoji of emojis) {
       const reaction = await request(
         "PUT",
         `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`
@@ -1314,6 +1465,8 @@ export function createPostGate(
       messageId,
       content: held.content,
       attachments: prepared.descriptors,
+      trigger: held.trigger ?? "first_post",
+      ruleId: held.ruleId ?? null,
       reviewChannelId: config.reviewChannelId,
       reviewMessageId: null,
       status: "pending",
@@ -1334,7 +1487,11 @@ export function createPostGate(
         reviewMessageId: posted._id,
         attachments: finalAttachments,
       });
-      await seedReviewReactions(config.reviewChannelId, posted._id);
+      await seedReviewReactions(config.reviewChannelId, posted._id, [
+        APPROVE_EMOJI,
+        REJECT_EMOJI,
+        DENY_HOLD_EMOJI,
+      ]);
     } else {
       store.updateHeldPost(record.queueId, { attachments: finalAttachments });
       logger.warn?.(
@@ -1342,7 +1499,7 @@ export function createPostGate(
       );
     }
     logger.log?.(
-      `🛑  post-gate held queue=${auditAlias(record.queueId)} actor=${auditAlias(held.authorId)} server=${auditAlias(serverId)}`
+      `🛑  post-gate held queue=${auditAlias(record.queueId)} actor=${auditAlias(held.authorId)} server=${auditAlias(serverId)} trigger=${held.trigger ?? "first_post"} rule=${held.ruleId ?? "-"}`
     );
   }
 
@@ -1491,15 +1648,22 @@ export function createPostGate(
 
     const config = store.getPostGateConfig(serverId);
     if (config.mode !== "hold" || !isSafeId(config.reviewChannelId)) return;
-    const lockdown = config.level >= 3;
-    if (!lockdown) {
-      if (channelId === config.reviewChannelId) return;
-      if (store.isChannelExcluded(channelId)) return;
-      if (!hasLinkOrAttachment(message)) return;
-      // The first-post signal is only meaningful for a message actually
-      // eligible for a hold, so this stays inside the gate rather than
-      // running (and racing the archive) on every message.
-      if (!isFirstPostCandidate(serverId, authorId, message)) return;
+    const classified = classifyTrigger(message, config, {
+      serverId,
+      channelId,
+      authorId,
+    });
+    if (!classified) return;
+    const lockdown = classified.trigger === "lockdown";
+    // The first-post signal is only meaningful for a message actually eligible
+    // for a hold on that trigger, so this stays inside the gate rather than
+    // running (and racing the archive) on every message — and it still runs
+    // synchronously, before the first await below.
+    if (
+      classified.trigger === "first_post" &&
+      !isFirstPostCandidate(serverId, authorId, message)
+    ) {
+      return;
     }
 
     // revolt.js Message fields are live getters into the client's message
@@ -1512,6 +1676,8 @@ export function createPostGate(
       authorId,
       content: message.content ?? "",
       attachments: message.attachments ?? [],
+      trigger: classified.trigger,
+      ruleId: classified.match?.ruleId ?? null,
     };
 
     let resolveDecisionPromise;
@@ -1593,21 +1759,26 @@ export function createPostGate(
     );
   }
 
-  async function authorizeReviewer(record, moderatorId) {
+  async function authorizeReviewChannelActor(serverId, moderatorId) {
     // Manage Messages is checked in the review channel — where the
     // moderator is actually acting — not the (possibly inaccessible)
     // source channel the held content originally came from.
-    const config = store.getPostGateConfig(record.serverId);
-    return authorizeServerActor(
+    const config = store.getPostGateConfig(serverId);
+    const reviewer = await authorizeServerActor(
       client,
       {
-        serverId: record.serverId,
+        serverId,
         channelId: config.reviewChannelId,
         authorId: moderatorId,
       },
       COMMAND_ACCESS.MANAGE_MESSAGES,
       { logger }
     );
+    return reviewer.allowed && reviewer.permissionSource === "refreshed";
+  }
+
+  async function authorizeReviewer(record, moderatorId) {
+    return authorizeReviewChannelActor(record.serverId, moderatorId);
   }
 
   async function deleteReviewCard(record) {
@@ -1624,53 +1795,65 @@ export function createPostGate(
       : operation();
   }
 
-  async function approve(queueId, moderatorId) {
-    const record = store.getHeldPost(queueId);
-    if (!record) return { outcome: "missing" };
-    if (record.status !== "pending") return { outcome: record.status };
+  /**
+   * Every path that resolves a queue entry runs through here. The lock
+   * serialises two moderators reacting in the same instant; the re-read after
+   * the (asynchronous) permission check closes the window where both calls
+   * read "pending" before either of them wrote.
+   */
+  function resolveHeldPost(queueId, moderatorId, apply) {
+    return withLock(reviewLocks, queueId, async () => {
+      const record = store.getHeldPost(queueId);
+      if (!record) return { outcome: "missing" };
+      if (record.status !== "pending") return { outcome: record.status };
 
-    const reviewer = await authorizeReviewer(record, moderatorId);
-    if (!reviewer.allowed || reviewer.permissionSource !== "refreshed") {
-      return { outcome: "unauthorized" };
-    }
+      if (!(await authorizeReviewer(record, moderatorId))) {
+        return { outcome: "unauthorized" };
+      }
 
-    // Approval clears the author, not the content. Republishing held material
-    // through the bot means a moderator's "this account is fine" also
-    // relaunches whatever they posted — during a troll wave that turns the
-    // review queue into a delivery mechanism. The author keeps the right to
-    // post it again themselves; the archived copy stays on the review card as
-    // the evidence record.
-    const reviewDeleted = await deleteReviewCard(record);
-    if (!reviewDeleted) logger.warn?.("post-gate: review card cleanup failed");
-    // Legacy queue entries from before the authorId-snapshot fix may have no
-    // userId recorded — never touch the strike store under a phantom key.
-    const strikeCleared =
-      isSafeId(record.userId) &&
-      Boolean(store.clearAutomodStrike(record.serverId, record.userId));
-    store.updateHeldPost(queueId, {
-      status: "approved",
-      reviewedBy: moderatorId,
-      reviewedAt: now(),
+      const current = store.getHeldPost(queueId);
+      if (!current) return { outcome: "missing" };
+      if (current.status !== "pending") return { outcome: current.status };
+      return apply(current);
     });
-    await notifyReviewOutcome(record, "approved", moderatorId, {
-      strikeCleared,
-    });
-    logger.log?.(
-      `🛑  post-gate approved queue=${auditAlias(queueId)} moderator=${auditAlias(moderatorId)} strike_cleared=${strikeCleared}`
-    );
-    return { outcome: "approved", strikeCleared };
   }
 
-  async function reject(queueId, moderatorId) {
-    const record = store.getHeldPost(queueId);
-    if (!record) return { outcome: "missing" };
-    if (record.status !== "pending") return { outcome: record.status };
+  async function approve(queueId, moderatorId) {
+    return resolveHeldPost(queueId, moderatorId, async (record) => {
+      // Approval clears the author, not the content. Republishing held material
+      // through the bot means a moderator's "this account is fine" also
+      // relaunches whatever they posted — during a troll wave that turns the
+      // review queue into a delivery mechanism. The author keeps the right to
+      // post it again themselves; the archived copy stays on the review card as
+      // the evidence record.
+      const reviewDeleted = await deleteReviewCard(record);
+      if (!reviewDeleted)
+        logger.warn?.("post-gate: review card cleanup failed");
+      // Legacy queue entries from before the authorId-snapshot fix may have no
+      // userId recorded — never touch the strike store under a phantom key.
+      const strikeCleared =
+        isSafeId(record.userId) &&
+        Boolean(store.clearAutomodStrike(record.serverId, record.userId));
+      store.updateHeldPost(queueId, {
+        status: "approved",
+        reviewedBy: moderatorId,
+        reviewedAt: now(),
+      });
+      await notifyReviewOutcome(record, "approved", moderatorId, {
+        strikeCleared,
+      });
+      logger.log?.(
+        `🛑  post-gate approved queue=${auditAlias(queueId)} moderator=${auditAlias(moderatorId)} strike_cleared=${strikeCleared}`
+      );
+      return { outcome: "approved", strikeCleared };
+    });
+  }
 
-    const reviewer = await authorizeReviewer(record, moderatorId);
-    if (!reviewer.allowed || reviewer.permissionSource !== "refreshed") {
-      return { outcome: "unauthorized" };
-    }
-
+  /**
+   * Shared by ❌ Deny and 🔒 Deny + Hold User: both discard the content and
+   * advance the strike stage. Only the follow-up differs.
+   */
+  async function applyRejection(record, moderatorId, { notify = true } = {}) {
     const reviewDeleted = await deleteReviewCard(record);
     if (!reviewDeleted) logger.warn?.("post-gate: review card cleanup failed");
 
@@ -1689,18 +1872,367 @@ export function createPostGate(
       });
     }
 
-    store.updateHeldPost(queueId, {
+    store.updateHeldPost(record.queueId, {
       status: "rejected",
       reviewedBy: moderatorId,
       reviewedAt: current,
     });
-    await notifyReviewOutcome(record, "rejected", moderatorId, {
-      strikeSkipped,
-    });
-    logger.log?.(
-      `🛑  post-gate rejected queue=${auditAlias(queueId)} moderator=${auditAlias(moderatorId)} strike=${level ?? "skipped"}`
+    if (notify) {
+      await notifyReviewOutcome(record, "rejected", moderatorId, {
+        strikeSkipped,
+      });
+      logger.log?.(
+        `🛑  post-gate rejected queue=${auditAlias(record.queueId)} moderator=${auditAlias(moderatorId)} strike=${level ?? "skipped"}`
+      );
+    }
+    return { outcome: "rejected", strikeLevel: level, strikeSkipped };
+  }
+
+  async function reject(queueId, moderatorId) {
+    return resolveHeldPost(queueId, moderatorId, (record) =>
+      applyRejection(record, moderatorId)
     );
-    return { outcome: "rejected", strikeLevel: level };
+  }
+
+  // ── Full-user Post Gate ──────────────────────────────────────
+
+  function pendingHeldCountFor(serverId, userId) {
+    return store
+      .getPendingHeldPosts(serverId)
+      .filter((entry) => entry.userId === userId).length;
+  }
+
+  async function deleteCard(channelId, messageId) {
+    if (!isSafeId(channelId) || !isSafeId(messageId)) return true;
+    const operation = async () => {
+      const response = await request(
+        "DELETE",
+        `/channels/${channelId}/messages/${messageId}`
+      );
+      return Boolean(response.ok);
+    };
+    return typeof runIntentionalDelete === "function"
+      ? runIntentionalDelete(messageId, operation)
+      : operation();
+  }
+
+  function timestampLabel(value) {
+    return Number.isFinite(value)
+      ? new Date(value).toUTCString()
+      : "*(not recorded)*";
+  }
+
+  function durationLabel(ms) {
+    if (!Number.isFinite(ms) || ms < 0) return "an unknown time";
+    const hours = Math.floor(ms / (60 * 60 * 1_000));
+    if (hours < 1) return "under an hour";
+    if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"}`;
+    return `${Math.floor(hours / 24)} days`;
+  }
+
+  function buildUserHoldCardEmbed(record) {
+    const lines = [
+      `${actorLabel(record.userId)} is currently in Post Gate.`,
+      "All new messages from this user in this server are held for moderator approval.",
+      "",
+      `**Held by:** ${actorLabel(record.heldBy)}`,
+      `**Held since:** ${timestampLabel(record.heldAt)}`,
+    ];
+    if (record.originQueueId) {
+      lines.push(`**Origin:** denied queue entry \`${record.originQueueId}\``);
+    }
+    lines.push(
+      "",
+      `React ${RELEASE_EMOJI} to release them, or use \`${commandName()} release <@${record.userId}>\`.`,
+      "Releasing restores normal posting straight away. Messages already in the review queue stay queued and are reviewed individually.",
+      "This hold never expires on its own — it ends only when a moderator releases it."
+    );
+    return buildAuditEmbed("🔒 Post Gate — User Held", lines, "#E67E22");
+  }
+
+  function buildUserHoldReminderEmbed(record, pending) {
+    return buildAuditEmbed(
+      "⏰ Post Gate — User Still Held",
+      [
+        `${actorLabel(record.userId)} has been in Post Gate for ${durationLabel(now() - (record.heldAt ?? now()))}.`,
+        "",
+        `**Held by:** ${actorLabel(record.heldBy)}`,
+        `**Held since:** ${timestampLabel(record.heldAt)}`,
+        `**Still queued:** ${pending} held message(s) awaiting review`,
+        "",
+        `React ${RELEASE_EMOJI} to release them, or ${CONTINUE_EMOJI} to keep holding and be reminded again in ${durationLabel(reminderMs)}.`,
+        "Irminsul never releases a hold by itself; this is a reminder, not a deadline.",
+      ],
+      "#E67E22"
+    );
+  }
+
+  async function postUserHoldCard(record) {
+    const config = store.getPostGateConfig(record.serverId);
+    if (!isSafeId(config.reviewChannelId)) return null;
+    const posted = await sendProtected(config.reviewChannelId, {
+      embeds: [buildUserHoldCardEmbed(record)],
+    });
+    if (!isSafeId(posted?._id)) {
+      logger.warn?.(
+        `post-gate: could not post the Post Gate control card for actor=${auditAlias(record.userId)}`
+      );
+      return null;
+    }
+    store.updateUserHold(record.serverId, record.userId, {
+      cardChannelId: config.reviewChannelId,
+      cardMessageId: posted._id,
+    });
+    await seedReviewReactions(config.reviewChannelId, posted._id, [
+      RELEASE_EMOJI,
+    ]);
+    return posted._id;
+  }
+
+  /**
+   * Idempotent: an author already in Post Gate keeps the original record, and
+   * the control card is reposted only when a previous attempt failed to leave
+   * one behind. Repeatedly denying that author never stacks cards or rewrites
+   * who first held them.
+   */
+  async function holdUser(serverId, userId, moderatorId, origin = {}) {
+    return withLock(userHoldLocks, `${serverId}:${userId}`, async () => {
+      const existing = store.getUserHold(serverId, userId);
+      if (existing?.active) {
+        if (!existing.cardMessageId) await postUserHoldCard(existing);
+        return { outcome: "already_held", record: existing };
+      }
+
+      const heldAt = now();
+      const config = store.getPostGateConfig(serverId);
+      const { created, record } = store.createUserHold({
+        serverId,
+        userId,
+        heldAt,
+        heldBy: moderatorId,
+        originQueueId: origin.originQueueId ?? null,
+        originMessageId: origin.originMessageId ?? null,
+        cardChannelId: config.reviewChannelId,
+        reminderAt: heldAt + reminderMs,
+      });
+      if (!created) return { outcome: "already_held", record };
+
+      await postUserHoldCard(record);
+      logger.log?.(
+        `🛑  post-gate user-held server=${auditAlias(serverId)} actor=${auditAlias(userId)} moderator=${auditAlias(moderatorId)} origin=${auditAlias(origin.originQueueId ?? "-")}`
+      );
+      return { outcome: "held", record };
+    });
+  }
+
+  async function releaseUser(
+    serverId,
+    userId,
+    moderatorId,
+    { reason = "manual" } = {}
+  ) {
+    return withLock(userHoldLocks, `${serverId}:${userId}`, async () => {
+      const existing = store.getUserHold(serverId, userId);
+      if (!existing?.active) return { outcome: "not_held" };
+      if (!(await authorizeReviewChannelActor(serverId, moderatorId))) {
+        return { outcome: "unauthorized" };
+      }
+      const current = store.getUserHold(serverId, userId);
+      if (!current?.active) return { outcome: "not_held" };
+
+      const releasedAt = now();
+      const { released, record } = store.releaseUserHold(serverId, userId, {
+        releasedBy: moderatorId,
+        releasedAt,
+        reason,
+      });
+      if (!released) return { outcome: "not_held" };
+
+      await deleteCard(record.cardChannelId, record.cardMessageId);
+      await deleteCard(record.cardChannelId, record.lastReminderMessageId);
+
+      // Releasing stops future holds only. Anything already queued keeps its
+      // own review card, because a release is a judgement about the author and
+      // not about content no moderator has looked at yet.
+      const pending = pendingHeldCountFor(serverId, userId);
+      await sendAccountability(
+        serverId,
+        "🔓 Post Gate — User Released",
+        [
+          `${actorLabel(userId)} is no longer in Post Gate and can post normally again.`,
+          "",
+          `**Released by:** ${actorLabel(moderatorId)}`,
+          `**Held by:** ${actorLabel(record.heldBy)} since ${timestampLabel(record.heldAt)}`,
+          `**Held for:** ${durationLabel(releasedAt - (record.heldAt ?? releasedAt))}`,
+          `**Still queued:** ${pending} held message(s) from this author remain pending individual review — releasing only stops future messages from being held.`,
+        ],
+        "#2ECC71"
+      );
+      logger.log?.(
+        `🛑  post-gate user-released server=${auditAlias(serverId)} actor=${auditAlias(userId)} moderator=${auditAlias(moderatorId)} reason=${reason} pending=${pending} held_for_ms=${releasedAt - (record.heldAt ?? releasedAt)}`
+      );
+      return { outcome: "released", pending, record };
+    });
+  }
+
+  async function continueHold(serverId, userId, moderatorId) {
+    return withLock(userHoldLocks, `${serverId}:${userId}`, async () => {
+      const existing = store.getUserHold(serverId, userId);
+      if (!existing?.active) return { outcome: "not_held" };
+      if (!(await authorizeReviewChannelActor(serverId, moderatorId))) {
+        return { outcome: "unauthorized" };
+      }
+
+      const nextReminderAt = now() + reminderMs;
+      await deleteCard(existing.cardChannelId, existing.lastReminderMessageId);
+      store.updateUserHold(serverId, userId, {
+        reminderAt: nextReminderAt,
+        lastReminderMessageId: null,
+      });
+      await sendAccountability(
+        serverId,
+        "⏳ Post Gate — Hold Continued",
+        [
+          `${actorLabel(moderatorId)} chose to keep ${actorLabel(userId)} in Post Gate.`,
+          `**Next reminder:** ${timestampLabel(nextReminderAt)}`,
+        ],
+        "#E67E22"
+      );
+      logger.log?.(
+        `🛑  post-gate hold-continued server=${auditAlias(serverId)} actor=${auditAlias(userId)} moderator=${auditAlias(moderatorId)}`
+      );
+      return { outcome: "continued", reminderAt: nextReminderAt };
+    });
+  }
+
+  /**
+   * Forgotten-hold protection. A hold is never released automatically; when one
+   * has stood for the configured period, moderators get a card offering
+   * Release / Continue Holding and the clock is re-armed. Driven by the
+   * existing hourly sweep, so a reminder lands within an hour of coming due.
+   */
+  async function remindHeldUsers() {
+    for (const due of store.getDueUserHoldReminders(now())) {
+      await withLock(
+        userHoldLocks,
+        `${due.serverId}:${due.userId}`,
+        async () => {
+          const record = store.getUserHold(due.serverId, due.userId);
+          if (!record?.active) return;
+          if (
+            !Number.isFinite(record.reminderAt) ||
+            record.reminderAt > now()
+          ) {
+            return;
+          }
+          const config = store.getPostGateConfig(record.serverId);
+          if (config.mode !== "hold" || !isSafeId(config.reviewChannelId)) {
+            return;
+          }
+
+          // Only one reminder is ever outstanding per hold.
+          await deleteCard(record.cardChannelId, record.lastReminderMessageId);
+          const pending = pendingHeldCountFor(record.serverId, record.userId);
+          const posted = await sendProtected(config.reviewChannelId, {
+            embeds: [buildUserHoldReminderEmbed(record, pending)],
+          });
+          const reminderMessageId = isSafeId(posted?._id) ? posted._id : null;
+          store.updateUserHold(record.serverId, record.userId, {
+            reminderAt: now() + reminderMs,
+            reminderCount: (record.reminderCount ?? 0) + 1,
+            lastReminderMessageId: reminderMessageId,
+          });
+          if (reminderMessageId) {
+            await seedReviewReactions(
+              config.reviewChannelId,
+              reminderMessageId,
+              [RELEASE_EMOJI, CONTINUE_EMOJI]
+            );
+          }
+          logger.log?.(
+            `🛑  post-gate hold-reminder server=${auditAlias(record.serverId)} actor=${auditAlias(record.userId)} count=${(record.reminderCount ?? 0) + 1}`
+          );
+        }
+      );
+    }
+  }
+
+  /**
+   * A control card stranded in the old review channel is a control nobody sees,
+   * so every active hold gets a fresh card when the review channel moves.
+   */
+  async function repostUserHoldCards(serverId) {
+    for (const record of store.getActiveUserHolds(serverId)) {
+      await withLock(
+        userHoldLocks,
+        `${record.serverId}:${record.userId}`,
+        async () => {
+          await deleteCard(record.cardChannelId, record.cardMessageId);
+          await deleteCard(record.cardChannelId, record.lastReminderMessageId);
+          const moved = store.updateUserHold(record.serverId, record.userId, {
+            cardMessageId: null,
+            lastReminderMessageId: null,
+          });
+          if (moved?.active) await postUserHoldCard(moved);
+        }
+      );
+    }
+  }
+
+  async function notifyDenyHold(record, moderatorId, rejection, hold) {
+    const lines = [
+      `**Queue ID:** \`${record.queueId}\``,
+      `**Denied by:** ${actorLabel(moderatorId)}`,
+      `The held content from ${actorLabel(record.userId)} was discarded${
+        rejection.strikeSkipped
+          ? " (no automod strike was recorded — the original author's id was not captured)"
+          : " and their automod strike stage was increased"
+      }.`,
+    ];
+    if (hold.outcome === "held") {
+      lines.push(
+        "",
+        `${actorLabel(record.userId)} is now in Post Gate: every message they send is held for moderator approval until a moderator releases them.`,
+        `**Hold began:** ${timestampLabel(hold.record?.heldAt)}`
+      );
+    } else if (hold.outcome === "already_held") {
+      lines.push(
+        "",
+        `${actorLabel(record.userId)} was already in Post Gate — the existing hold, placed by ${actorLabel(hold.record?.heldBy)} on ${timestampLabel(hold.record?.heldAt)}, is unchanged.`
+      );
+    } else {
+      lines.push(
+        "",
+        "No Post Gate hold was placed: this queue entry predates author-id capture, so there is no account to hold."
+      );
+    }
+    await sendAccountability(
+      record.serverId,
+      "🔒 Held Post Denied — Author Placed in Post Gate",
+      lines,
+      "#E74C3C"
+    );
+  }
+
+  async function denyHold(queueId, moderatorId) {
+    return resolveHeldPost(queueId, moderatorId, async (record) => {
+      const rejection = await applyRejection(record, moderatorId, {
+        notify: false,
+      });
+      // The same legacy guard the strike uses: never create a hold keyed on a
+      // phantom user id.
+      const hold = isSafeId(record.userId)
+        ? await holdUser(record.serverId, record.userId, moderatorId, {
+            originQueueId: record.queueId,
+            originMessageId: record.messageId,
+          })
+        : { outcome: "skipped_legacy" };
+      await notifyDenyHold(record, moderatorId, rejection, hold);
+      logger.log?.(
+        `🛑  post-gate deny-hold queue=${auditAlias(queueId)} moderator=${auditAlias(moderatorId)} actor=${auditAlias(record.userId ?? "-")} strike=${rejection.strikeLevel ?? "skipped"} hold=${hold.outcome}`
+      );
+      return { ...rejection, userHold: hold.outcome };
+    });
   }
 
   async function handleLevelReaction(event) {
@@ -1779,23 +2311,142 @@ export function createPostGate(
       !isSafeId(event.id) ||
       !isSafeId(event.user_id) ||
       event.user_id === client.user?.id ||
-      (event.emoji_id !== APPROVE_EMOJI && event.emoji_id !== REJECT_EMOJI)
+      !REVIEW_EMOJI.has(event.emoji_id)
     ) {
       return;
     }
     if (await handleLevelReaction(event)) return;
+
+    // Dispatch is keyed on the message id, and a review-channel message is
+    // exactly one kind of card, so the three card types can never be confused.
+    // A reaction a card does not offer is ignored rather than guessed at.
     const record = store.findHeldPostByReviewMessage(event.id);
-    if (!record) return;
-    const result =
-      event.emoji_id === APPROVE_EMOJI
-        ? await approve(record.queueId, event.user_id)
-        : await reject(record.queueId, event.user_id);
-    logger.log?.(
-      `🛑  post-gate reaction-review queue=${auditAlias(record.queueId)} actor=${auditAlias(event.user_id)} outcome=${result.outcome}`
-    );
+    if (record) {
+      let result;
+      if (event.emoji_id === APPROVE_EMOJI) {
+        result = await approve(record.queueId, event.user_id);
+      } else if (event.emoji_id === REJECT_EMOJI) {
+        result = await reject(record.queueId, event.user_id);
+      } else if (event.emoji_id === DENY_HOLD_EMOJI) {
+        result = await denyHold(record.queueId, event.user_id);
+      } else {
+        return;
+      }
+      logger.log?.(
+        `🛑  post-gate reaction-review queue=${auditAlias(record.queueId)} actor=${auditAlias(event.user_id)} outcome=${result.outcome}`
+      );
+      return;
+    }
+
+    const card = store.findUserHoldByCardMessage(event.id);
+    if (!card) return;
+    if (event.emoji_id === RELEASE_EMOJI) {
+      const result = await releaseUser(
+        card.record.serverId,
+        card.record.userId,
+        event.user_id,
+        { reason: "reaction" }
+      );
+      logger.log?.(
+        `🛑  post-gate reaction-release actor=${auditAlias(card.record.userId)} moderator=${auditAlias(event.user_id)} outcome=${result.outcome}`
+      );
+      return;
+    }
+    // "Continue holding" is only offered on a reminder card.
+    if (event.emoji_id === CONTINUE_EMOJI && card.cardKind === "reminder") {
+      await continueHold(
+        card.record.serverId,
+        card.record.userId,
+        event.user_id
+      );
+    }
   }
 
   // ── Command routing ──────────────────────────────────────────
+
+  async function listHolds(message, serverId) {
+    const holds = store.getActiveUserHolds(serverId);
+    const lines = holds.length
+      ? holds
+          .slice(0, 10)
+          .map(
+            (record) =>
+              `- ${actorLabel(record.userId)} — held by ${actorLabel(record.heldBy)} since ${timestampLabel(record.heldAt)} (${pendingHeldCountFor(serverId, record.userId)} message(s) queued)`
+          )
+      : ["No members are currently in Post Gate."];
+    if (holds.length > 10) {
+      lines.push(`…and ${holds.length - 10} more.`);
+    }
+    await respond(
+      channelIdFrom(message),
+      "🔒 Members In Post Gate",
+      lines.join("\n"),
+      holds.length ? "#E67E22" : "#3498DB"
+    );
+    return { outcome: "holds", count: holds.length };
+  }
+
+  async function describeTerms(message) {
+    const compiled = ensureCompiledTerms(true);
+    const list = compiled.list ?? store.getProhibitedTermList();
+    const lines = [describeProhibitedTermList(compiled, list)];
+    if (list.status === "malformed") {
+      lines.push(
+        "",
+        `The operator list could not be parsed (\`${safeErrorSummary(list.error)}\`) and was ignored. The built-in list is still active.`
+      );
+    } else if (list.status === "missing") {
+      lines.push(
+        "",
+        "No `prohibited_terms.json` is present in the data directory, so only the built-in list is active."
+      );
+    } else if (list.skipped) {
+      lines.push("", `${list.skipped} malformed entr(y/ies) were skipped.`);
+    }
+    lines.push(
+      "",
+      "A match holds the message for review. It never bans, times out, or strikes anyone on its own."
+    );
+    await respond(
+      channelIdFrom(message),
+      "🔤 Prohibited Terms",
+      lines.join("\n"),
+      list.status === "malformed" ? "#E74C3C" : "#3498DB"
+    );
+    return { outcome: "terms", status: list.status };
+  }
+
+  async function releaseCommand(message, serverId, args) {
+    const target = findTargetToken(tokenizeArgs(args));
+    if (!target) {
+      await respond(
+        channelIdFrom(message),
+        "⚠️ Which Member?",
+        `Use \`${commandName()} release @member\`.`,
+        "#E74C3C"
+      );
+      return { outcome: "invalid_target" };
+    }
+    const result = await releaseUser(
+      serverId,
+      target.targetId,
+      message.authorId,
+      { reason: "command" }
+    );
+    const descriptions = {
+      released: `${actorLabel(target.targetId)} was released and can post normally again. ${result.pending} held message(s) from them stay queued for individual review.`,
+      not_held: "That member is not currently in Post Gate.",
+      unauthorized:
+        "Fresh permission verification did not confirm Manage Messages in the review channel.",
+    };
+    await respond(
+      channelIdFrom(message),
+      result.outcome === "released" ? "🔓 User Released" : "🛑 Release Result",
+      descriptions[result.outcome] ?? `Release status: ${result.outcome}.`,
+      result.outcome === "released" ? "#2ECC71" : "#E74C3C"
+    );
+    return result;
+  }
 
   async function handleCommand(message, args = []) {
     await gate.expireDueChallenges();
@@ -1847,7 +2498,17 @@ export function createPostGate(
       }
       return requestChange(message, "off", null);
     }
-    if (action === "approve" || action === "reject") {
+    if (action === "holds") return listHolds(message, serverId);
+    if (action === "terms") return describeTerms(message);
+    if (action === "release")
+      return releaseCommand(message, serverId, [second, ...extra]);
+    if (
+      action === "approve" ||
+      action === "reject" ||
+      action === "deny-hold" ||
+      action === "denyhold"
+    ) {
+      const denyHoldRequested = action.startsWith("deny");
       const queueId = String(second ?? "").trim();
       if (!isSafeId(queueId) || extra.length) {
         await respond(
@@ -1858,15 +2519,27 @@ export function createPostGate(
         );
         return { outcome: "invalid_queue_id" };
       }
-      const result =
-        action === "approve"
+      const result = denyHoldRequested
+        ? await denyHold(queueId, message.authorId)
+        : action === "approve"
           ? await approve(queueId, message.authorId)
           : await reject(queueId, message.authorId);
+      const alreadyResolved = (outcome) =>
+        `That queue entry was already resolved as ${outcome} by another moderator; nothing was changed.`;
       const descriptions = {
         approved:
-          "The author was cleared and their automod strike reset. The content was not reposted — they can post it again themselves.",
-        rejected:
-          "The held post was discarded and the author's automod strike stage was increased.",
+          action === "approve"
+            ? "The author was cleared and their automod strike reset. The content was not reposted — they can post it again themselves."
+            : alreadyResolved("approved"),
+        rejected: denyHoldRequested
+          ? result.userHold === "held"
+            ? "The held post was discarded, the author's automod strike stage was increased, and every later message from them will now be held for review."
+            : result.userHold === "already_held"
+              ? "The held post was discarded and the strike stage increased. The author was already in Post Gate, so their existing hold is unchanged."
+              : "The held post was discarded. No Post Gate hold was placed: this entry predates author-id capture."
+          : action === "reject"
+            ? "The held post was discarded and the author's automod strike stage was increased."
+            : alreadyResolved("rejected"),
         missing:
           "That queue entry does not exist or has already been cleaned up.",
         pending: "That queue entry is already pending.",
@@ -1879,7 +2552,9 @@ export function createPostGate(
         result.outcome === "approved"
           ? "✅ Post Approved"
           : result.outcome === "rejected"
-            ? "❌ Post Rejected"
+            ? denyHoldRequested
+              ? "🔒 Post Denied — Author Held"
+              : "❌ Post Rejected"
             : "🛑 Review Result",
         descriptions[result.outcome] ?? `Queue status: ${result.outcome}.`,
         result.outcome === "approved"
@@ -1894,7 +2569,7 @@ export function createPostGate(
       await respond(
         channelIdFrom(message),
         "⚠️ Invalid Post Gate Command",
-        `Use \`${commandName()} status\`, \`${commandName()} here\`, \`${commandName()} #channel\`, \`${commandName()} off\`, \`${commandName()} confirm CODE\`, \`${commandName()} cancel\`, \`${commandName()} approve QUEUE_ID\`, or \`${commandName()} reject QUEUE_ID\`.`,
+        `Use \`${commandName()} status\`, \`${commandName()} here\`, \`${commandName()} #channel\`, \`${commandName()} off\`, \`${commandName()} confirm CODE\`, \`${commandName()} cancel\`, \`${commandName()} approve QUEUE_ID\`, \`${commandName()} reject QUEUE_ID\`, \`${commandName()} deny-hold QUEUE_ID\`, \`${commandName()} release @member\`, \`${commandName()} holds\`, or \`${commandName()} terms\`.`,
         "#E74C3C"
       );
       return { outcome: "invalid_command" };
@@ -1930,7 +2605,13 @@ export function createPostGate(
   async function maintainQueue() {
     try {
       await expireOverdue();
+      // Forgotten-hold reminders ride the existing hourly sweep rather than
+      // adding a second timer, so a reminder lands within an hour of its due
+      // time and nothing has to be rescheduled after a restart.
+      await remindHeldUsers();
+      ensureCompiledTerms();
       store.prunePostGateQueue(now());
+      store.prunePostGateUserHolds(now());
     } catch (error) {
       logFailure("queue maintenance failed", error);
     }
@@ -1958,9 +2639,17 @@ export function createPostGate(
     const config = isSafeId(serverId)
       ? store.getPostGateConfig(serverId)
       : { mode: "off", level: 0 };
+    if (config.mode !== "hold") return false;
+    // Share handleMessage's own predicate rather than re-testing the content
+    // here: a user hold or a prohibited-term hold would otherwise stay visible
+    // to automod, the audit log, and the command router. Most messages still
+    // return before the microtask hop below.
     if (
-      config.mode !== "hold" ||
-      (config.level < 3 && !hasLinkOrAttachment(message))
+      !classifyTrigger(message, config, {
+        serverId,
+        channelId: channelIdFrom(message),
+        authorId: message?.authorId,
+      })
     ) {
       return false;
     }
@@ -1985,6 +2674,12 @@ export function createPostGate(
     shouldExcludeMessageDelete,
     startQueuePrune,
     maintainQueue,
+    denyHold,
+    releaseUser,
+    continueHold,
+    remindHeldUsers,
+    getActiveUserHolds: (serverId) => store.getActiveUserHolds(serverId),
+    reloadProhibitedTerms: () => ensureCompiledTerms(true),
     reconcilePermissionLock,
     reconcilePermissionLocks,
     getPending(serverId) {

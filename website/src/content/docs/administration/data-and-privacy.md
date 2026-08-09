@@ -15,6 +15,7 @@ The bot persists data needed to avoid duplicate announcements and resume configu
 - Enka-approved channel exclusions in `channel_exclusions.json`;
 - automod modes, cases, approvals, strikes, and reversible actions;
 - the post gate's mode, server moderation level, review channel, default-role Send Messages restoration marker, and pending/resolved held-post queue;
+- full-user Post Gate holds in `post_gate_user_holds.json` — who was held, which moderator held them, when the hold began and which queue entry caused it, when the next reminder is due, and who released them and when. A released hold is kept for 7 days as an audit record and then dropped;
 - bounded spam-report correlation metadata without member-supplied reasons; and
 - protected-message records needed to restore deleted audit entries.
 
@@ -26,9 +27,13 @@ The archive is operational evidence. Restrict host access, include it in your co
 
 An approved `/Exclude-Channel` request purges that channel's existing archive entries and prevents new message content from entering the archive. Removing an exclusion affects only future messages; purged content is not restored.
 
-## First-post gate queue
+## Post Gate queue
 
-A message held at Level 1 or 2 (see [First-post gate](/HoYoFetch/moderation/post-gate/)) is removed from its original channel. Its text and attachment metadata enter the held-post queue, while copied media is attached to the Stoat review card. Approval copies every attachment through RAM to the repost and then deletes the review card. Rejection or 7-day expiry deletes the review card and its Stoat media. Privacy-excluded channels are never queued; Levels 3–4 may still deny messages there without retaining their content.
+A message held at Level 1 or 2 (see [Post Gate](/HoYoFetch/moderation/post-gate/)) is removed from its original channel. Its text and attachment metadata enter the held-post queue, while copied media is attached to the Stoat review card. Approval copies every attachment through RAM to the repost and then deletes the review card. Rejection or 7-day expiry deletes the review card and its Stoat media. Privacy-excluded channels are never queued; Levels 3–4 may still deny messages there without retaining their content.
+
+The queue entry also records why the message was held and, for a prohibited-term match, the id of the rule that fired. The matched text itself is never stored separately or written to a log line — the original message content on the review card is the only copy.
+
+The prohibited-term list in `prohibited_terms.json` is operator-authored configuration, not observed member data. It lives in the gitignored data directory and Irminsul only ever reads it.
 
 ## Attachments
 

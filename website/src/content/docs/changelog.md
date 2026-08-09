@@ -3,6 +3,31 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Version 3.2.0
+
+### Prohibited-term hold filter
+
+- Added a third Level 1–2 hold trigger: a message matching the prohibited-term list is held for review regardless of the author's tenure or whether the post carries a link, closing the gap where a single targeted slur produced none of the burst or flood behaviour automod scores on.
+- Matching is word- and phrase-aware rather than substring-based. Every term is anchored between word boundaries and no stage of matching deletes separators from the message, so `Scunthorpe` is structurally incapable of matching. Evasion is handled by normalising the message toward the term — Unicode compatibility and case folding, invisible and control characters removed, diacritics stripped, Cyrillic and Greek homoglyphs folded, leetspeak folded only inside a word, separators between letters tolerated for longer terms, and stretched letters collapsed — while a term's own repeated letters are still required.
+- An allowlist takes precedence over any term it overlaps, so an innocent phrase is rescued without exempting the same term used on its own elsewhere in the message.
+- A match only ever holds. It never bans, times out, or records an automod strike by itself; the strike follows a moderator's denial exactly as it does for a link hold.
+- Irminsul ships a small built-in list plus the classic false positives. Operators extend it with `prohibited_terms.json` in the data directory and reload it with `/Post-Gate terms` without restarting. A missing file is silent, a malformed one is logged once and ignored so the built-in list stays active, and the degraded state is reported in `/Post-Gate status`.
+- Review cards and log lines name the rule id that fired, never the matched text, so reviewing a slur does not republish it into the review channel.
+
+### Deny and hold a user
+
+- Added a third review action, `Deny + Hold User` (🔒 or `/Post-Gate deny-hold QUEUE_ID`). It discards the post and advances the strike stage exactly as Deny does, then places the author in full Post Gate so every later message they send is held for review.
+- A persistent control card in the review channel records who placed the hold and when, and carries a 🔓 release reaction. Holding is idempotent: denying the same author again reports the existing hold rather than stacking records or reposting the card.
+- Hold state is persisted alongside the rest of Irminsul's moderation state, so it survives a bot restart — control cards included — and survives the member leaving and rejoining, because it is keyed on the server and the account rather than on membership. Moving the review channel reposts every control card into the new one.
+- Releasing with 🔓 or `/Post-Gate release @member` restores normal posting immediately, but messages already in the review queue stay queued and are reviewed individually; the release notice states how many are outstanding. A release is a judgement about the author, not a way to publish a queue nobody read.
+- A hold never expires or releases on its own. After 24 hours — configurable with `POST_GATE_HOLD_REMINDER_HOURS` — moderators get a reminder offering Release or Continue Holding, repeating once per window rather than once per maintenance sweep.
+- `/Post-Gate holds` lists who is currently gated, who held them, since when, and how many of their messages are still queued.
+
+### One decision per held post
+
+- Fixed a race where two moderators acting on the same held post in the same instant could both pass the "still pending" check, because the permission refresh between that check and the write is asynchronous. Decisions are now serialised per queue entry and re-checked after authorization, so exactly one outcome is recorded, one review card deleted, and one accountability notice posted.
+- The moderator who acted second is told the outcome the first one recorded instead of receiving a generic queue-status reply.
+
 ## Version 3.1.0
 
 ### VPS-only emergency lock

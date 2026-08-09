@@ -146,6 +146,7 @@ postGate = createPostGate(client, {
   prefix: CONFIG.prefix,
   approvalGate,
   runIntentionalDelete: tamperProtection.runIntentionalDelete,
+  holdReminderMs: CONFIG.postGateHoldReminderMs,
 });
 client.on("messageCreate", (message) => {
   postGate

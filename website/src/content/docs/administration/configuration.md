@@ -5,19 +5,20 @@ description: Environment variables for code fetching, emergency controls, emoji,
 
 Copy `.env.example` to `.env` and provide the bot token. Never commit `.env`.
 
-| Variable                   | Default              | Purpose                                                          |
-| -------------------------- | -------------------- | ---------------------------------------------------------------- |
-| `BOT_TOKEN`                | Required             | Revolt bot token                                                 |
-| `EMERGENCY_SERVER_ID`      | Emergency CLI only   | Server controlled by the VPS-only default Send Messages lock     |
-| `STOAT_API_BASE`           | Stoat production API | REST endpoint used by the VPS-only emergency command             |
-| `PREFIX`                   | `/`                  | Message-command prefix                                           |
-| `FETCH_INTERVAL`           | `60`                 | Auto-fetch interval in minutes, clamped to a safe range          |
-| `FETCH_COOLDOWN`           | `10`                 | Minimum seconds between manual fetches per channel; `0` disables |
-| `EMOJI_MODE`               | `unicode`            | Initial `unicode` or `custom` reward-emoji mode                  |
-| `AUDITLOG_DEBUG`           | Off                  | Set to `1` for verbose, redacted audit pipeline diagnostics      |
-| `AUDITLOG_EVIDENCE_MAX_MB` | `20`                 | Maximum Stoat-mirrored size; `0` disables attachment archiving   |
-| `HOYOFETCH_DATA_DIR`       | `./data`             | Runtime persistence directory                                    |
-| `HOYO_API_BASE`            | hoyo-codes endpoint  | Override for the GI, HSR, and ZZZ API base                       |
+| Variable                        | Default              | Purpose                                                                    |
+| ------------------------------- | -------------------- | -------------------------------------------------------------------------- |
+| `BOT_TOKEN`                     | Required             | Revolt bot token                                                           |
+| `EMERGENCY_SERVER_ID`           | Emergency CLI only   | Server controlled by the VPS-only default Send Messages lock               |
+| `STOAT_API_BASE`                | Stoat production API | REST endpoint used by the VPS-only emergency command                       |
+| `PREFIX`                        | `/`                  | Message-command prefix                                                     |
+| `FETCH_INTERVAL`                | `60`                 | Auto-fetch interval in minutes, clamped to a safe range                    |
+| `FETCH_COOLDOWN`                | `10`                 | Minimum seconds between manual fetches per channel; `0` disables           |
+| `EMOJI_MODE`                    | `unicode`            | Initial `unicode` or `custom` reward-emoji mode                            |
+| `AUDITLOG_DEBUG`                | Off                  | Set to `1` for verbose, redacted audit pipeline diagnostics                |
+| `AUDITLOG_EVIDENCE_MAX_MB`      | `20`                 | Maximum Stoat-mirrored size; `0` disables attachment archiving             |
+| `POST_GATE_HOLD_REMINDER_HOURS` | `24`                 | Hours before moderators are reminded a Post Gate hold still stands (1–168) |
+| `HOYOFETCH_DATA_DIR`            | `./data`             | Runtime persistence directory                                              |
+| `HOYO_API_BASE`                 | hoyo-codes endpoint  | Override for the GI, HSR, and ZZZ API base                                 |
 
 ```dotenv title=".env"
 BOT_TOKEN=replace_with_your_token
@@ -29,6 +30,7 @@ FETCH_COOLDOWN=10
 EMOJI_MODE=unicode
 AUDITLOG_DEBUG=
 AUDITLOG_EVIDENCE_MAX_MB=20
+POST_GATE_HOLD_REMINDER_HOURS=24
 ```
 
 `AUDITLOG_EVIDENCE_BUDGET_MB` is obsolete because Irminsul no longer retains attachment bytes on disk. It is accepted and ignored for one compatibility release with a startup warning; remove it from existing `.env` files.
