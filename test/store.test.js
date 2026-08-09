@@ -12,6 +12,18 @@ let dataDir;
 before(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "hoyofetch-test-"));
   process.env.HOYOFETCH_DATA_DIR = dataDir;
+  writeFileSync(
+    join(dataDir, "post_gate_user_holds.json"),
+    JSON.stringify({
+      "LEGACYSERVER:LEGACYUSER": {
+        serverId: "LEGACYSERVER",
+        userId: "LEGACYUSER",
+        active: true,
+        heldAt: 500,
+        heldBy: "LEGACYMOD",
+      },
+    })
+  );
   // Import AFTER setting the env so the store reads the temp dir.
   store = await import("../store.js");
 });
@@ -429,6 +441,11 @@ test("privacy digest state round-trips per server and defaults to null", () => {
 });
 
 test("user holds normalise ids, timestamps, and the active flag on load", () => {
+  const legacy = store.getUserHold("LEGACYSERVER", "LEGACYUSER");
+  assert.equal(legacy.holdSource, "manual");
+  assert.equal(legacy.triggerSurface, null);
+  assert.equal(legacy.triggerRuleId, null);
+
   const created = store.createUserHold({
     serverId: "HOLDSERVER1",
     userId: "HOLDUSER1",
@@ -449,6 +466,7 @@ test("user holds normalise ids, timestamps, and the active flag on load", () => 
   assert.equal(created.record.reminderCount, 0);
   assert.equal(created.record.lastReminderMessageId, null);
   assert.equal(created.record.heldBy, "HOLDMOD1");
+  assert.equal(created.record.holdSource, "manual");
 
   assert.equal(store.isUserHeld("HOLDSERVER1", "HOLDUSER1"), true);
   assert.equal(store.isUserHeld("HOLDSERVER1", "SOMEONEELSE"), false);
@@ -458,6 +476,33 @@ test("user holds normalise ids, timestamps, and the active flag on load", () => 
     created: false,
     record: null,
   });
+});
+
+test("automatic user holds persist only their safe trigger metadata", () => {
+  const created = store.createUserHold({
+    serverId: "AUTOHOLDSERVER",
+    userId: "AUTOHOLDUSER",
+    heldAt: 10_000,
+    heldBy: null,
+    holdSource: "automatic",
+    triggerSurface: "bio",
+    triggerRuleId: "contact:dm-available",
+  });
+  assert.equal(created.record.holdSource, "automatic");
+  assert.equal(created.record.triggerSurface, "bio");
+  assert.equal(created.record.triggerRuleId, "contact:dm-available");
+
+  const unsafe = store.createUserHold({
+    serverId: "AUTOHOLDSERVER2",
+    userId: "AUTOHOLDUSER2",
+    heldAt: 10_001,
+    holdSource: "unexpected",
+    triggerSurface: "banner",
+    triggerRuleId: "raw bio https://unsafe.example",
+  });
+  assert.equal(unsafe.record.holdSource, "manual");
+  assert.equal(unsafe.record.triggerSurface, null);
+  assert.equal(unsafe.record.triggerRuleId, null);
 });
 
 test("creating a user hold twice returns the existing record without duplicating it", () => {

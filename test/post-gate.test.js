@@ -15,6 +15,7 @@ process.env.HOYOFETCH_DATA_DIR = mkdtempSync(
 
 const { createPostGate, ENKA_APPROVER_USER_ID } =
   await import("../post-gate.js");
+const { AUTOMOD_LIMITS } = await import("../automod.js");
 const { recordMessage } = await import("../message-archive.js");
 
 const SERVER_ID = "SERVER123";
@@ -261,6 +262,10 @@ function makeHarness({
   lockdownDeleteFails = false,
   lockdownBanFails = false,
   holdReminderMs = 24 * 60 * 60 * 1_000,
+  profileResponses = new Map(),
+  profileCacheTtlMs,
+  profileRetryMs,
+  profileCacheMaxEntries,
   onMessageDeleted = () => {},
 } = {}) {
   let current = clock;
@@ -275,6 +280,7 @@ function makeHarness({
   const deletedMessageIds = [];
   const removedEvidencePaths = [];
   const logLines = [];
+  const profileRequests = [];
   let attachmentUploads = 0;
   let serverDefaultPermissions = initialDefaultPermissions;
 
@@ -389,6 +395,20 @@ function makeHarness({
   };
 
   const request = async (method, path, body) => {
+    const profileMatch = path.match(/^\/users\/([A-Za-z0-9]+)\/profile$/);
+    if (method === "GET" && profileMatch) {
+      const userId = profileMatch[1];
+      profileRequests.push(userId);
+      const configured = profileResponses.get(userId);
+      const response =
+        typeof configured === "function"
+          ? await configured({ userId, call: profileRequests.length })
+          : configured;
+      if (typeof response === "string") {
+        return { ok: true, status: 200, data: { content: response } };
+      }
+      return response ?? { ok: false, status: 404 };
+    }
     if (
       method === "DELETE" &&
       /^\/channels\/[^/]+\/messages\/[^/]+$/.test(path)
@@ -476,6 +496,9 @@ function makeHarness({
     },
     scheduleInterval: () => ({ unref() {} }),
     holdReminderMs,
+    ...(profileCacheTtlMs === undefined ? {} : { profileCacheTtlMs }),
+    ...(profileRetryMs === undefined ? {} : { profileRetryMs }),
+    ...(profileCacheMaxEntries === undefined ? {} : { profileCacheMaxEntries }),
     logger: {
       log: (line) => logLines.push(line),
       warn: (line) => logLines.push(line),
@@ -495,6 +518,7 @@ function makeHarness({
     permissionWrites,
     deletedMessageIds,
     removedEvidencePaths,
+    profileRequests,
     get attachmentUploads() {
       return attachmentUploads;
     },
@@ -1561,6 +1585,16 @@ function establishedMessage({ id, content, authorId = ESTABLISHED_USER_ID }) {
   });
 }
 
+function recentIdentityMessage({
+  id,
+  content,
+  authorId = ESTABLISHED_USER_ID,
+  createdAt = new Date(1_800_000_000_000 - 60_000),
+  joinedAt = new Date(1_800_000_000_000 - 60_000),
+} = {}) {
+  return newAccountMessage({ id, authorId, content, createdAt, joinedAt });
+}
+
 function useOperatorTerms(harness, { terms = [], allowlist = [] } = {}) {
   Object.assign(harness.store.termList, {
     terms,
@@ -1576,6 +1610,388 @@ const reviewCommandMessage = (authorId = MOD_USER_ID) => ({
   server: { id: SERVER_ID },
   channelId: REVIEW_CHANNEL_ID,
   authorId,
+});
+
+// ══════════════════════════════════════════════════════════════
+//  Automatic DM and off-platform solicitation holds
+// ══════════════════════════════════════════════════════════════
+
+test("a contact solicitation automatically holds a recent-identity account without a strike", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+
+  await harness.postGate.handleMessage(
+    recentIdentityMessage({ id: "MSGCONTACT1", content: "my DMs are open" })
+  );
+
+  assert.deepEqual(harness.deletedMessageIds, ["MSGCONTACT1"]);
+  assert.equal(harness.profileRequests.length, 0);
+  const [queued] = [...harness.store.queue.values()];
+  assert.equal(queued.trigger, "contact_solicitation");
+  assert.equal(queued.triggerSurface, "message");
+  assert.equal(queued.ruleId, "contact:dm-available");
+  const hold = harness.store.getUserHold(SERVER_ID, ESTABLISHED_USER_ID);
+  assert.equal(hold.active, true);
+  assert.equal(hold.holdSource, "automatic");
+  assert.equal(hold.heldBy, null);
+  assert.equal(hold.triggerSurface, "message");
+  assert.equal(hold.triggerRuleId, "contact:dm-available");
+  assert.equal(
+    harness.store.getAutomodStrike(SERVER_ID, ESTABLISHED_USER_ID),
+    null
+  );
+  assert.match(
+    JSON.stringify(harness.protectedLogs),
+    /automatic contact screening/
+  );
+});
+
+test("contact screening accepts either recent-account or recent-membership identity risk", async () => {
+  const cases = [
+    {
+      id: "MSGCONTACTACCOUNT",
+      createdAt: new Date(1_800_000_000_000 - 60_000),
+      joinedAt: null,
+    },
+    {
+      id: "MSGCONTACTMEMBER",
+      createdAt: new Date(1_800_000_000_000 - 400 * 24 * 60 * 60 * 1_000),
+      joinedAt: new Date(1_800_000_000_000 - 60_000),
+    },
+  ];
+
+  for (const entry of cases) {
+    const harness = makeHarness();
+    await enableHold(harness);
+    await harness.postGate.handleMessage(
+      recentIdentityMessage({ ...entry, content: "DM me" })
+    );
+
+    assert.deepEqual(harness.deletedMessageIds, [entry.id]);
+    assert.equal(
+      harness.store.isUserHeld(SERVER_ID, ESTABLISHED_USER_ID),
+      true
+    );
+  }
+});
+
+test("established accounts and established first-time posters are not contact screened", async () => {
+  const harness = makeHarness({
+    profileResponses: new Map([[ESTABLISHED_USER_ID, "DMs open"]]),
+  });
+  await enableHold(harness);
+
+  const messageMatch = establishedMessage({
+    id: "MSGCONTACTESTABLISHED1",
+    content: "DM me",
+  });
+  const bioOnlyMatch = establishedMessage({
+    id: "MSGCONTACTESTABLISHED2",
+    content: "ordinary first post",
+  });
+  const firstHandling = harness.postGate.handleMessage(messageMatch);
+  const firstExcluded = harness.postGate.shouldExcludeMessage(messageMatch);
+  const secondHandling = harness.postGate.handleMessage(bioOnlyMatch);
+  const secondExcluded = harness.postGate.shouldExcludeMessage(bioOnlyMatch);
+  await Promise.all([firstHandling, secondHandling]);
+
+  assert.equal(await firstExcluded, false);
+  assert.equal(await secondExcluded, false);
+  assert.equal(harness.profileRequests.length, 0);
+  assert.equal(harness.deletedMessageIds.length, 0);
+  assert.equal(harness.store.queue.size, 0);
+  assert.equal(harness.store.holds.size, 0);
+});
+
+test("contact screening follows exact recent-identity boundaries and rejects invalid future dates", async () => {
+  const current = 1_800_000_000_000;
+  const cases = [
+    {
+      id: "MSGCONTACTBOUNDARYOLD",
+      expectedHeld: false,
+      createdAt: new Date(current - AUTOMOD_LIMITS.recentAccountMs),
+      joinedAt: new Date(current - AUTOMOD_LIMITS.recentMemberMs),
+    },
+    {
+      id: "MSGCONTACTBOUNDARYACCOUNT",
+      expectedHeld: true,
+      createdAt: new Date(current - AUTOMOD_LIMITS.recentAccountMs + 1),
+      joinedAt: new Date(current - AUTOMOD_LIMITS.recentMemberMs),
+    },
+    {
+      id: "MSGCONTACTBOUNDARYMEMBER",
+      expectedHeld: true,
+      createdAt: new Date(current - AUTOMOD_LIMITS.recentAccountMs),
+      joinedAt: new Date(current - AUTOMOD_LIMITS.recentMemberMs + 1),
+    },
+    {
+      id: "MSGCONTACTFUTURE",
+      expectedHeld: false,
+      createdAt: new Date(current + 60_000),
+      joinedAt: new Date("invalid"),
+    },
+  ];
+
+  for (const entry of cases) {
+    const harness = makeHarness({ clock: current });
+    await enableHold(harness);
+    await harness.postGate.handleMessage(
+      recentIdentityMessage({ ...entry, content: "DMs open" })
+    );
+
+    assert.equal(
+      harness.store.isUserHeld(SERVER_ID, ESTABLISHED_USER_ID),
+      entry.expectedHeld,
+      entry.id
+    );
+    assert.equal(
+      harness.deletedMessageIds.includes(entry.id),
+      entry.expectedHeld,
+      entry.id
+    );
+  }
+});
+
+test("a matching profile bio holds a recent-identity message before other listeners proceed without copying the bio", async () => {
+  const secretBio = "DMs open — Discord: private-handle";
+  const harness = makeHarness({
+    profileResponses: new Map([[ESTABLISHED_USER_ID, secretBio]]),
+  });
+  await enableHold(harness);
+  const message = recentIdentityMessage({
+    id: "MSGCONTACTBIO1",
+    content: "ordinary server message",
+  });
+
+  const handling = harness.postGate.handleMessage(message);
+  const excluded = harness.postGate.shouldExcludeMessage(message);
+  await handling;
+
+  assert.equal(await excluded, true);
+  assert.deepEqual(harness.deletedMessageIds, ["MSGCONTACTBIO1"]);
+  assert.deepEqual(harness.profileRequests, [ESTABLISHED_USER_ID]);
+  const [queued] = [...harness.store.queue.values()];
+  assert.equal(queued.trigger, "contact_solicitation");
+  assert.equal(queued.triggerSurface, "bio");
+  const cards = JSON.stringify(harness.protectedLogs);
+  assert.match(cards, /profile bio \(content withheld\)/);
+  assert.equal(cards.includes(secretBio), false);
+  assert.equal(cards.includes("private-handle"), false);
+});
+
+test("successful profile checks are cached until TTL and refreshed afterwards", async () => {
+  const profileResponses = new Map([[ESTABLISHED_USER_ID, "ordinary bio"]]);
+  const harness = makeHarness({ profileResponses, profileCacheTtlMs: 1_000 });
+  await enableHold(harness);
+
+  await harness.postGate.handleMessage(
+    recentIdentityMessage({ id: "MSGCONTACTCACHE1", content: "one" })
+  );
+  await harness.postGate.handleMessage(
+    recentIdentityMessage({ id: "MSGCONTACTCACHE2", content: "two" })
+  );
+  assert.equal(harness.profileRequests.length, 1);
+
+  harness.advance(1_001);
+  profileResponses.set(ESTABLISHED_USER_ID, "direct messages welcome");
+  await harness.postGate.handleMessage(
+    recentIdentityMessage({ id: "MSGCONTACTCACHE3", content: "three" })
+  );
+  assert.equal(harness.profileRequests.length, 2);
+  assert.deepEqual(harness.deletedMessageIds, ["MSGCONTACTCACHE3"]);
+});
+
+test("profile lookup failures fail open, log redacted context, and retry after the backoff", async () => {
+  const profileResponses = new Map([
+    [ESTABLISHED_USER_ID, { ok: false, status: 503 }],
+  ]);
+  const harness = makeHarness({ profileResponses, profileRetryMs: 1_000 });
+  await enableHold(harness);
+
+  await harness.postGate.handleMessage(
+    recentIdentityMessage({ id: "MSGCONTACTFAIL1", content: "one" })
+  );
+  await harness.postGate.handleMessage(
+    recentIdentityMessage({ id: "MSGCONTACTFAIL2", content: "two" })
+  );
+  assert.equal(harness.profileRequests.length, 1);
+  assert.equal(harness.deletedMessageIds.length, 0);
+  assert.equal(
+    harness.logLines.join("\n").includes(ESTABLISHED_USER_ID),
+    false
+  );
+
+  harness.advance(1_001);
+  profileResponses.set(ESTABLISHED_USER_ID, "message me");
+  await harness.postGate.handleMessage(
+    recentIdentityMessage({ id: "MSGCONTACTFAIL3", content: "three" })
+  );
+  assert.equal(harness.profileRequests.length, 2);
+  assert.deepEqual(harness.deletedMessageIds, ["MSGCONTACTFAIL3"]);
+});
+
+test("concurrent messages coalesce one profile lookup and one automatic user hold", async () => {
+  let releaseProfile;
+  const profilePending = new Promise((resolve) => {
+    releaseProfile = resolve;
+  });
+  const harness = makeHarness({
+    profileResponses: new Map([
+      [
+        ESTABLISHED_USER_ID,
+        async () => {
+          await profilePending;
+          return { ok: true, status: 200, data: { content: "DM me" } };
+        },
+      ],
+    ]),
+  });
+  await enableHold(harness);
+
+  const first = harness.postGate.handleMessage(
+    recentIdentityMessage({ id: "MSGCONTACTRACE1", content: "one" })
+  );
+  const second = harness.postGate.handleMessage(
+    recentIdentityMessage({ id: "MSGCONTACTRACE2", content: "two" })
+  );
+  releaseProfile();
+  await Promise.all([first, second]);
+
+  assert.equal(harness.profileRequests.length, 1);
+  assert.equal(harness.store.holds.size, 1);
+  assert.equal(harness.store.queue.size, 2);
+  assert.deepEqual(harness.deletedMessageIds.sort(), [
+    "MSGCONTACTRACE1",
+    "MSGCONTACTRACE2",
+  ]);
+});
+
+test("profile cache eviction is bounded and 404 no-profile results are cacheable", async () => {
+  const secondUser = "SECONDUSER123";
+  const profileResponses = new Map([
+    [ESTABLISHED_USER_ID, { ok: false, status: 404 }],
+    [secondUser, { ok: false, status: 404 }],
+  ]);
+  const harness = makeHarness({
+    profileResponses,
+    profileCacheMaxEntries: 1,
+  });
+  await enableHold(harness);
+
+  await harness.postGate.handleMessage(
+    recentIdentityMessage({ id: "MSGCONTACTLRU1", content: "one" })
+  );
+  await harness.postGate.handleMessage(
+    recentIdentityMessage({
+      id: "MSGCONTACTLRU2",
+      authorId: secondUser,
+      content: "two",
+    })
+  );
+  await harness.postGate.handleMessage(
+    recentIdentityMessage({ id: "MSGCONTACTLRU3", content: "three" })
+  );
+  assert.deepEqual(harness.profileRequests, [
+    ESTABLISHED_USER_ID,
+    secondUser,
+    ESTABLISHED_USER_ID,
+  ]);
+});
+
+test("releasing an automatic hold re-holds the account if its cached bio still matches", async () => {
+  const harness = makeHarness({
+    profileResponses: new Map([[ESTABLISHED_USER_ID, "inbox available"]]),
+  });
+  await enableHold(harness);
+  await harness.postGate.handleMessage(
+    recentIdentityMessage({ id: "MSGCONTACTRELEASE1", content: "one" })
+  );
+  const released = await harness.postGate.releaseUser(
+    SERVER_ID,
+    ESTABLISHED_USER_ID,
+    MOD_USER_ID
+  );
+  assert.equal(released.outcome, "released");
+
+  await harness.postGate.handleMessage(
+    recentIdentityMessage({ id: "MSGCONTACTRELEASE2", content: "two" })
+  );
+  const hold = harness.store.getUserHold(SERVER_ID, ESTABLISHED_USER_ID);
+  assert.equal(hold.active, true);
+  assert.equal(hold.holdSource, "automatic");
+  assert.equal(harness.profileRequests.length, 1);
+  assert.deepEqual(
+    harness.deletedMessageIds.filter((id) => id.startsWith("MSGCONTACT")),
+    ["MSGCONTACTRELEASE1", "MSGCONTACTRELEASE2"]
+  );
+});
+
+test("an automatic hold does not return from cached bio after the account ages out", async () => {
+  const harness = makeHarness({
+    profileResponses: new Map([[ESTABLISHED_USER_ID, "inbox available"]]),
+  });
+  await enableHold(harness);
+  await harness.postGate.handleMessage(
+    recentIdentityMessage({ id: "MSGCONTACTAGEOUT1", content: "one" })
+  );
+  const released = await harness.postGate.releaseUser(
+    SERVER_ID,
+    ESTABLISHED_USER_ID,
+    MOD_USER_ID
+  );
+  assert.equal(released.outcome, "released");
+
+  harness.advance(AUTOMOD_LIMITS.recentAccountMs + 1);
+  const agedMessage = recentIdentityMessage({
+    id: "MSGCONTACTAGEOUT2",
+    content: "two",
+  });
+  const handling = harness.postGate.handleMessage(agedMessage);
+  const excluded = harness.postGate.shouldExcludeMessage(agedMessage);
+  await handling;
+
+  assert.equal(await excluded, false);
+  assert.equal(harness.store.isUserHeld(SERVER_ID, ESTABLISHED_USER_ID), false);
+  assert.equal(harness.profileRequests.length, 1);
+  assert.equal(harness.deletedMessageIds.includes("MSGCONTACTAGEOUT2"), false);
+});
+
+test("automatic contact screening preserves moderator and privacy exclusions", async () => {
+  const harness = makeHarness({
+    profileResponses: new Map([[ESTABLISHED_USER_ID, "DMs open"]]),
+  });
+  await enableHold(harness);
+
+  await harness.postGate.handleMessage(
+    recentIdentityMessage({
+      id: "MSGCONTACTMOD1",
+      authorId: MOD_USER_ID,
+      content: "DM me",
+    })
+  );
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGCONTACTEXCLUDED1",
+      channelId: EXCLUDED_CHANNEL_ID,
+      content: "DMs open",
+    })
+  );
+  assert.equal(harness.deletedMessageIds.length, 0);
+  assert.equal(harness.store.holds.size, 0);
+  assert.equal(harness.profileRequests.length, 0);
+});
+
+test("a deletion failure leaves the automatically detected account held without creating a false queue record", async () => {
+  const harness = makeHarness({ lockdownDeleteFails: true });
+  await enableHold(harness);
+
+  await harness.postGate.handleMessage(
+    recentIdentityMessage({ id: "MSGCONTACTDELETEFAIL1", content: "DM me" })
+  );
+
+  assert.equal(harness.store.isUserHeld(SERVER_ID, ESTABLISHED_USER_ID), true);
+  assert.equal(harness.store.queue.size, 0);
+  assert.equal(harness.deletedMessageIds.length, 0);
 });
 
 test("holds a message containing a prohibited term even from an established member", async () => {

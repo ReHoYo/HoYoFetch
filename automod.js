@@ -98,6 +98,20 @@ function isRecent(time, now, windowMs) {
   return time !== null && time <= now && now - time < windowMs;
 }
 
+export function hasRecentIdentitySignal(
+  { accountCreatedAt, joinedAt } = {},
+  {
+    now = Date.now(),
+    recentAccountMs = AUTOMOD_LIMITS.recentAccountMs,
+    recentMemberMs = AUTOMOD_LIMITS.recentMemberMs,
+  } = {}
+) {
+  return (
+    isRecent(asTime(accountCreatedAt), now, recentAccountMs) ||
+    isRecent(asTime(joinedAt), now, recentMemberMs)
+  );
+}
+
 function formatDuration(durationMs) {
   if (durationMs < 60 * 60_000) return `${durationMs / 60_000} minutes`;
   if (durationMs < 24 * 60 * 60_000) {
@@ -221,9 +235,14 @@ export class AntiRaidDetector {
     const raidState = this.joinStates.get(serverId);
     const joinedDuringRaid =
       (raidState?.joinedDuringRaid.get(userId) ?? 0) > now;
-    const recentIdentity =
-      isRecent(asTime(accountCreatedAt), now, policy.recentAccountMs) ||
-      isRecent(asTime(joinedAt), now, policy.recentMemberMs);
+    const recentIdentity = hasRecentIdentitySignal(
+      { accountCreatedAt, joinedAt },
+      {
+        now,
+        recentAccountMs: policy.recentAccountMs,
+        recentMemberMs: policy.recentMemberMs,
+      }
+    );
 
     const signals = {
       rapidBurst: rapid.length >= AUTOMOD_LIMITS.rapidMessages,

@@ -15,6 +15,7 @@ const {
   AUTOMOD_TIMEOUT_LADDER,
   buildEvidenceExcerpt,
   createAutomod,
+  hasRecentIdentitySignal,
   normalizeAutomodContent,
   redactExcludedEvidence,
 } = await import("../automod.js");
@@ -302,6 +303,46 @@ test("content normalization defeats whitespace, case, and zero-width drift", () 
   assert.equal(
     buildEvidenceExcerpt("https://bad.example <@USER>"),
     "[url] <@​USER>"
+  );
+});
+
+test("recent identity uses Automod's exact account and membership windows", () => {
+  const now = 1_800_000_000_000;
+  const minute = 60_000;
+
+  assert.equal(
+    hasRecentIdentitySignal({ accountCreatedAt: now - minute }, { now }),
+    true
+  );
+  assert.equal(
+    hasRecentIdentitySignal(
+      {
+        accountCreatedAt: now - AUTOMOD_LIMITS.recentAccountMs,
+        joinedAt: now - AUTOMOD_LIMITS.recentMemberMs + 1,
+      },
+      { now }
+    ),
+    true
+  );
+  assert.equal(
+    hasRecentIdentitySignal(
+      {
+        accountCreatedAt: now - AUTOMOD_LIMITS.recentAccountMs,
+        joinedAt: now - AUTOMOD_LIMITS.recentMemberMs,
+      },
+      { now }
+    ),
+    false
+  );
+  assert.equal(
+    hasRecentIdentitySignal(
+      {
+        accountCreatedAt: new Date("invalid"),
+        joinedAt: now + minute,
+      },
+      { now }
+    ),
+    false
   );
 });
 
