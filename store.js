@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdirSync,
   renameSync,
+  statSync,
 } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
@@ -37,6 +38,9 @@ const CHANNEL_EXCLUSIONS_PATH = join(DATA_DIR, "channel_exclusions.json");
 const MODERATION_LEVEL_PATH = join(DATA_DIR, "moderation_level.json");
 const POST_GATE_PATH = join(DATA_DIR, "post_gate.json");
 const POST_GATE_QUEUE_PATH = join(DATA_DIR, "post_gate_queue.json");
+const POST_GATE_USER_HOLDS_PATH = join(DATA_DIR, "post_gate_user_holds.json");
+// Operator-maintained, never written by the bot. See website docs for the shape.
+const PROHIBITED_TERMS_PATH = join(DATA_DIR, "prohibited_terms.json");
 const PRIVACY_DIGEST_PATH = join(DATA_DIR, "privacy_digest.json");
 
 // ── Helpers ────────────────────────────────────────
@@ -1191,6 +1195,345 @@ export function prunePostGateQueue(now = Date.now()) {
   }
   if (changed) persistPostGateQueue();
   return evidencePaths;
+}
+
+// ═══════════════════════════════════════════════════
+//  Post gate — full-user holds (post-gate.js)
+// ═══════════════════════════════════════════════════
+// When a moderator denies a held post with "deny + hold user", every later
+// message from that member is held until a moderator releases them. The state
+// lives here rather than in memory so it survives a restart, and it is keyed
+// "serverId:userId" — the same convention automod_strikes.json uses — so
+// leaving and rejoining the server changes nothing.
+
+const MAX_USER_HOLDS = 1_000;
+const STORE_SAFE_ID = /^[A-Za-z0-9]+$/;
+
+let postGateUserHolds = readJSON(POST_GATE_USER_HOLDS_PATH, {});
+
+function userHoldKey(serverId, userId) {
+  return `${serverId}:${userId}`;
+}
+
+function safeStoreId(value) {
+  return typeof value === "string" && STORE_SAFE_ID.test(value) ? value : null;
+}
+
+function finiteOrNull(value) {
+  return Number.isFinite(value) ? value : null;
+}
+
+function normalisePostGateUserHold(value = {}) {
+  return {
+    serverId: safeStoreId(value.serverId),
+    userId: safeStoreId(value.userId),
+    active: value.active === true,
+    heldAt: finiteOrNull(value.heldAt),
+    heldBy: safeStoreId(value.heldBy),
+    originQueueId: safeStoreId(value.originQueueId),
+    originMessageId: safeStoreId(value.originMessageId),
+    cardChannelId: safeStoreId(value.cardChannelId),
+    cardMessageId: safeStoreId(value.cardMessageId),
+    reminderAt: finiteOrNull(value.reminderAt),
+    reminderCount:
+      Number.isFinite(value.reminderCount) && value.reminderCount > 0
+        ? Math.min(Math.floor(value.reminderCount), 1_000)
+        : 0,
+    lastReminderMessageId: safeStoreId(value.lastReminderMessageId),
+    releasedAt: finiteOrNull(value.releasedAt),
+    releasedBy: safeStoreId(value.releasedBy),
+    releaseReason:
+      typeof value.releaseReason === "string" ? value.releaseReason : null,
+  };
+}
+
+let migratedUserHolds = false;
+for (const [key, value] of Object.entries(postGateUserHolds)) {
+  const normalised = normalisePostGateUserHold(value);
+  if (JSON.stringify(value) !== JSON.stringify(normalised)) {
+    postGateUserHolds[key] = normalised;
+    migratedUserHolds = true;
+  }
+}
+if (migratedUserHolds) writeJSON(POST_GATE_USER_HOLDS_PATH, postGateUserHolds);
+
+function persistUserHolds() {
+  writeJSON(POST_GATE_USER_HOLDS_PATH, postGateUserHolds);
+}
+
+/** Synchronous hot path: post-gate.js calls this for every message. */
+export function isUserHeld(serverId, userId) {
+  return postGateUserHolds[userHoldKey(serverId, userId)]?.active === true;
+}
+
+export function getUserHold(serverId, userId) {
+  const record = postGateUserHolds[userHoldKey(serverId, userId)];
+  return record ? normalisePostGateUserHold(record) : null;
+}
+
+/**
+ * Idempotent by contract: an already-active hold is returned untouched so a
+ * second "deny + hold user" can never duplicate the record or reset who placed
+ * the hold and when.
+ */
+export function createUserHold(record = {}) {
+  const normalised = normalisePostGateUserHold(record);
+  if (!normalised.serverId || !normalised.userId) {
+    return { created: false, record: null };
+  }
+  const key = userHoldKey(normalised.serverId, normalised.userId);
+  const existing = postGateUserHolds[key];
+  if (existing?.active) {
+    return { created: false, record: normalisePostGateUserHold(existing) };
+  }
+
+  normalised.active = true;
+  postGateUserHolds[key] = normalised;
+  const excess = Object.keys(postGateUserHolds).length - MAX_USER_HOLDS;
+  if (excess > 0) {
+    const oldest = Object.entries(postGateUserHolds)
+      .sort(([, a], [, b]) => (a.heldAt ?? 0) - (b.heldAt ?? 0))
+      .slice(0, excess);
+    for (const [staleKey] of oldest) delete postGateUserHolds[staleKey];
+  }
+  persistUserHolds();
+  return { created: true, record: structuredClone(normalised) };
+}
+
+export function updateUserHold(serverId, userId, patch = {}) {
+  const key = userHoldKey(serverId, userId);
+  const record = postGateUserHolds[key];
+  if (!record) return null;
+  postGateUserHolds[key] = normalisePostGateUserHold({
+    ...record,
+    ...structuredClone(patch),
+  });
+  persistUserHolds();
+  return structuredClone(postGateUserHolds[key]);
+}
+
+/**
+ * Mark a hold inactive while keeping the record for audit. prunePostGateUserHolds
+ * drops it once it has sat released past the shared retention window.
+ */
+export function releaseUserHold(
+  serverId,
+  userId,
+  { releasedBy = null, releasedAt = Date.now(), reason = null } = {}
+) {
+  const key = userHoldKey(serverId, userId);
+  const record = postGateUserHolds[key];
+  if (!record?.active) {
+    return { released: false, record: record ? structuredClone(record) : null };
+  }
+  postGateUserHolds[key] = normalisePostGateUserHold({
+    ...record,
+    active: false,
+    releasedBy,
+    releasedAt,
+    releaseReason: reason,
+    reminderAt: null,
+  });
+  persistUserHolds();
+  return { released: true, record: structuredClone(postGateUserHolds[key]) };
+}
+
+/**
+ * Reverse lookup for reaction dispatch, mirroring findHeldPostByReviewMessage.
+ * A control card and a reminder card are distinguished so ⏳ ("continue
+ * holding") can be accepted only where it is actually offered.
+ */
+export function findUserHoldByCardMessage(messageId) {
+  if (!safeStoreId(messageId)) return null;
+  for (const record of Object.values(postGateUserHolds)) {
+    if (!record.active) continue;
+    if (record.cardMessageId === messageId) {
+      return { record: structuredClone(record), cardKind: "control" };
+    }
+    if (record.lastReminderMessageId === messageId) {
+      return { record: structuredClone(record), cardKind: "reminder" };
+    }
+  }
+  return null;
+}
+
+export function getActiveUserHolds(serverId) {
+  return Object.values(postGateUserHolds)
+    .filter(
+      (record) =>
+        record.active &&
+        (serverId === undefined || record.serverId === serverId)
+    )
+    .map((record) => structuredClone(record));
+}
+
+export function getDueUserHoldReminders(now = Date.now()) {
+  return Object.values(postGateUserHolds)
+    .filter(
+      (record) =>
+        record.active &&
+        Number.isFinite(record.reminderAt) &&
+        record.reminderAt <= now
+    )
+    .map((record) => structuredClone(record));
+}
+
+export function prunePostGateUserHolds(now = Date.now()) {
+  let changed = false;
+  for (const [key, record] of Object.entries(postGateUserHolds)) {
+    const releasedLongAgo =
+      !record.active &&
+      Number.isFinite(record.releasedAt) &&
+      now - record.releasedAt > RESOLVED_RETENTION_MS;
+    if (releasedLongAgo) {
+      delete postGateUserHolds[key];
+      changed = true;
+    }
+  }
+  if (changed) persistUserHolds();
+  return changed;
+}
+
+// ═══════════════════════════════════════════════════
+//  Post gate — operator prohibited-term list (post-gate.js)
+// ═══════════════════════════════════════════════════
+// data/prohibited_terms.json is written by the operator, never by the bot, and
+// *extends* the built-in seed list in prohibited-terms.js. readJSON is
+// deliberately not reused here: it collapses a parse error into the fallback,
+// which would make a file the operator broke indistinguishable from one they
+// never created.
+
+const MAX_TERM_FILE_ENTRIES = 500;
+
+let prohibitedTermCache = null;
+let prohibitedTermStat = null;
+let warnedAboutTermFile = false;
+
+function readProhibitedTermsFile() {
+  if (!existsSync(PROHIBITED_TERMS_PATH)) {
+    return { status: "missing", raw: null, error: null, signature: null };
+  }
+  try {
+    const stats = statSync(PROHIBITED_TERMS_PATH);
+    const raw = JSON.parse(readFileSync(PROHIBITED_TERMS_PATH, "utf-8"));
+    return {
+      status: "ok",
+      raw: sanitiseObject(raw),
+      error: null,
+      signature: `${stats.mtimeMs}:${stats.size}`,
+    };
+  } catch (error) {
+    return {
+      status: "malformed",
+      raw: null,
+      error: error?.message ?? String(error),
+      signature: null,
+    };
+  }
+}
+
+function normaliseTermEntries(values, { allowObjects }) {
+  const entries = [];
+  let skipped = 0;
+  for (const value of Array.isArray(values) ? values : []) {
+    if (entries.length >= MAX_TERM_FILE_ENTRIES) {
+      skipped += 1;
+      continue;
+    }
+    if (typeof value === "string") {
+      const term = value.trim();
+      if (term) entries.push(term);
+      else skipped += 1;
+      continue;
+    }
+    if (
+      allowObjects &&
+      value &&
+      typeof value === "object" &&
+      typeof value.term === "string" &&
+      value.term.trim()
+    ) {
+      entries.push({
+        term: value.term.trim(),
+        ...(typeof value.id === "string" && value.id.trim()
+          ? { id: value.id.trim() }
+          : {}),
+        ...(typeof value.tolerant === "boolean"
+          ? { tolerant: value.tolerant }
+          : {}),
+      });
+      continue;
+    }
+    skipped += 1;
+  }
+  return { entries, skipped };
+}
+
+function normaliseProhibitedTermList(file) {
+  if (file.status !== "ok") {
+    return {
+      terms: [],
+      allowlist: [],
+      status: file.status,
+      error: file.error,
+      skipped: 0,
+      loadedAt: Date.now(),
+    };
+  }
+  const terms = normaliseTermEntries(file.raw?.terms, { allowObjects: true });
+  const allowlist = normaliseTermEntries(file.raw?.allowlist, {
+    allowObjects: false,
+  });
+  return {
+    terms: terms.entries,
+    allowlist: allowlist.entries,
+    status: "ok",
+    error: null,
+    skipped: terms.skipped + allowlist.skipped,
+    loadedAt: Date.now(),
+  };
+}
+
+function loadProhibitedTermList() {
+  const file = readProhibitedTermsFile();
+  if (file.status === "malformed" && !warnedAboutTermFile) {
+    warnedAboutTermFile = true;
+    console.warn(
+      `⚠️  Ignoring unreadable ${PROHIBITED_TERMS_PATH}: ${file.error}. The built-in prohibited-term list stays active.`
+    );
+  }
+  if (file.status === "ok") warnedAboutTermFile = false;
+  prohibitedTermStat = file.signature;
+  prohibitedTermCache = normaliseProhibitedTermList(file);
+  return prohibitedTermCache;
+}
+
+export function getProhibitedTermList() {
+  if (!prohibitedTermCache) loadProhibitedTermList();
+  return structuredClone(prohibitedTermCache);
+}
+
+/**
+ * Re-read only when the file actually changed, so the hourly post-gate sweep
+ * costs one stat() rather than a parse. `force` is used by /Post-Gate terms so
+ * an operator can apply an edit without restarting the bot.
+ */
+export function reloadProhibitedTermList({ force = false } = {}) {
+  if (!force && prohibitedTermCache) {
+    let signature = null;
+    try {
+      if (existsSync(PROHIBITED_TERMS_PATH)) {
+        const stats = statSync(PROHIBITED_TERMS_PATH);
+        signature = `${stats.mtimeMs}:${stats.size}`;
+      }
+    } catch {
+      signature = null;
+    }
+    if (signature === prohibitedTermStat) {
+      return { changed: false, ...structuredClone(prohibitedTermCache) };
+    }
+  }
+  return { changed: true, ...structuredClone(loadProhibitedTermList()) };
 }
 
 // ═══════════════════════════════════════════════════

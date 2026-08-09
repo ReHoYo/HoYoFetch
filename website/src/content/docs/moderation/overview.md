@@ -7,7 +7,7 @@ Irminsul moderation is designed around exact permission checks, explicit reasons
 
 Member safety reports use the same protected-record destination but are not moderation actions. A report can raise a staff-review priority when several independent members report the same account, but it never changes the target's account or server state.
 
-Anti-abuse coverage is layered: automod reacts to _behavior_ (message bursts, floods, join surges) that needs several messages to show itself, while the [first-post gate and server levels](/HoYoFetch/moderation/post-gate/) can review a new member's first link/media or place the whole server into lockdown. Holding a post does not change the author's automod strike stage; rejecting it advances the shared four-stage timeout ladder without immediately applying a timeout.
+Anti-abuse coverage is layered: automod reacts to _behavior_ (message bursts, floods, join surges) that needs several messages to show itself, while the [Post Gate and server levels](/HoYoFetch/moderation/post-gate/) can review a new member's first link/media, a prohibited term, every message from a held member, or place the whole server into lockdown. Holding a post does not change the author's automod strike stage; rejecting it advances the shared four-stage timeout ladder without immediately applying a timeout.
 
 ## Before the first action
 
@@ -51,4 +51,4 @@ History cleanup covers only messages Irminsul observed while archiving was activ
 
 Results never claim complete erasure. Every message Irminsul could not delete is reported by cause — already gone from Stoat, blocked by a missing Manage Messages permission, still rate limited, or failed outright — so a partial result says what to do about it rather than only how many were lost. A message that Stoat no longer has is reconciled into the archive rather than counted as a failure, so repeat cleanups stop retrying it.
 
-Continue to [Spam reports](/HoYoFetch/moderation/spam-reports/), [Manual actions](/HoYoFetch/moderation/manual-actions/), [Audit log](/HoYoFetch/moderation/audit-log/), [Automod](/HoYoFetch/moderation/automod/), or [First-post gate](/HoYoFetch/moderation/post-gate/).
+Continue to [Spam reports](/HoYoFetch/moderation/spam-reports/), [Manual actions](/HoYoFetch/moderation/manual-actions/), [Audit log](/HoYoFetch/moderation/audit-log/), [Automod](/HoYoFetch/moderation/automod/), or [Post Gate](/HoYoFetch/moderation/post-gate/).

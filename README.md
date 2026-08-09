@@ -75,7 +75,9 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/AuditLog [status\|here\|#channel\|off\|confirm CODE\|cancel]` | View or request an Enka-approved audit-log configuration change (admins/mods only)                                                |
 | `/Test-AuditLog`                                                | Send a test event through the audit pipeline to verify delivery (admins/mods only; legacy diagnostic alias)                       |
 | `/Exclude-Channel [status\|here\|#channel\|remove #channel]`    | Request Enka-approved message-content privacy exclusions (admins/mods only)                                                       |
-| `/Post-Gate [status\|here\|#channel\|off]`                      | Configure the Enka-approved review channel used by moderation levels (admins/mods only)                                           |
+| `/Post-Gate [status\|here\|#channel\|off\|holds\|terms]`        | Configure the Enka-approved review channel, list held members, or inspect the prohibited-term list (admins/mods only)             |
+| `/Post-Gate [approve\|reject\|deny-hold] QUEUE_ID`              | Resolve a held post: clear the author, discard with a strike, or discard and place the author in Post Gate (Manage Messages)      |
+| `/Post-Gate release @member`                                    | Release a member from Post Gate so their messages post normally again (Manage Messages)                                           |
 | `/Level [status\|1\|2\|3\|4 confirm]`                           | Set the server-wide link/media review or lockdown policy (admins/mods only)                                                       |
 | `/Automod status`                                               | Show this server's automod mode, logger, and ban quorum (admins/mods only)                                                        |
 | `/Automod monitor [here\|#channel]`                             | Detect and log cases without changing messages or members (admins/mods only)                                                      |
@@ -201,6 +203,14 @@ Choose the lowest level that matches the current situation:
 Levels 1–2 reduce common link/media bot spam but do not block ordinary text messages. Level 2 is intentionally behaviorally identical to Level 1 for now; selecting it communicates an elevated posture without silently changing thresholds. Levels 3–4 are disruptive lockdown settings, not everyday filters.
 
 Levels 1–2 normalize common link obfuscations before deciding whether to hold a post. This includes inserted spaces or invisible characters, spaced and `hxxp` protocols, Unicode URL punctuation, bracketed dots, bare domains, and IPv4 addresses; the original message is preserved unchanged for moderator review.
+
+At Levels 1–2 a message is also held when it matches the **prohibited-term filter**, regardless of the author's tenure or whether the post carries a link. Matching is word- and phrase-aware after Unicode, case, invisible-character, diacritic, homoglyph, leetspeak, and stretched-letter normalization, so `Scunthorpe` is never flagged while `n i g g e r`, `nіgger`, and `n1gg3r` are. An allowlist takes precedence over any term it overlaps. A match only ever **holds** the message for review — it never bans, times out, or strikes anyone by itself; the strike follows a moderator's denial, exactly as it does for a link hold. Irminsul ships a small built-in list; operators extend it with `data/prohibited_terms.json` (`{"terms": [...], "allowlist": [...]}`) and reload it without a restart via `/Post-Gate terms`. The review card names the rule id that fired, never the matched text.
+
+### Holding a whole member
+
+Denying a held post with 🔒 (or `/Post-Gate deny-hold QUEUE_ID`) discards the post, advances the automod strike stage, and places the author in **full Post Gate**: every later message they send is held for review, whatever it contains. Irminsul posts one persistent control card to the review channel naming who placed the hold and when, with a 🔓 reaction to release. The hold is idempotent — denying the same author again never stacks records or reposts the card — and it is stored on disk, so it survives a restart and a leave/rejoin. Recognized moderators, the review channel itself, privacy-excluded channels, and Levels 3–4 lockdown all continue to take precedence.
+
+A hold never expires on its own. After 24 hours (`POST_GATE_HOLD_REMINDER_HOURS`, 1–168) Irminsul reminds moderators that the hold is still standing and offers 🔓 Release or ⏳ Continue Holding; ignoring the reminder simply repeats it one window later. Releasing (🔓 or `/Post-Gate release @member`) restores normal posting immediately, but messages already sitting in the review queue stay queued and are reviewed individually — a release is a judgement about the author, not about content nobody has looked at yet. Both transitions are recorded to the protected review channel.
 
 Levels 3–4 clear **Send Messages** from the server default role, then keep reactive deletion as a fallback for messages allowed by explicit channel or role overrides. Irminsul must have **Manage Permissions** plus explicit **View Channel** and **Send Messages** access in the protected review channel so it cannot lock itself out. Staff roles and bots that rely only on the default role are also silenced; give trusted roles explicit sending permission if they must remain active. Unlocking restores only the Send Messages bit Irminsul removed, preserving unrelated permission changes, and startup/event/periodic reconciliation repairs drift.
 
@@ -411,6 +421,13 @@ docker run -d --name hoyofetch --restart unless-stopped \
 ```
 
 ## 📝 Changelog
+
+### v3.2.0
+
+- Added a prohibited-term hold filter to Levels 1–2: word- and phrase-aware matching after Unicode, case, invisible-character, homoglyph, leetspeak, and stretched-letter normalization, with an allowlist that takes precedence. A match only holds the message for review and never punishes on its own
+- Added `Deny + Hold User` (🔒) and full-user Post Gate: every later message from a held member is held for review, a persistent control card records who held them and when, and 🔓 or `/Post-Gate release @member` restores normal posting while leaving already-queued messages queued
+- Added forgotten-hold reminders after `POST_GATE_HOLD_REMINDER_HOURS` (default 24) offering Release / Continue Holding, with no automatic release ever
+- Fixed a race where two moderators acting on the same held post in the same instant could both pass the pending check; decisions are now serialised per queue entry and the second action reports the outcome the first recorded
 
 ### v3.1.0
 

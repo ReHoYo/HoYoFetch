@@ -58,7 +58,11 @@ export function getCommandAccess(body, commandGameMap = {}) {
     body === "post-gate approve" ||
     body.startsWith("post-gate approve ") ||
     body === "post-gate reject" ||
-    body.startsWith("post-gate reject ")
+    body.startsWith("post-gate reject ") ||
+    body === "post-gate deny-hold" ||
+    body.startsWith("post-gate deny-hold ") ||
+    body === "post-gate release" ||
+    body.startsWith("post-gate release ")
   ) {
     return COMMAND_ACCESS.MANAGE_MESSAGES;
   }
