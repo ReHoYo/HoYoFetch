@@ -177,12 +177,12 @@ Signals are heuristics for a moderator to weigh, not proof that an account is a 
 
 `/Post-Gate here` or `/Post-Gate #channel` first establishes the Enka-approved review destination. Recognized moderators can then use `/Level status` or select a persistent server policy:
 
-| Level | Policy                                                                            |
-| ----- | --------------------------------------------------------------------------------- |
-| 1     | Hold links and media from new, newly joined, or first-time members for review     |
-| 2     | Same link/media review policy as Level 1                                          |
-| 3     | Remove default-role sending and delete slipped posts without creating queue items |
-| 4     | Apply Level 3 and automatically ban each slipped-message author                   |
+| Level | Policy                                                                                     |
+| ----- | ------------------------------------------------------------------------------------------ |
+| 1     | Review qualifying links/media, prohibited terms, and recent-identity contact solicitations |
+| 2     | Same review policy as Level 1                                                              |
+| 3     | Remove default-role sending and delete slipped posts without creating queue items          |
+| 4     | Apply Level 3 and automatically ban each slipped-message author                            |
 
 Choose the lowest level that matches the current situation:
 
@@ -193,17 +193,21 @@ Choose the lowest level that matches the current situation:
 | 3     | **A large or active raid.** Stops regular members from sending server-wide and deletes anything that slips through, without automatically banning the author.        |
 | 4     | **Emergency lockdown for the most severe raids.** Uses Level 3's message lockdown and also bans non-exempt authors whose messages bypass the permission lock.        |
 
-Levels 1–2 reduce common link/media bot spam but do not block ordinary text messages. Level 2 is intentionally behaviorally identical to Level 1 for now; selecting it communicates an elevated posture without silently changing thresholds. Levels 3–4 are disruptive lockdown settings, not everyday filters.
+Levels 1–2 reduce common link/media bot spam and review specific text signals; they do not hold unrelated ordinary messages. Level 2 is intentionally behaviorally identical to Level 1 for now; selecting it communicates an elevated posture without silently changing thresholds. Levels 3–4 are disruptive lockdown settings, not everyday filters.
 
 Levels 1–2 normalize common link obfuscations before deciding whether to hold a post. This includes inserted spaces or invisible characters, spaced and `hxxp` protocols, Unicode URL punctuation, bracketed dots, bare domains, and IPv4 addresses; the original message is preserved unchanged for moderator review.
 
 At Levels 1–2 a message is also held when it matches the **prohibited-term filter**, regardless of the author's tenure or whether the post carries a link. Matching is word- and phrase-aware after Unicode, case, invisible-character, diacritic, homoglyph, leetspeak, and stretched-letter normalization, so `Scunthorpe` is never flagged while `n i g g e r`, `nіgger`, and `n1gg3r` are. An allowlist takes precedence over any term it overlaps. A match only ever **holds** the message for review — it never bans, times out, or strikes anyone by itself; the strike follows a moderator's denial, exactly as it does for a link hold. Irminsul ships a small built-in list; operators extend it with `data/prohibited_terms.json` (`{"terms": [...], "allowlist": [...]}`) and reload it without a restart via `/Post-Gate terms`. The review card names the rule id that fired, never the matched text.
 
+Levels 1–2 also screen a non-moderator's post and current profile bio for **DM availability and off-platform contact solicitation** only while Automod's existing recent-identity signal applies: the account is under 7 days old or the server membership is under 24 hours old. Established accounts and established first-time posters are not contact-screened. Covered signals include open/available DMs, direct invitations such as `message me`, labeled handles for common social and gaming platforms, their profile/invite URLs, and explicit email invitations. Matching tolerates common Unicode, invisible-character, homoglyph, leetspeak, spacing, punctuation, and stretched-letter bypasses while allowing clear opt-outs such as `DMs closed` and ordinary unlabeled Stoat `@mentions`.
+
+A contact match automatically places the account in full Post Gate and queues the triggering message without applying a strike. The protected cards record only a stable rule id and whether the signal came from the message or bio; bio text and external contact details are not copied. Successful profile/no-profile checks are cached for ten minutes and concurrent messages share one lookup. If Stoat cannot return a profile and no fresh result is cached, message-only detection continues, the post is allowed, diagnostics stay redacted, and profile checks retry after one minute.
+
 ### Holding a whole member
 
-Denying a held post with 🔒 (or `/Post-Gate deny-hold QUEUE_ID`) discards the post, advances the automod strike stage, and places the author in **full Post Gate**: every later message they send is held for review, whatever it contains. Irminsul posts one persistent control card to the review channel naming who placed the hold and when, with a 🔓 reaction to release. The hold is idempotent — denying the same author again never stacks records or reposts the card — and it is stored on disk, so it survives a restart and a leave/rejoin. Recognized moderators, the review channel itself, privacy-excluded channels, and Levels 3–4 lockdown all continue to take precedence.
+Denying a held post with 🔒 (or `/Post-Gate deny-hold QUEUE_ID`) discards the post, advances the automod strike stage, and places the author in **full Post Gate**: every later message they send is held for review, whatever it contains. A contact-solicitation match creates the same full-user hold automatically but does not advance the strike stage. Irminsul posts one persistent control card naming either the moderator or the automatic screening source, with a 🔓 reaction to release. The hold is idempotent — repeated triggers never stack records or repost the card — and it is stored on disk, so it survives a restart and a leave/rejoin. Recognized moderators, the review channel itself, privacy-excluded channels, and Levels 3–4 lockdown all continue to take precedence.
 
-A hold never expires on its own. After 24 hours (`POST_GATE_HOLD_REMINDER_HOURS`, 1–168) Irminsul reminds moderators that the hold is still standing and offers 🔓 Release or ⏳ Continue Holding; ignoring the reminder simply repeats it one window later. Releasing (🔓 or `/Post-Gate release @member`) restores normal posting immediately, but messages already sitting in the review queue stay queued and are reviewed individually — a release is a judgement about the author, not about content nobody has looked at yet. Both transitions are recorded to the protected review channel.
+A hold never expires on its own. After 24 hours (`POST_GATE_HOLD_REMINDER_HOURS`, 1–168) Irminsul reminds moderators that the hold is still standing and offers 🔓 Release or ⏳ Continue Holding; ignoring the reminder simply repeats it one window later. Releasing (🔓 or `/Post-Gate release @member`) restores normal posting immediately, but messages already sitting in the review queue stay queued and are reviewed individually — a release is a judgement about the author, not about content nobody has looked at yet. If the account still has a recent identity and its next message or still-cached/refreshed bio continues to advertise contact, it is automatically held again. Once both recent-identity windows expire, contact screening and automatic re-holding stop. Both transitions are recorded to the protected review channel.
 
 Levels 3–4 clear **Send Messages** from the server default role, then keep reactive deletion as a fallback for messages allowed by explicit channel or role overrides. Irminsul must have **Manage Permissions** plus explicit **View Channel** and **Send Messages** access in the protected review channel so it cannot lock itself out. Staff roles and bots that rely only on the default role are also silenced; give trusted roles explicit sending permission if they must remain active. Unlocking restores only the Send Messages bit Irminsul removed, preserving unrelated permission changes, and startup/event/periodic reconciliation repairs drift.
 
@@ -433,6 +437,11 @@ The repository has no per-command telemetry, so real-world use of the removed al
 | `reason:`, `delete:`, `window:`, `purge:`, `duration:`, `mute:`, `timeout:`      | Plain reasons and bare values, for example `/Ban @member 1d repeated spam`            |
 
 The internal undocumented `postgate` route, retired `moderation_level.json` subsystem, v2 evidence-cache paths, and completed pre-v3 startup migrations were also removed. Existing one-year archive records with legacy attachment shapes and seven-day Post Gate queue entries without an author ID remain readable defensively.
+
+### v3.2.2
+
+- Added automatic full-user Post Gate holds for DM availability and off-platform contact solicitations found in recent-identity accounts' messages or profile bios, with bounded evasion normalization, redacted evidence, and cached/single-flight profile checks
+- Contact screening uses Automod's existing recent-identity windows (account under 7 days or membership under 24 hours), excludes established and established first-time posters, applies no strike on detection, and keeps queued-message approval separate from account release
 
 ### v3.2.0
 

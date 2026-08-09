@@ -1126,6 +1126,12 @@ function safeStoreId(value) {
   return typeof value === "string" && STORE_SAFE_ID.test(value) ? value : null;
 }
 
+function safeHoldRuleId(value) {
+  return typeof value === "string" && /^[a-z0-9:_-]+$/iu.test(value)
+    ? value
+    : null;
+}
+
 function finiteOrNull(value) {
   return Number.isFinite(value) ? value : null;
 }
@@ -1137,6 +1143,12 @@ function normalisePostGateUserHold(value = {}) {
     active: value.active === true,
     heldAt: finiteOrNull(value.heldAt),
     heldBy: safeStoreId(value.heldBy),
+    holdSource: value.holdSource === "automatic" ? "automatic" : "manual",
+    triggerSurface:
+      value.triggerSurface === "message" || value.triggerSurface === "bio"
+        ? value.triggerSurface
+        : null,
+    triggerRuleId: safeHoldRuleId(value.triggerRuleId),
     originQueueId: safeStoreId(value.originQueueId),
     originMessageId: safeStoreId(value.originMessageId),
     cardChannelId: safeStoreId(value.cardChannelId),
