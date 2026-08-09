@@ -442,6 +442,7 @@ The internal undocumented `postgate` route, retired `moderation_level.json` subs
 
 - Added automatic full-user Post Gate holds for DM availability and off-platform contact solicitations found in recent-identity accounts' messages or profile bios, with bounded evasion normalization, redacted evidence, and cached/single-flight profile checks
 - Contact screening uses Automod's existing recent-identity windows (account under 7 days or membership under 24 hours), excludes established and established first-time posters, applies no strike on detection, and keeps queued-message approval separate from account release
+- This is the final version of Irminsul. If Stoat grows to the point where a larger operational surface is needed, its next chapter will add an administrator dashboard and SQLite-backed persistence; until then, Irminsul ends here
 
 ### v3.2.0
 
