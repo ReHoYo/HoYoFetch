@@ -1,9 +1,9 @@
 ---
 title: Post Gate
-description: Hold a new poster's first link or media, a prohibited term, or every message from a held member for moderator review before it stays visible.
+description: Review risky first links or media, prohibited terms, DM and off-platform contact solicitations, and every message from a held member.
 ---
 
-Automod's behavioral detection (rapid bursts, duplicate floods, mention floods) needs several messages to accumulate before it triggers. The Post Gate holds individual messages a moderator should read first — a new member's opening link or attachment, a prohibited term, or anything at all from a member a moderator has placed in Post Gate. It also supplies the protected review destination for server moderation Levels 1–2 and the transition notices for Levels 3–4.
+Automod's behavioral detection (rapid bursts, duplicate floods, mention floods) needs several messages to accumulate before it triggers. The Post Gate holds individual messages a moderator should read first — a new member's opening link or attachment, a prohibited term, a DM/off-platform contact solicitation, or anything at all from a member already in Post Gate. It also supplies the protected review destination for server moderation Levels 1–2 and the transition notices for Levels 3–4.
 
 The post gate is **off by default for every server**.
 
@@ -15,15 +15,16 @@ At Levels 1–2, a message is deleted and queued for review only when **all** of
 - The channel is not the review channel itself, and is not privacy-excluded via `/Exclude-Channel` — excluded channels retain nothing, so the gate never touches them.
 - The author is not a recognized moderator. This is checked with the same fresh permission verification `/Automod` uses, and fails closed: if the check itself is unavailable, nothing is held.
 
-Given that, **any one** of three triggers queues the message:
+Given that, **any one** of four triggers queues the message:
 
-| Trigger                 | What it catches                                                                             | Tenure matters? |
-| ----------------------- | ------------------------------------------------------------------------------------------- | --------------- |
-| **Author in Post Gate** | Every message from a member a moderator placed in [full Post Gate](#holding-a-whole-member) | No              |
-| **Prohibited term**     | A message matching the [prohibited-term filter](#prohibited-terms)                          | No              |
-| **First link or media** | A link **or** at least one attachment from a new or first-time poster                       | Yes             |
+| Trigger                  | What it catches                                                                                     | Tenure matters? |
+| ------------------------ | --------------------------------------------------------------------------------------------------- | --------------- |
+| **Author in Post Gate**  | Every message from a member already in [full Post Gate](#holding-a-whole-member)                    | No              |
+| **Contact solicitation** | A matching message or the author's current [profile bio](#dm-and-off-platform-contact-solicitation) | No              |
+| **Prohibited term**      | A message matching the [prohibited-term filter](#prohibited-terms)                                  | No              |
+| **First link or media**  | A link **or** at least one attachment from a new or first-time poster                               | Yes             |
 
-The third trigger additionally requires the author to be, by locally cached or archived evidence, **new**:
+The fourth trigger additionally requires the author to be, by locally cached or archived evidence, **new**:
 
 - the account was created less than 7 days ago, or
 - the author joined this server less than 24 hours ago, or
@@ -41,6 +42,25 @@ Irminsul does not notify an author when their message is held — a quiet hold i
 > Due to spam and abuse, new members' first links or media may be held for a quick moderator check before staying visible.
 
 :::
+
+## DM and off-platform contact solicitation
+
+At Levels 1–2 Irminsul checks every otherwise eligible non-moderator message and the author's current profile bio for contact invitations. A match immediately creates a persistent [full-user hold](#holding-a-whole-member), deletes and queues the triggering message, and leaves every later message queued until a moderator releases the account. The automatic hold itself never applies an automod strike, timeout, or ban.
+
+The built-in detector covers:
+
+- open or available DMs, private messages, PMs, and inboxes, including reversed wording such as `open DMs`
+- direct invitations such as `DM me`, `message me`, `contact us`, `add me`, and `follow me`
+- labeled handles and profile/invite URLs for common messaging, social, and gaming platforms
+- explicit email/contact invitations, while leaving ordinary unlabeled Stoat `@mentions` alone
+
+Matching is bounded to 8 KB and normalizes case, Unicode compatibility forms, invisible/control characters, combining diacritics, common Latin-looking homoglyphs, in-word leetspeak, inserted spacing/punctuation, and stretched letters. Clear opt-outs such as `DMs closed`, `DMs are not open`, `not accepting DMs`, and `do not DM me` are not matches. Ambiguous contact wording remains reviewable.
+
+The review and control cards name only a stable rule id and whether the signal came from the message or profile bio. Profile text, external handles, and unsafe URLs are never copied into the automatic-hold control card. The triggering message remains on its normal protected review card as message evidence; a bio-triggered card says **profile bio (content withheld)**.
+
+Successful profile and no-profile results are cached in memory for ten minutes, up to 5,000 recently used accounts, and concurrent messages from one account share a single lookup. A failed profile request uses a still-fresh successful cache result if one exists. With no usable result, Irminsul continues message-only detection, allows that post, logs only redacted diagnostics, and waits one minute before trying the profile again. The cache intentionally resets when Irminsul restarts.
+
+No finite text detector can catch arbitrary coded prose, base64, contact details inside images, or QR codes. A match is a screening signal for a moderator, not a misconduct finding.
 
 ## Prohibited terms
 
@@ -98,7 +118,7 @@ No word list catches novel spellings, coded language, or abuse that uses no list
 
 ## Holding a whole member
 
-Denying a held post with 🔒 places its author in **full Post Gate**. While that is active, _every_ message they send in the server is held for review — text, links, media, regardless of tenure, regardless of the term list.
+Denying a held post with 🔒 places its author in **full Post Gate**. A DM/off-platform contact match creates the same hold automatically without adding a strike. While either hold is active, _every_ message the member sends in the server is held for review — text, links, media, regardless of tenure, regardless of the term list.
 
 The preconditions above still apply in full: the review channel and privacy-excluded channels are never gated, recognized moderators are always exempt (so holding a moderator has no effect while they retain Manage Messages), and Levels 3–4 lockdown continues to take precedence over the queue.
 
@@ -115,7 +135,9 @@ When a hold begins, Irminsul posts one persistent control card to the review cha
 >
 > React 🔓 to release them, or use `/Post-Gate release @user`.
 
-The hold is **idempotent**: denying the same author again reports the existing hold, leaves who-held-them and when untouched, and never posts a second card. Two moderators pressing 🔒 at the same instant produce one hold, not two.
+Automatic cards show **Irminsul (automatic contact screening)** instead of a moderator and include the signal surface and rule id without copying the bio or contact detail.
+
+The hold is **idempotent**: denying or automatically matching the same author again reports the existing hold, leaves its original source and time untouched, and never posts a second card. Two simultaneous triggers produce one hold, not two.
 
 State is stored on disk alongside the rest of Irminsul's moderation state, so a hold survives a bot restart — including its control card, which keeps working — and survives the member leaving and rejoining, because it is keyed on the server and the account rather than on membership. Turning the post gate off leaves hold records inert; re-enabling it honours them again. Moving the review channel reposts every control card into the new one.
 
@@ -130,6 +152,8 @@ A hold **never expires and is never released automatically**. After 24 hours —
 Release with 🔓 on the control or reminder card, or with `/Post-Gate release @member`. Both require freshly verified Manage Messages in the review channel, the same check the review actions use. Normal posting resumes immediately and the control card is removed.
 
 **Messages already in the review queue stay queued.** Release only stops _future_ messages from being held; anything already waiting keeps its own review card and is approved or denied individually, and the release notice states how many are outstanding. A release is a judgement about the author, not about content no moderator has looked at yet — and it must never become a way to publish a queue nobody read.
+
+Approving a queued item also resolves only that item; it does not release the account-level hold. If a released account's next message or still-cached/refreshed bio continues to match the contact detector, Irminsul automatically holds it again.
 
 ## Configuration
 

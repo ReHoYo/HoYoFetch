@@ -33,6 +33,7 @@ import { AUTOMOD_LIMITS, nextStrikeLevel } from "./automod.js";
 import { parseChannelArg } from "./auditlog.js";
 import { findTargetToken, tokenizeArgs } from "./command-args.js";
 import { buildAuditEmbed, buildStatusEmbed } from "./embeds.js";
+import { matchContactSolicitation } from "./contact-solicitation.js";
 import { countArchivedMessages } from "./message-archive.js";
 import {
   hasPermission,
@@ -93,6 +94,9 @@ export const REVIEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1_000;
 export const LEVEL_CONFIRM_WINDOW_MS = 2 * 60 * 1_000;
 export const DEGRADED_NOTICE_WINDOW_MS = 10 * 60 * 1_000;
 export const PERMISSION_RECONCILE_INTERVAL_MS = 5 * 60 * 1_000;
+export const PROFILE_CONTACT_CACHE_TTL_MS = 10 * 60 * 1_000;
+export const PROFILE_CONTACT_RETRY_MS = 60 * 1_000;
+export const PROFILE_CONTACT_CACHE_MAX_ENTRIES = 5_000;
 const QUEUE_PRUNE_INTERVAL_MS = 60 * 60 * 1_000;
 const MAX_LOCKDOWN_ACTORS = 5_000;
 export const USER_HOLD_REMINDER_MS = 24 * 60 * 60 * 1_000;
@@ -115,6 +119,7 @@ const REVIEW_EMOJI = new Set([
 const TRIGGER_LABELS = Object.freeze({
   first_post: "link or attachment from a new or first-time poster",
   prohibited_term: "prohibited-term filter",
+  contact_solicitation: "DM or off-platform contact solicitation",
   user_hold: "author is currently in Post Gate",
 });
 const LOCKDOWN_BAN_REASON =
@@ -240,6 +245,9 @@ export function createPostGate(
     scheduleTimeout = setTimeout,
     scheduleInterval = setInterval,
     holdReminderMs = USER_HOLD_REMINDER_MS,
+    profileCacheTtlMs = PROFILE_CONTACT_CACHE_TTL_MS,
+    profileRetryMs = PROFILE_CONTACT_RETRY_MS,
+    profileCacheMaxEntries = PROFILE_CONTACT_CACHE_MAX_ENTRIES,
   } = {}
 ) {
   if (typeof send !== "function") {
@@ -269,6 +277,18 @@ export function createPostGate(
         MAX_HOLD_REMINDER_MS
       )
     : USER_HOLD_REMINDER_MS;
+  const contactProfileTtlMs =
+    Number.isFinite(profileCacheTtlMs) && profileCacheTtlMs >= 0
+      ? profileCacheTtlMs
+      : PROFILE_CONTACT_CACHE_TTL_MS;
+  const contactProfileRetryMs =
+    Number.isFinite(profileRetryMs) && profileRetryMs >= 0
+      ? profileRetryMs
+      : PROFILE_CONTACT_RETRY_MS;
+  const contactProfileCacheLimit =
+    Number.isInteger(profileCacheMaxEntries) && profileCacheMaxEntries > 0
+      ? profileCacheMaxEntries
+      : PROFILE_CONTACT_CACHE_MAX_ENTRIES;
 
   let pruneStarted = false;
   const pendingDecisions = new Map();
@@ -281,6 +301,9 @@ export function createPostGate(
   // acting in the same instant produce one outcome rather than two.
   const reviewLocks = new Map();
   const userHoldLocks = new Map();
+  const contactProfileCache = new Map();
+  const contactProfileLookups = new Map();
+  const contactProfileRetryAfter = new Map();
   let compiledTerms = null;
 
   /**
@@ -1323,6 +1346,94 @@ export function createPostGate(
 
   // ── Detection ────────────────────────────────────────────────
 
+  function touchContactProfileCache(userId, entry) {
+    contactProfileCache.delete(userId);
+    contactProfileCache.set(userId, entry);
+    while (contactProfileCache.size > contactProfileCacheLimit) {
+      contactProfileCache.delete(contactProfileCache.keys().next().value);
+    }
+  }
+
+  function recentContactProfile(userId) {
+    const entry = contactProfileCache.get(userId);
+    if (!entry || now() - entry.checkedAt >= contactProfileTtlMs) return null;
+    touchContactProfileCache(userId, entry);
+    return entry;
+  }
+
+  async function fetchContactProfile(userId) {
+    const cached = recentContactProfile(userId);
+    if (cached) return cached;
+    if ((contactProfileRetryAfter.get(userId) ?? 0) > now()) return null;
+
+    const inFlight = contactProfileLookups.get(userId);
+    if (inFlight) return inFlight;
+
+    const lookup = (async () => {
+      let response;
+      try {
+        response = await request(
+          "GET",
+          `/users/${encodeURIComponent(userId)}/profile`
+        );
+      } catch (error) {
+        logger.warn?.(
+          `post-gate: profile contact check failed actor=${auditAlias(userId)} error=${safeErrorSummary(error)}`
+        );
+      }
+
+      if (response?.ok && response.data && typeof response.data === "object") {
+        const entry = {
+          bio:
+            typeof response.data.content === "string"
+              ? response.data.content
+              : "",
+          checkedAt: now(),
+        };
+        contactProfileRetryAfter.delete(userId);
+        touchContactProfileCache(userId, entry);
+        return entry;
+      }
+      // Stoat returns 404 when an account has no profile document. That is a
+      // successful, cacheable "no bio" result rather than an outage.
+      if (response?.status === 404) {
+        const entry = { bio: "", checkedAt: now() };
+        contactProfileRetryAfter.delete(userId);
+        touchContactProfileCache(userId, entry);
+        return entry;
+      }
+
+      contactProfileRetryAfter.set(userId, now() + contactProfileRetryMs);
+      if (response) {
+        logger.warn?.(
+          `post-gate: profile contact check unavailable actor=${auditAlias(userId)} status=${response.status || "unknown"}`
+        );
+      }
+      return null;
+    })();
+    contactProfileLookups.set(userId, lookup);
+    try {
+      return await lookup;
+    } finally {
+      if (contactProfileLookups.get(userId) === lookup) {
+        contactProfileLookups.delete(userId);
+      }
+    }
+  }
+
+  async function matchContactProfile(userId) {
+    const profile = await fetchContactProfile(userId);
+    return profile ? matchContactSolicitation(profile.bio) : null;
+  }
+
+  function canInspectProfile(config, { channelId }) {
+    return (
+      config.level < 3 &&
+      channelId !== config.reviewChannelId &&
+      !store.isChannelExcluded(channelId)
+    );
+  }
+
   /**
    * Decide *why* a message would be held, or null for "leave it alone".
    * Synchronous by contract and free of archive reads, so handleMessage can
@@ -1342,6 +1453,14 @@ export function createPostGate(
     if (channelId === config.reviewChannelId) return null;
     if (store.isChannelExcluded(channelId)) return null;
     if (store.isUserHeld(serverId, authorId)) return { trigger: "user_hold" };
+    const contact = matchContactSolicitation(message?.content);
+    if (contact) {
+      return {
+        trigger: "contact_solicitation",
+        match: contact,
+        triggerSurface: "message",
+      };
+    }
     const match = matchProhibitedTerm(message?.content, ensureCompiledTerms());
     if (match) return { trigger: "prohibited_term", match };
     if (hasLinkOrAttachment(message)) return { trigger: "first_post" };
@@ -1389,6 +1508,14 @@ export function createPostGate(
     // channel, and repeating the term there would republish the very thing the
     // hold removed.
     if (record.ruleId) lines.push(`**Matched rule:** \`${record.ruleId}\``);
+    if (
+      record.trigger === "contact_solicitation" &&
+      (record.triggerSurface === "message" || record.triggerSurface === "bio")
+    ) {
+      lines.push(
+        `**Signal source:** ${record.triggerSurface === "bio" ? "profile bio (content withheld)" : "message"}`
+      );
+    }
     lines.push(
       `**Content:** ${record.content ? record.content.slice(0, 1000) : "*(no text — attachment/link only)*"}`
     );
@@ -1467,6 +1594,7 @@ export function createPostGate(
       attachments: prepared.descriptors,
       trigger: held.trigger ?? "first_post",
       ruleId: held.ruleId ?? null,
+      triggerSurface: held.triggerSurface ?? null,
       reviewChannelId: config.reviewChannelId,
       reviewMessageId: null,
       status: "pending",
@@ -1648,23 +1776,23 @@ export function createPostGate(
 
     const config = store.getPostGateConfig(serverId);
     if (config.mode !== "hold" || !isSafeId(config.reviewChannelId)) return;
-    const classified = classifyTrigger(message, config, {
+    let classified = classifyTrigger(message, config, {
       serverId,
       channelId,
       authorId,
     });
-    if (!classified) return;
-    const lockdown = classified.trigger === "lockdown";
     // The first-post signal is only meaningful for a message actually eligible
     // for a hold on that trigger, so this stays inside the gate rather than
     // running (and racing the archive) on every message — and it still runs
     // synchronously, before the first await below.
     if (
-      classified.trigger === "first_post" &&
+      classified?.trigger === "first_post" &&
       !isFirstPostCandidate(serverId, authorId, message)
     ) {
-      return;
+      classified = null;
     }
+
+    if (!classified && !canInspectProfile(config, { channelId })) return;
 
     // revolt.js Message fields are live getters into the client's message
     // collection. holdMessage deletes the message before it needs these
@@ -1676,8 +1804,9 @@ export function createPostGate(
       authorId,
       content: message.content ?? "",
       attachments: message.attachments ?? [],
-      trigger: classified.trigger,
-      ruleId: classified.match?.ruleId ?? null,
+      trigger: classified?.trigger ?? null,
+      ruleId: classified?.match?.ruleId ?? null,
+      triggerSurface: classified?.triggerSurface ?? null,
     };
 
     let resolveDecisionPromise;
@@ -1693,6 +1822,28 @@ export function createPostGate(
     pendingDecisions.set(messageId, decision);
 
     try {
+      if (
+        canInspectProfile(config, { channelId }) &&
+        classified?.trigger !== "contact_solicitation" &&
+        classified?.trigger !== "user_hold"
+      ) {
+        const profileMatch = await matchContactProfile(authorId);
+        if (profileMatch) {
+          classified = {
+            trigger: "contact_solicitation",
+            match: profileMatch,
+            triggerSurface: "bio",
+          };
+          held.trigger = classified.trigger;
+          held.ruleId = profileMatch.ruleId;
+          held.triggerSurface = "bio";
+        }
+      }
+      if (!classified) {
+        resolveDecision(false);
+        return;
+      }
+
       const authorization = await authorizeServerActor(
         client,
         { serverId, channelId, authorId },
@@ -1711,7 +1862,7 @@ export function createPostGate(
         return;
       }
 
-      if (lockdown) {
+      if (classified.trigger === "lockdown") {
         resolveDecision(true);
         await enforceLockdown(
           serverId,
@@ -1721,6 +1872,14 @@ export function createPostGate(
           config.level
         );
       } else {
+        if (classified.trigger === "contact_solicitation") {
+          await holdUser(serverId, authorId, null, {
+            holdSource: "automatic",
+            triggerSurface: classified.triggerSurface,
+            triggerRuleId: classified.match?.ruleId ?? null,
+            originMessageId: messageId,
+          });
+        }
         await holdMessage(serverId, channelId, held, config, resolveDecision);
       }
     } catch (error) {
@@ -1743,9 +1902,14 @@ export function createPostGate(
       outcome === "approved"
         ? "✅ Held Post Approved"
         : "❌ Held Post Rejected";
+    const authorStillHeld =
+      isSafeId(record.userId) &&
+      store.isUserHeld(record.serverId, record.userId);
     const description =
       outcome === "approved"
-        ? `${actorLabel(record.userId)} was cleared${strikeCleared ? " and their automod strike was reset" : ""}. The content was **not** reposted to ${channelLabel(record.channelId)} — they can post it again themselves.`
+        ? authorStillHeld
+          ? `This queue item from ${actorLabel(record.userId)} was approved${strikeCleared ? " and their automod strike was reset" : ""}, but the account remains in Post Gate until a moderator releases it. The content was **not** reposted to ${channelLabel(record.channelId)}.`
+          : `${actorLabel(record.userId)} was cleared${strikeCleared ? " and their automod strike was reset" : ""}. The content was **not** reposted to ${channelLabel(record.channelId)} — they can post it again themselves.`
         : `The held content from ${actorLabel(record.userId)} was discarded${strikeSkipped ? " (no automod strike was recorded — the original author's id was not captured)" : " and their automod strike stage was increased"}.`;
     await sendAccountability(
       record.serverId,
@@ -1930,14 +2094,26 @@ export function createPostGate(
     return `${Math.floor(hours / 24)} days`;
   }
 
+  function holdSourceLabel(record) {
+    return record.holdSource === "automatic"
+      ? "Irminsul (automatic contact screening)"
+      : actorLabel(record.heldBy);
+  }
+
   function buildUserHoldCardEmbed(record) {
     const lines = [
       `${actorLabel(record.userId)} is currently in Post Gate.`,
       "All new messages from this user in this server are held for moderator approval.",
       "",
-      `**Held by:** ${actorLabel(record.heldBy)}`,
+      `**Held by:** ${holdSourceLabel(record)}`,
       `**Held since:** ${timestampLabel(record.heldAt)}`,
     ];
+    if (record.holdSource === "automatic") {
+      lines.push(
+        `**Signal source:** ${record.triggerSurface === "bio" ? "profile bio (content withheld)" : "message"}`,
+        `**Matched rule:** \`${record.triggerRuleId ?? "contact:unknown"}\``
+      );
+    }
     if (record.originQueueId) {
       lines.push(`**Origin:** denied queue entry \`${record.originQueueId}\``);
     }
@@ -1956,7 +2132,7 @@ export function createPostGate(
       [
         `${actorLabel(record.userId)} has been in Post Gate for ${durationLabel(now() - (record.heldAt ?? now()))}.`,
         "",
-        `**Held by:** ${actorLabel(record.heldBy)}`,
+        `**Held by:** ${holdSourceLabel(record)}`,
         `**Held since:** ${timestampLabel(record.heldAt)}`,
         `**Still queued:** ${pending} held message(s) awaiting review`,
         "",
@@ -1999,7 +2175,13 @@ export function createPostGate(
     return withLock(userHoldLocks, `${serverId}:${userId}`, async () => {
       const existing = store.getUserHold(serverId, userId);
       if (existing?.active) {
-        if (!existing.cardMessageId) await postUserHoldCard(existing);
+        if (!existing.cardMessageId) {
+          try {
+            await postUserHoldCard(existing);
+          } catch (error) {
+            logFailure("user-hold card post failed", error);
+          }
+        }
         return { outcome: "already_held", record: existing };
       }
 
@@ -2010,6 +2192,9 @@ export function createPostGate(
         userId,
         heldAt,
         heldBy: moderatorId,
+        holdSource: origin.holdSource === "automatic" ? "automatic" : "manual",
+        triggerSurface: origin.triggerSurface ?? null,
+        triggerRuleId: origin.triggerRuleId ?? null,
         originQueueId: origin.originQueueId ?? null,
         originMessageId: origin.originMessageId ?? null,
         cardChannelId: config.reviewChannelId,
@@ -2017,9 +2202,13 @@ export function createPostGate(
       });
       if (!created) return { outcome: "already_held", record };
 
-      await postUserHoldCard(record);
+      try {
+        await postUserHoldCard(record);
+      } catch (error) {
+        logFailure("user-hold card post failed", error);
+      }
       logger.log?.(
-        `🛑  post-gate user-held server=${auditAlias(serverId)} actor=${auditAlias(userId)} moderator=${auditAlias(moderatorId)} origin=${auditAlias(origin.originQueueId ?? "-")}`
+        `🛑  post-gate user-held server=${auditAlias(serverId)} actor=${auditAlias(userId)} source=${origin.holdSource === "automatic" ? "automatic" : "manual"} moderator=${auditAlias(moderatorId)} origin=${auditAlias(origin.originQueueId ?? "-")}`
       );
       return { outcome: "held", record };
     });
@@ -2062,7 +2251,7 @@ export function createPostGate(
           `${actorLabel(userId)} is no longer in Post Gate and can post normally again.`,
           "",
           `**Released by:** ${actorLabel(moderatorId)}`,
-          `**Held by:** ${actorLabel(record.heldBy)} since ${timestampLabel(record.heldAt)}`,
+          `**Held by:** ${holdSourceLabel(record)} since ${timestampLabel(record.heldAt)}`,
           `**Held for:** ${durationLabel(releasedAt - (record.heldAt ?? releasedAt))}`,
           `**Still queued:** ${pending} held message(s) from this author remain pending individual review — releasing only stops future messages from being held.`,
         ],
@@ -2198,7 +2387,7 @@ export function createPostGate(
     } else if (hold.outcome === "already_held") {
       lines.push(
         "",
-        `${actorLabel(record.userId)} was already in Post Gate — the existing hold, placed by ${actorLabel(hold.record?.heldBy)} on ${timestampLabel(hold.record?.heldAt)}, is unchanged.`
+        `${actorLabel(record.userId)} was already in Post Gate — the existing hold, placed by ${holdSourceLabel(hold.record ?? {})} on ${timestampLabel(hold.record?.heldAt)}, is unchanged.`
       );
     } else {
       lines.push(
@@ -2371,7 +2560,7 @@ export function createPostGate(
           .slice(0, 10)
           .map(
             (record) =>
-              `- ${actorLabel(record.userId)} — held by ${actorLabel(record.heldBy)} since ${timestampLabel(record.heldAt)} (${pendingHeldCountFor(serverId, record.userId)} message(s) queued)`
+              `- ${actorLabel(record.userId)} — held by ${holdSourceLabel(record)} since ${timestampLabel(record.heldAt)} (${pendingHeldCountFor(serverId, record.userId)} message(s) queued)`
           )
       : ["No members are currently in Post Gate."];
     if (holds.length > 10) {
@@ -2640,16 +2829,13 @@ export function createPostGate(
       ? store.getPostGateConfig(serverId)
       : { mode: "off", level: 0 };
     if (config.mode !== "hold") return false;
-    // Share handleMessage's own predicate rather than re-testing the content
-    // here: a user hold or a prohibited-term hold would otherwise stay visible
-    // to automod, the audit log, and the command router. Most messages still
-    // return before the microtask hop below.
+    // Bio matching is asynchronous. The messageCreate listener above registers
+    // a pending decision synchronously for every profile-eligible message, so
+    // the command, automod, and archive listeners can share the exact outcome
+    // instead of racing the profile request.
     if (
-      !classifyTrigger(message, config, {
-        serverId,
-        channelId: channelIdFrom(message),
-        authorId: message?.authorId,
-      })
+      !canInspectProfile(config, { channelId: channelIdFrom(message) }) &&
+      config.level < 3
     ) {
       return false;
     }

@@ -3,6 +3,16 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Version 3.2.2
+
+### Automatic contact-solicitation holds
+
+- Added a fourth Level 1–2 Post Gate trigger for DM availability and off-platform contact solicitation in either a member's message or current profile bio. A match places the account in persistent full Post Gate, deletes and queues the triggering message, and holds every later message until a moderator releases the account.
+- The built-in matcher covers open/available DMs, direct contact invitations, platform-labeled handles, supported profile and invite URLs, and explicit email invitations. Bounded normalization handles case, Unicode compatibility forms, invisible characters, diacritics, common homoglyphs, in-word leetspeak, inserted separators, and stretched letters while excluding clear opt-outs and ordinary unlabeled Stoat mentions.
+- Automatic holds do not apply a strike, timeout, or ban. Protected cards retain only the stable rule id and whether the signal came from the message or bio; profile contents and external contact details are withheld.
+- Successful profile and no-profile checks use a ten-minute, 5,000-entry in-memory LRU cache. Concurrent posts share one lookup; unavailable profiles fail open to message-only detection with redacted diagnostics and a one-minute retry backoff.
+- Approving a queued message does not release its account-level hold. A moderator must release the account explicitly, and a later matching message or still-current bio automatically places it back into Post Gate.
+
 ## Version 3.2.1 — breaking command cleanup
 
 Deprecated compatibility routes and delimiter syntax have been removed instead of retained as runtime warning aliases. Upgrades from versions older than v3 are no longer supported.
