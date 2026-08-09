@@ -75,6 +75,10 @@ export default defineConfig({
           ],
         },
         {
+          label: "Contributing to Irminsul",
+          items: [{ slug: "contributing/adding-features-with-ai" }],
+        },
+        {
           label: "Help and administration",
           items: [
             { slug: "troubleshooting" },
