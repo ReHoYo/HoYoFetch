@@ -35,16 +35,12 @@ const TEST_MANIFEST = [
   },
 ];
 
-function makeServer({ name = "Hub", existing = [] } = {}) {
+function makeServer({ id = "HUBSERVER", name = "Hub", existing = [] } = {}) {
   const existingEmoji = existing.map((entry, i) => ({
     id: `EXIST${i}`,
     name: entry,
   }));
-  return {
-    name,
-    fetchEmojis: async () => existingEmoji,
-    createEmoji: async (autumnId, opts) => ({ id: `NEW_${opts.name}` }),
-  };
+  return { id, name, fetchEmojis: async () => existingEmoji };
 }
 
 function makeClient(server, serverId = "HUBSERVER") {
@@ -52,6 +48,9 @@ function makeClient(server, serverId = "HUBSERVER") {
     servers: { get: (id) => (id === serverId ? server : undefined) },
     configuration: { features: { autumn: { url: "https://autumn.test" } } },
     authenticationHeader: ["X-Bot-Token", "secret"],
+    // Real code no longer calls server.createEmoji() (see emoji-provision.js
+    // for why); tests inject createEmojiImpl directly instead, so client.api
+    // only needs to exist for the one test that exercises the real default.
   };
 }
 
@@ -67,14 +66,14 @@ async function fakeUploadImpl({ filename }) {
   return `AUTUMN_${filename}`;
 }
 
+async function fakeCreateEmojiImpl({ name }) {
+  return `NEW_${name}`;
+}
+
 test("provisionEmoji uploads only the manifest entries missing from the hub", async () => {
   const server = makeServer({ existing: ["primogem", "mora"] });
   const client = makeClient(server);
   const createCalls = [];
-  server.createEmoji = async (autumnId, opts) => {
-    createCalls.push(opts.name);
-    return { id: `NEW_${opts.name}` };
-  };
 
   const summary = await provisionEmoji({
     client,
@@ -82,6 +81,10 @@ test("provisionEmoji uploads only the manifest entries missing from the hub", as
     manifest: TEST_MANIFEST,
     fetchImpl: fakeFetchImpl,
     uploadImpl: fakeUploadImpl,
+    createEmojiImpl: async ({ name }) => {
+      createCalls.push(name);
+      return `NEW_${name}`;
+    },
     loadRegistry: () => ({ entries: {} }),
     saveRegistry: () => {},
   });
@@ -112,6 +115,9 @@ test("provisionEmoji makes no network calls when everything is already provision
     uploadImpl: async () => {
       throw new Error("should not upload");
     },
+    createEmojiImpl: async () => {
+      throw new Error("should not create");
+    },
     loadRegistry: () => ({ entries: {} }),
     saveRegistry: () => {},
   });
@@ -134,6 +140,7 @@ test("provisionEmoji reports a failed download without aborting the rest", async
       return fakeFetchImpl(url);
     },
     uploadImpl: fakeUploadImpl,
+    createEmojiImpl: fakeCreateEmojiImpl,
     loadRegistry: () => ({ entries: {} }),
     saveRegistry: () => {},
   });
@@ -141,7 +148,7 @@ test("provisionEmoji reports a failed download without aborting the rest", async
   assert.equal(summary.ok, true);
   assert.equal(summary.failed.length, 1);
   assert.equal(summary.failed[0].name, "mora");
-  assert.equal(summary.failed[0].reason, "download_failed");
+  assert.equal(summary.failed[0].reason, "download_failed (HTTP 404)");
   assert.equal(summary.created.length, 4);
 });
 
@@ -159,6 +166,7 @@ test("provisionEmoji skips an icon over the size cap without uploading it", asyn
       uploadCount += 1;
       return fakeUploadImpl(opts);
     },
+    createEmojiImpl: fakeCreateEmojiImpl,
     maxIconBytes: 1, // fakeFetchImpl's body is 3 bytes
     loadRegistry: () => ({ entries: {} }),
     saveRegistry: () => {},
@@ -171,10 +179,6 @@ test("provisionEmoji skips an icon over the size cap without uploading it", asyn
 
 test("provisionEmoji continues after one createEmoji call fails, and still saves the successes", async () => {
   const server = makeServer();
-  server.createEmoji = async (autumnId, opts) => {
-    if (opts.name === "mora") throw new Error("403 Forbidden");
-    return { id: `NEW_${opts.name}` };
-  };
   const client = makeClient(server);
   let savedRecord = null;
 
@@ -184,6 +188,10 @@ test("provisionEmoji continues after one createEmoji call fails, and still saves
     manifest: TEST_MANIFEST,
     fetchImpl: fakeFetchImpl,
     uploadImpl: fakeUploadImpl,
+    createEmojiImpl: async ({ name }) => {
+      if (name === "mora") throw new Error("403 Forbidden");
+      return `NEW_${name}`;
+    },
     loadRegistry: () => ({ entries: {} }),
     saveRegistry: (record) => {
       savedRecord = record;
@@ -201,10 +209,6 @@ test("provisionEmoji respects the server emoji cap, provisioning lowest tier fir
   const server = makeServer({ existing: ["primogem"] });
   const client = makeClient(server);
   const createCalls = [];
-  server.createEmoji = async (autumnId, opts) => {
-    createCalls.push(opts.name);
-    return { id: `NEW_${opts.name}` };
-  };
 
   const summary = await provisionEmoji({
     client,
@@ -212,6 +216,10 @@ test("provisionEmoji respects the server emoji cap, provisioning lowest tier fir
     manifest: TEST_MANIFEST,
     fetchImpl: fakeFetchImpl,
     uploadImpl: fakeUploadImpl,
+    createEmojiImpl: async ({ name }) => {
+      createCalls.push(name);
+      return `NEW_${name}`;
+    },
     maxServerEmoji: 2, // budget = 2 - 1 existing = 1
     loadRegistry: () => ({ entries: {} }),
     saveRegistry: () => {},
@@ -270,6 +278,7 @@ test("provisionEmoji persists the documented registry shape with bare emoji ids"
     manifest: TEST_MANIFEST.slice(0, 1),
     fetchImpl: fakeFetchImpl,
     uploadImpl: fakeUploadImpl,
+    createEmojiImpl: fakeCreateEmojiImpl,
     loadRegistry: () => ({ entries: {} }),
     saveRegistry: (record) => {
       saved = record;
@@ -285,4 +294,61 @@ test("provisionEmoji persists the documented registry shape with bare emoji ids"
   assert.equal(entry.name, "primogem");
   assert.equal(entry.iconUrl, TEST_MANIFEST[0].url);
   assert.equal(typeof entry.provisionedAt, "number");
+});
+
+// Regression: revolt.js's Server.createEmoji() hands whatever a PUT
+// /custom/emoji/{id} response contains straight to its internal Solid.js
+// store, which throws "Cannot read properties of undefined (reading
+// 'partial')" whenever the response has no `_id` — which is exactly what
+// happens when Stoat rejects the request (e.g. missing Manage
+// Customisation) and responds with an error body, since revolt-api never
+// checks the HTTP status before treating the body as success. This exercises
+// the real (non-injected) createEmojiImpl default against a fake client.api
+// to confirm the rejection surfaces as a normal per-item failure instead.
+test("provisionEmoji surfaces a clear reason instead of crashing when Stoat rejects the create request", async () => {
+  const server = makeServer();
+  const client = makeClient(server);
+  client.api = {
+    put: async () => ({
+      type: "MissingPermission",
+      permission: "ManageCustomisation",
+    }),
+  };
+
+  const summary = await provisionEmoji({
+    client,
+    serverId: "HUBSERVER",
+    manifest: TEST_MANIFEST.slice(0, 1),
+    fetchImpl: fakeFetchImpl,
+    uploadImpl: fakeUploadImpl,
+    // No createEmojiImpl override: this must exercise the real default.
+    loadRegistry: () => ({ entries: {} }),
+    saveRegistry: () => {},
+  });
+
+  assert.equal(summary.ok, true);
+  assert.equal(summary.created.length, 0);
+  assert.equal(summary.failed.length, 1);
+  assert.match(summary.failed[0].reason, /MissingPermission/);
+  assert.match(summary.failed[0].reason, /Manage Customisation/);
+  assert.doesNotMatch(summary.failed[0].reason, /partial/);
+});
+
+test("provisionEmoji surfaces a clear reason when Stoat's response has no _id and no type either", async () => {
+  const server = makeServer();
+  const client = makeClient(server);
+  client.api = { put: async () => ({}) };
+
+  const summary = await provisionEmoji({
+    client,
+    serverId: "HUBSERVER",
+    manifest: TEST_MANIFEST.slice(0, 1),
+    fetchImpl: fakeFetchImpl,
+    uploadImpl: fakeUploadImpl,
+    loadRegistry: () => ({ entries: {} }),
+    saveRegistry: () => {},
+  });
+
+  assert.equal(summary.failed.length, 1);
+  assert.match(summary.failed[0].reason, /did not return a created emoji id/);
 });

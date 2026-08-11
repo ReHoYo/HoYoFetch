@@ -30,6 +30,41 @@ const DEFAULT_MAX_SERVER_EMOJI = 100;
 const DEFAULT_MAX_ICON_BYTES = 500_000;
 const DOWNLOAD_TIMEOUT_MS = 15_000;
 
+/**
+ * Create a server emoji via the raw Stoat API, bypassing revolt.js's
+ * Server.createEmoji(). That helper hands whatever the PUT call returns
+ * straight to its local object-store hydration, which throws an unrelated,
+ * confusing "Cannot read properties of undefined (reading 'partial')"
+ * TypeError whenever the response has no `_id` — which happens whenever
+ * Stoat rejects the request (e.g. missing Manage Customisation) and
+ * responds with an error body instead, since revolt-api's request wrapper
+ * never checks the HTTP status before treating the body as success. Calling
+ * the endpoint directly and validating the response ourselves turns that
+ * crash into an actual, actionable per-item failure reason.
+ *
+ * @param  {Object} opts — { client, server, autumnId, name }
+ * @return {Promise<string>} the created emoji's id
+ */
+async function defaultCreateEmoji({ client, server, autumnId, name }) {
+  const response = await client.api.put(`/custom/emoji/${autumnId}`, {
+    parent: { type: "Server", id: server.id },
+    name,
+  });
+  if (typeof response?._id !== "string" || !response._id) {
+    throw new Error(describeEmojiCreateFailure(response));
+  }
+  return response._id;
+}
+
+function describeEmojiCreateFailure(response) {
+  const hint = "Check the bot has Manage Customisation on the hub server.";
+  if (response?.type) {
+    const detail = response.permission ? `: ${response.permission}` : "";
+    return `Stoat rejected the emoji (${response.type}${detail}). ${hint}`;
+  }
+  return `Stoat did not return a created emoji id. ${hint}`;
+}
+
 function emptySummary(error, { serverId = null, serverName = null } = {}) {
   return {
     ok: false,
@@ -70,9 +105,10 @@ function deriveEmojiMap(entries) {
  * @param {string}   [opts.serverId]     — defaults to CONFIG.emojiHubServerId
  * @param {Array}    [opts.manifest]     — defaults to EMOJI_ICON_MANIFEST
  * @param {Function} [opts.fetchImpl]
- * @param {Function} [opts.uploadImpl]   — defaults to uploadAttachmentBytes
- * @param {Function} [opts.loadRegistry] — defaults to store.loadEmojiRegistry
- * @param {Function} [opts.saveRegistry] — defaults to store.saveEmojiRegistry
+ * @param {Function} [opts.uploadImpl]     — defaults to uploadAttachmentBytes
+ * @param {Function} [opts.createEmojiImpl] — defaults to defaultCreateEmoji
+ * @param {Function} [opts.loadRegistry]   — defaults to store.loadEmojiRegistry
+ * @param {Function} [opts.saveRegistry]   — defaults to store.saveEmojiRegistry
  * @param {number}   [opts.maxServerEmoji]
  * @param {number}   [opts.maxIconBytes]
  * @param {Console}  [opts.logger]
@@ -84,6 +120,7 @@ export async function provisionEmoji({
   manifest = EMOJI_ICON_MANIFEST,
   fetchImpl = fetch,
   uploadImpl = uploadAttachmentBytes,
+  createEmojiImpl = defaultCreateEmoji,
   loadRegistry = loadEmojiRegistry,
   saveRegistry = saveEmojiRegistry,
   maxServerEmoji = DEFAULT_MAX_SERVER_EMOJI,
@@ -157,7 +194,13 @@ export async function provisionEmoji({
         signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
       });
       if (!res?.ok) {
-        failed.push({ name: item.name, reason: "download_failed" });
+        // Include the status so a blocked/challenged host (403) reads
+        // differently from a simply-renamed file (404) in the report.
+        const status = Number.isInteger(res?.status) ? res.status : "?";
+        failed.push({
+          name: item.name,
+          reason: `download_failed (HTTP ${status})`,
+        });
         continue;
       }
 
@@ -169,7 +212,10 @@ export async function provisionEmoji({
 
       const bytes = Buffer.from(await res.arrayBuffer());
       if (bytes.length === 0) {
-        failed.push({ name: item.name, reason: "download_failed" });
+        failed.push({
+          name: item.name,
+          reason: "download_failed (empty body)",
+        });
         continue;
       }
       if (bytes.length > maxIconBytes) {
@@ -187,10 +233,15 @@ export async function provisionEmoji({
         fetchImpl,
       });
 
-      const emoji = await server.createEmoji(autumnId, { name: item.name });
+      const emojiId = await createEmojiImpl({
+        client,
+        server,
+        autumnId,
+        name: item.name,
+      });
       created.push(item.name);
       entries[item.keyword] = {
-        emojiId: emoji.id,
+        emojiId,
         name: item.name,
         iconUrl: item.url,
         provisionedAt: Date.now(),

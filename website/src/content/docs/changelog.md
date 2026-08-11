@@ -18,6 +18,7 @@ description: Major public Irminsul capabilities and documentation milestones.
 - `/EmojiSetup` only uploads inside the server configured as `EMOJI_HUB_SERVER_ID`; run anywhere else (or with `/EmojiSetup status`), it reports coverage without touching the hub's emoji budget.
 - `custom_emojis.json`, which no code actually read despite being the documented config file, is removed. The 11 previously-provisioned emoji IDs are preserved as a fallback seed.
 - `EMOJI_HUB_SERVER_ID` now defaults to Irminsul's own in-house hub server, so this deployment needs no `.env` change to use `/EmojiSetup`; the variable still overrides it for a different install.
+- Fixed `/EmojiSetup` reporting a confusing `Cannot read properties of undefined (reading 'partial')` for every icon that reached the create-emoji step. The cause: revolt.js's `Server.createEmoji()` hands whatever a `PUT /custom/emoji/{id}` call returns straight to its local object store, and that throws whenever the response has no `_id` — exactly what happens when Stoat rejects the request (for example, missing Manage Customisation) and revolt-api doesn't check the HTTP status before treating the error body as success. Irminsul now calls that endpoint directly and reports Stoat's actual rejection reason instead. Failed downloads also now include the HTTP status, so a blocked host (403) reads differently from a simply-renamed file (404).
 
 ## Version 3.2.3
 

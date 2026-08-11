@@ -415,6 +415,7 @@ docker run -d --name hoyofetch --restart unless-stopped \
 - Coerced reward values of any shape (array of strings, array of `{name,count}` objects, number) into a clean display string in one place, fixing a latent crash where an API returning an array for `rewards` could throw inside emoji formatting
 - Reward icons are now auto-provisioned: `/EmojiSetup` (or `npm run emoji:provision`) downloads item icons and uploads them as custom emoji on a configured hub server, replacing the old manual download/upload/copy-the-ID workflow. Re-running it is safe and free — an already-provisioned keyword is reused, never re-uploaded. `custom_emojis.json`, which nothing actually read, is removed
 - `EMOJI_HUB_SERVER_ID` now defaults to Irminsul's own in-house hub server, so this deployment needs no `.env` change to use `/EmojiSetup`; the variable still overrides it for a different install
+- Fixed `/EmojiSetup` reporting a confusing `Cannot read properties of undefined (reading 'partial')` instead of a real reason: revolt.js's `Server.createEmoji()` hydrates whatever a create-emoji call returns into its local store without checking it succeeded, which crashes whenever Stoat rejects the request (e.g. missing Manage Customisation) since revolt-api never checks the HTTP status first. Irminsul now calls the endpoint directly and surfaces Stoat's actual rejection reason; failed downloads also now report their HTTP status
 
 ### v3.2.3
 
