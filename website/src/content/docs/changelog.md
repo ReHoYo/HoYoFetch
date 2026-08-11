@@ -3,6 +3,21 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Version 3.2.4
+
+### Reward backfill and article-link fallback
+
+- The long-standing "Reward details unavailable" message is gone. `hoyo-codes.seria.moe` periodically returns a blank reward field for an otherwise-valid code; Irminsul now backfills it from a secondary source — ennead for Genshin/HSR/ZZZ, the Fandom wiki for Honkai Impact 3rd — matching by code identity. The backfill is cached, best-effort, and never blocks a fetch: a slow or failing secondary source just leaves the code as it was.
+- When no source has reward text at all, the fallback line now links the game's Game8 (or, for HI3, Fandom) code article instead of a dead end. Only the first rewardless code in a batch carries the link, keeping a 10-code embed well under the 2,000-character description cap.
+- Reward values of any shape (an array of strings, an array of `{name,count}` objects, a bare number) are now coerced into a clean display string in one place, closing a latent crash where an API returning an array for `rewards` could throw during emoji formatting.
+
+### Automated reward-icon provisioning
+
+- Custom reward emoji no longer require manually downloading an icon, uploading it to a hub server, and copying its ID into the config. `/EmojiSetup` (or `npm run emoji:provision` on the host) downloads every icon listed in `emoji-icons.js` and uploads it as a Revolt server emoji, reporting what was created, reused, skipped, or failed.
+- Provisioning is idempotent: it reads the hub server's existing emoji first, so an already-provisioned keyword is reused rather than re-uploaded, and a wiped local registry self-heals from the server's own state on the next run.
+- `/EmojiSetup` only uploads inside the server configured as `EMOJI_HUB_SERVER_ID`; run anywhere else (or with `/EmojiSetup status`), it reports coverage without touching the hub's emoji budget.
+- `custom_emojis.json`, which no code actually read despite being the documented config file, is removed. The 11 previously-provisioned emoji IDs are preserved as a fallback seed.
+
 ## Version 3.2.3
 
 ### Prohibited-term identity screening
@@ -19,8 +34,6 @@ description: Major public Irminsul capabilities and documentation milestones.
 - A bare token is now recognized as the target anywhere in the command once it is at least 20 characters and carries a digit or capital letter — comfortably covering every real 26-character Stoat account ID while staying well above any ordinary reason word's length, so `/Kick for raiding` still asks for a member rather than trying to moderate someone called "for."
 - `/Kick`, `/Mute`, and `/Automod release` now distinguish "this account is not a current member of this server" from a genuine permission-verification failure, and name `/Ban` as the command for a departed or never-joined account, instead of a single generic "could not be verified" message for both cases.
 - `/Ban`, `/Report-Spam`, and `/Get-Info` now also resolve a plain-text `@Username#1234` (typed by hand, not selected from the mention picker) against Irminsul's local account cache — populated from servers it shares with the account, the same cache existing username display already reads from. Stoat's only username-resolution API is "send friend request," so this deliberately never calls it; an uncached account is left unresolved with an error naming the username and discriminator, rather than silently mistargeting the wrong account or falling back to the generic "no target" message. The match is case-sensitive and requires an exact discriminator, since a wrong guess here means moderating the wrong account.
-
-Version 3.2.3 is the final version of Irminsul. If Stoat grows to the point where a larger operational surface is needed, its next chapter will add an administrator dashboard and SQLite-backed persistence; until then, Irminsul ends here.
 
 ## Version 3.2.2
 

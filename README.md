@@ -66,6 +66,7 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 | `/EnableFetch [all\|hoyo\|nte\|wuwa\|nte-wuwa]`                       | Enable the selected auto-fetch scope; no argument means all games (admins/mods only)                                              |
 | `/DisableFetch`                                                       | Disable auto-fetch in the current channel (admins/mods only)                                                                      |
 | `/EmojiMode [unicode\|custom]`                                        | Show or switch reward-emoji rendering at runtime (admins/mods only)                                                               |
+| `/EmojiSetup [status]`                                                | Auto-provision reward icons as custom emoji on the configured hub server, or check coverage (admins/mods only)                    |
 | `/Restart`                                                            | Restart the bot after deploying updates (admins/mods only)                                                                        |
 | `/Server-Info`                                                        | Show cached server, archive, feature-health, and safe VPS diagnostics (admins/mods only)                                          |
 | `/AuditLog [status\|test\|here\|#channel\|off\|confirm CODE\|cancel]` | View, test, or request an Enka-approved audit-log configuration change (admins/mods only)                                         |
@@ -258,40 +259,22 @@ The hoyo-codes API returns an array of `{code, rewards, date, source}`. The enne
 
 ## 🎨 Custom Emoji Hub
 
-You can use custom Revolt server emoji instead of Unicode emoji for reward icons (💎→ actual Primogem icon, etc.).
+You can use custom Revolt server emoji instead of Unicode emoji for reward icons (💎→ actual Primogem icon, etc.). Irminsul provisions these itself — there's no manual download/upload/copy-the-ID chore.
 
 ### How it works
 
-1. **Create a dedicated server** on Revolt (e.g. "Irminsul Emoji Hub")
-2. **Upload emoji** — game icons for Primogems, Mora, Stellar Jade, etc.
-3. **Get each emoji's ID** — in the emoji picker, hover/select an emoji before sending; the format is `:EMOJI_ID:` where EMOJI_ID is a long alphanumeric string like `01H7K9RTHKEPJM8DM19TX35M8N`
-4. **Invite the bot** to the emoji hub server
-5. **Edit `custom_emojis.json`** — fill in the IDs
+1. **Create a server** on Revolt (e.g. "Irminsul Emoji Hub") and invite the bot with **Manage Customisation**
+2. **Set `EMOJI_HUB_SERVER_ID`** in `.env` to that server's ID
+3. **Run `/EmojiSetup`** in that server (or `npm run emoji:provision` from the host) — it downloads each icon named in `emoji-icons.js` and uploads it as a server emoji, reporting exactly what succeeded, was skipped, or failed
+4. **Switch rendering** with `/EmojiMode custom`
+
+`/EmojiSetup` is safe to run repeatedly: an already-provisioned keyword is reused rather than re-uploaded, so re-running it after adding new manifest entries only fetches what's missing. `/EmojiSetup status` reports current coverage without uploading anything, and outside the hub server the command is always read-only.
 
 ### Why a hub server?
 
-In Revolt, custom emoji are globally referenced by their unique ID. A bot can use emoji from **any server it has joined** in messages sent to **any other server**. This means you only need one hub server with all your emoji — the bot renders them everywhere.
+In Revolt, custom emoji are globally referenced by their unique ID. A bot can use emoji from **any server it has joined** in messages sent to **any other server**. This means you only need one hub server with all your emoji — the bot renders them everywhere. (Revolt has no equivalent of Discord's application-owned emoji, so a hub server can't be eliminated — only the manual work of populating it can.)
 
-### Example `custom_emojis.json`
-
-```json
-{
-  "genshin": {
-    "primogem": "01H7ABCDEF123456",
-    "mora": "01H7ABCDEF789012"
-  },
-  "hkrpg": {
-    "stellar jade": "01H7XYZXYZXYZ123"
-  },
-  "_global": {
-    "crystal": "01H7GLOBALEMOJI01"
-  }
-}
-```
-
-- **Game-specific** entries override `_global` entries
-- Leave a value as `""` or remove it to fall back to Unicode emoji
-- `_comment` keys are ignored by the code
+Provisioned emoji IDs persist to `data/emoji_registry.json`. If that file is ever lost (a fresh deploy, for example), re-running `/EmojiSetup` costs nothing extra — it reads the hub server's existing emoji list first and reuses what's already there.
 
 ## 🏗️ Architecture
 
@@ -308,7 +291,8 @@ hoyofetch/
 ├── settings-monitor.js Persistent server-setting diff and reconciliation
 ├── tamper-protection.js Always-on protected audit-message restoration
 ├── emergency-lockdown.js VPS-only default Send Messages control
-├── custom_emojis.json  Optional: custom Revolt emoji IDs
+├── emoji-icons.js      Icon manifest for custom-emoji provisioning
+├── emoji-provision.js  Auto-provisions reward icons onto the emoji hub
 ├── .env.example        Configuration template
 ├── package.json
 ├── website/            Astro Starlight documentation site
@@ -316,6 +300,7 @@ hoyofetch/
     ├── channels.json
     ├── known_codes.json
     ├── source_cache.json
+    ├── emoji_registry.json
     ├── auditlog.json
     ├── server_settings_snapshots.json
     ├── protected_messages.json
@@ -362,6 +347,7 @@ All settings are in `.env`:
 | `FETCH_INTERVAL`      | `60`                                 | Auto-fetch interval in minutes                                                     |
 | `FETCH_COOLDOWN`      | `10`                                 | Min seconds between manual `/Fetch*` commands per channel (`0` disables)           |
 | `EMOJI_MODE`          | `unicode`                            | Initial emoji mode (`unicode` or `custom`); switchable at runtime via `/EmojiMode` |
+| `EMOJI_HUB_SERVER_ID` | _(required for `/EmojiSetup`)_       | Server Irminsul auto-provisions reward icons onto (needs Manage Customisation)     |
 | `HOYO_API_BASE`       | `https://hoyo-codes.seria.moe/codes` | GI/HSR/ZZZ API                                                                     |
 | `HOYOFETCH_DATA_DIR`  | `./data`                             | Where `channels.json` / `known_codes.json` / `source_cache.json` are stored        |
 
@@ -421,13 +407,18 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ## 📝 Changelog
 
+### v3.2.4
+
+- Fixed the long-standing "Reward details unavailable" fallback: `hoyo-codes.seria.moe` periodically returns a blank reward field for an otherwise-valid code, and Irminsul now backfills it from a secondary source (ennead for GI/HSR/ZZZ, the Fandom wiki for HI3) by matching code identity, cached and best-effort so a slow or failing secondary never blocks a fetch. When no source has reward text at all, the line now links the game's Game8 (or, for HI3, Fandom) code article instead of a dead end
+- Coerced reward values of any shape (array of strings, array of `{name,count}` objects, number) into a clean display string in one place, fixing a latent crash where an API returning an array for `rewards` could throw inside emoji formatting
+- Reward icons are now auto-provisioned: `/EmojiSetup` (or `npm run emoji:provision`) downloads item icons and uploads them as custom emoji on a configured hub server, replacing the old manual download/upload/copy-the-ID workflow. Re-running it is safe and free — an already-provisioned keyword is reused, never re-uploaded. `custom_emojis.json`, which nothing actually read, is removed
+
 ### v3.2.3
 
 - Extended the prohibited-term filter to usernames, display names, and server nicknames — checked on join, on nickname change, and on every message, so a slur used as an identity no longer needs a message to surface it. A match automatically places the account in full Post Gate, exactly as a contact-solicitation match does; the offending name itself is never shown on a card, only the rule id and which field matched
 - Fixed manual moderation commands rejecting a bare account ID anywhere except the very first word, while the error message told moderators a user ID should work. A full-length (26-character) account ID is now recognized anywhere in the command, matching how a `<@mention>` already worked; `/Ban`, `/Report-Spam`, and `/Get-Info` all pick it up
 - `/Kick`, `/Mute`, and `/Automod release` now tell a moderator when the target simply isn't a current server member and point them at `/Ban`, instead of the generic "could not be verified" message previously used for both cases
 - `/Ban`, `/Report-Spam`, and `/Get-Info` also now resolve a plain-text `@Username#1234` (typed by hand, not a real mention) against accounts Irminsul already has cached from a shared server, since Stoat's only username-lookup API is "send friend request" and this deliberately never calls it. An uncached username is left unresolved with an error naming what couldn't be found, rather than mistargeting or falling back to a generic error
-- This is the final version of Irminsul. If Stoat grows to the point where a larger operational surface is needed, its next chapter will add an administrator dashboard and SQLite-backed persistence; until then, Irminsul ends here
 
 ### v3.2.2
 

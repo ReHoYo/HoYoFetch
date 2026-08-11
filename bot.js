@@ -29,6 +29,7 @@ import {
   WUWA_GAME_KEY,
   getEmojiMode,
   setEmojiMode,
+  setCustomEmojiRegistry,
 } from "./config.js";
 import { fetchCodes } from "./api.js";
 import {
@@ -48,7 +49,10 @@ import {
   detectNewCodes,
   seedKnownCodes,
   hasSeenGame,
+  getEmojiRegistryMap,
 } from "./store.js";
+import { provisionEmoji } from "./emoji-provision.js";
+import { EMOJI_ICON_MANIFEST } from "./emoji-icons.js";
 import {
   auditAlias,
   authorizeCommand,
@@ -245,6 +249,13 @@ client.on("ready", async () => {
   console.log(`   Interval: every ${CONFIG.fetchIntervalMinutes} min`);
   console.log(`   Enabled channels: ${getEnabledChannels().length}`);
 
+  // Apply any previously-provisioned custom emoji on top of the hardcoded
+  // seed, so a restart doesn't lose emoji /EmojiSetup already created.
+  const provisionedEmojiCount = setCustomEmojiRegistry(getEmojiRegistryMap());
+  if (provisionedEmojiCount > 0) {
+    console.log(`   Custom emoji: ${provisionedEmojiCount} provisioned`);
+  }
+
   approvalGate.resolveApprover();
   channelExclusion.startDigest();
   await postGate.reconcilePermissionLocks();
@@ -402,6 +413,9 @@ client.on("messageCreate", async (message) => {
         return;
       case "emoji_mode":
         await handleEmojiMode(message, cmdArgs.join(" ").toLowerCase());
+        return;
+      case "emoji_setup":
+        await handleEmojiSetup(message, cmdArgs.join(" ").toLowerCase());
         return;
       case "audit_log":
         await auditLogConfiguration.handleCommand(message, cmdArgs);
@@ -817,6 +831,125 @@ async function handleEmojiMode(message, arg) {
         "✅ Emoji Mode Updated",
         `Emoji rendering is now set to **${getEmojiMode()}**.`,
         "#2ECC71"
+      ),
+    ],
+  });
+}
+
+const EMOJI_SETUP_FAILURE_REASONS = {
+  hub_not_configured: "No emoji hub configured. Set `EMOJI_HUB_SERVER_ID`.",
+  fetch_emojis_failed: "Could not read the hub server's existing emoji list.",
+};
+
+/**
+ * `/EmojiSetup` — auto-provisions reward icons as custom emoji. Only
+ * mutates anything when run inside the configured hub server; everywhere
+ * else (and with the `status` argument) it just reports coverage, so the
+ * hub server is effectively the only place that can spend its emoji budget.
+ */
+async function handleEmojiSetup(message, arg) {
+  const server = message.server;
+  const isHub = Boolean(
+    CONFIG.emojiHubServerId && server?.id === CONFIG.emojiHubServerId
+  );
+
+  if (arg === "status" || !isHub) {
+    const provisioned = Object.keys(getEmojiRegistryMap()).length;
+    const total = EMOJI_ICON_MANIFEST.length;
+    const hubNote = !CONFIG.emojiHubServerId
+      ? "\nNo hub server configured — set `EMOJI_HUB_SERVER_ID` first."
+      : isHub
+        ? ""
+        : "\nRun `/EmojiSetup` in the configured hub server to provision or update icons.";
+    await safeSend(message.channel, {
+      embeds: [
+        buildStatusEmbed(
+          "🎨 Emoji Setup — Status",
+          `**${provisioned} of ${total}** reward keywords have a provisioned custom emoji.\n` +
+            `Emoji mode: **${getEmojiMode()}**.${hubNote}`,
+          "#3498DB"
+        ),
+      ],
+    });
+    return;
+  }
+
+  await safeSend(message.channel, {
+    embeds: [
+      buildStatusEmbed(
+        "⏳ Provisioning…",
+        `Downloading and uploading reward icons to **${server.name ?? server.id}**. A full run can take a minute.`,
+        "#F39C12"
+      ),
+    ],
+  });
+
+  let summary;
+  try {
+    summary = await provisionEmoji({ client });
+  } catch (err) {
+    await safeSend(message.channel, {
+      embeds: [
+        buildStatusEmbed(
+          "❌ Provisioning Failed",
+          `Something went wrong: ${safeErrorSummary(err)}`,
+          "#E74C3C"
+        ),
+      ],
+    });
+    return;
+  }
+
+  if (!summary.ok) {
+    const reason =
+      summary.error === "hub_not_found"
+        ? `Irminsul is not a member of hub server \`${summary.serverId}\`.`
+        : (EMOJI_SETUP_FAILURE_REASONS[summary.error] ??
+          `Provisioning failed: ${summary.error}`);
+    await safeSend(message.channel, {
+      embeds: [buildStatusEmbed("❌ Provisioning Failed", reason, "#E74C3C")],
+    });
+    return;
+  }
+
+  const colour =
+    summary.failed.length === 0
+      ? "#2ECC71"
+      : summary.created.length > 0 || summary.reused.length > 0
+        ? "#E67E22"
+        : "#E74C3C";
+
+  const lines = [
+    `**Created:** ${summary.created.length}`,
+    `**Reused:** ${summary.reused.length}`,
+    `**Skipped:** ${summary.skipped.length}`,
+    `**Failed:** ${summary.failed.length}`,
+    `**Capacity:** ${summary.capacity.used}/${summary.capacity.limit} server emoji used`,
+  ];
+
+  const failedLines = summary.failed
+    .slice(0, 10)
+    .map((f) => `\`${f.name}\`: ${f.reason}`);
+  if (failedLines.length > 0) {
+    lines.push("", "**Failures:**", ...failedLines);
+    if (summary.failed.length > 10) {
+      lines.push(`_…and ${summary.failed.length - 10} more_`);
+    }
+  }
+
+  lines.push(
+    "",
+    `Switch rendering over with \`${CONFIG.prefix}EmojiMode custom\`.`
+  );
+
+  await safeSend(message.channel, {
+    embeds: [
+      buildStatusEmbed(
+        summary.failed.length === 0
+          ? "✅ Emoji Setup Complete"
+          : "⚠️ Emoji Setup Finished With Errors",
+        lines.join("\n"),
+        colour
       ),
     ],
   });

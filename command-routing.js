@@ -15,6 +15,7 @@ export const COMMAND_DISPATCH_BY_ROUTE = Object.freeze({
   enablefetch: "enable_fetch",
   disablefetch: "disable_fetch",
   emojimode: "emoji_mode",
+  emojisetup: "emoji_setup",
   auditlog: "audit_log",
   "exclude-channel": "exclude_channel",
   "post-gate": "post_gate",

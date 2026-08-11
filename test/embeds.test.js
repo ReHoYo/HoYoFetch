@@ -34,3 +34,34 @@ test("in-chat help attributes both Game8 code sources", () => {
     /\/EnableFetch \[all\|hoyo\|nte\|wuwa\|nte-wuwa\]/
   );
 });
+
+test("a batch of rewardless codes links the source article exactly once", () => {
+  const codes = [
+    { code: "CODEONE", rewards: null, source: "seria" },
+    { code: "CODETWO", rewards: null, source: "seria" },
+    { code: "CODETHREE", rewards: null, source: "seria" },
+  ];
+  const embed = buildCodesEmbed("genshin", codes);
+
+  const matches =
+    embed.description.match(
+      /game8\.co\/games\/Genshin-Impact\/archives\/304759/g
+    ) || [];
+  assert.equal(matches.length, 1);
+  assert.equal(
+    (embed.description.match(/Rewards not listed by this source/g) || [])
+      .length,
+    3
+  );
+});
+
+test("a ten-code all-rewardless batch stays under the embed description cap", () => {
+  const codes = Array.from({ length: 10 }, (_, i) => ({
+    code: `CODE${i}`,
+    rewards: null,
+    source: "seria",
+  }));
+  const embed = buildCodesEmbed("genshin", codes);
+
+  assert.ok(embed.description.length <= 2000, embed.description.length);
+});

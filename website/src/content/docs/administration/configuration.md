@@ -5,20 +5,21 @@ description: Environment variables for code fetching, emergency controls, emoji,
 
 Copy `.env.example` to `.env` and provide the bot token. Never commit `.env`.
 
-| Variable                        | Default              | Purpose                                                                    |
-| ------------------------------- | -------------------- | -------------------------------------------------------------------------- |
-| `BOT_TOKEN`                     | Required             | Revolt bot token                                                           |
-| `EMERGENCY_SERVER_ID`           | Emergency CLI only   | Server controlled by the VPS-only default Send Messages lock               |
-| `STOAT_API_BASE`                | Stoat production API | REST endpoint used by the VPS-only emergency command                       |
-| `PREFIX`                        | `/`                  | Message-command prefix                                                     |
-| `FETCH_INTERVAL`                | `60`                 | Auto-fetch interval in minutes, clamped to a safe range                    |
-| `FETCH_COOLDOWN`                | `10`                 | Minimum seconds between manual fetches per channel; `0` disables           |
-| `EMOJI_MODE`                    | `unicode`            | Initial `unicode` or `custom` reward-emoji mode                            |
-| `AUDITLOG_DEBUG`                | Off                  | Set to `1` for verbose, redacted audit pipeline diagnostics                |
-| `AUDITLOG_EVIDENCE_MAX_MB`      | `20`                 | Maximum Stoat-mirrored size; `0` disables attachment archiving             |
-| `POST_GATE_HOLD_REMINDER_HOURS` | `24`                 | Hours before moderators are reminded a Post Gate hold still stands (1–168) |
-| `HOYOFETCH_DATA_DIR`            | `./data`             | Runtime persistence directory                                              |
-| `HOYO_API_BASE`                 | hoyo-codes endpoint  | Override for the GI, HSR, and ZZZ API base                                 |
+| Variable                        | Default              | Purpose                                                                        |
+| ------------------------------- | -------------------- | ------------------------------------------------------------------------------ |
+| `BOT_TOKEN`                     | Required             | Revolt bot token                                                               |
+| `EMERGENCY_SERVER_ID`           | Emergency CLI only   | Server controlled by the VPS-only default Send Messages lock                   |
+| `STOAT_API_BASE`                | Stoat production API | REST endpoint used by the VPS-only emergency command                           |
+| `PREFIX`                        | `/`                  | Message-command prefix                                                         |
+| `FETCH_INTERVAL`                | `60`                 | Auto-fetch interval in minutes, clamped to a safe range                        |
+| `FETCH_COOLDOWN`                | `10`                 | Minimum seconds between manual fetches per channel; `0` disables               |
+| `EMOJI_MODE`                    | `unicode`            | Initial `unicode` or `custom` reward-emoji mode                                |
+| `EMOJI_HUB_SERVER_ID`           | `/EmojiSetup` only   | Server Irminsul auto-provisions reward icons onto (needs Manage Customisation) |
+| `AUDITLOG_DEBUG`                | Off                  | Set to `1` for verbose, redacted audit pipeline diagnostics                    |
+| `AUDITLOG_EVIDENCE_MAX_MB`      | `20`                 | Maximum Stoat-mirrored size; `0` disables attachment archiving                 |
+| `POST_GATE_HOLD_REMINDER_HOURS` | `24`                 | Hours before moderators are reminded a Post Gate hold still stands (1–168)     |
+| `HOYOFETCH_DATA_DIR`            | `./data`             | Runtime persistence directory                                                  |
+| `HOYO_API_BASE`                 | hoyo-codes endpoint  | Override for the GI, HSR, and ZZZ API base                                     |
 
 ```dotenv title=".env"
 BOT_TOKEN=replace_with_your_token
@@ -28,6 +29,7 @@ PREFIX=/
 FETCH_INTERVAL=60
 FETCH_COOLDOWN=10
 EMOJI_MODE=unicode
+EMOJI_HUB_SERVER_ID=
 AUDITLOG_DEBUG=
 AUDITLOG_EVIDENCE_MAX_MB=20
 POST_GATE_HOLD_REMINDER_HOURS=24
@@ -41,7 +43,7 @@ The bot token grants control of the bot account. Keep it in secret storage on th
 
 ## Runtime changes
 
-`/EmojiMode unicode` and `/EmojiMode custom` change the current process without editing `.env`. Channel subscriptions, audit configuration, automod configuration, cases, strikes, spam-report correlation metadata, protected records, and known codes are persisted locally.
+`/EmojiMode unicode` and `/EmojiMode custom` change the current process without editing `.env`. `/EmojiSetup`, run in the configured `EMOJI_HUB_SERVER_ID` server, auto-provisions the custom emoji `/EmojiMode custom` then renders — see [Custom emoji](/HoYoFetch/codes/custom-emoji/). Channel subscriptions, audit configuration, automod configuration, cases, strikes, spam-report correlation metadata, protected records, known codes, and the provisioned emoji registry are persisted locally.
 
 ## Debug logging
 

@@ -11,9 +11,16 @@ import {
   getEmojiMode,
   setEmojiMode,
   getEmojiMap,
+  getCustomEmojiRegistry,
+  setCustomEmojiRegistry,
 } from "../config.js";
 
-afterEach(() => setEmojiMode("unicode")); // restore default
+const SEED_REGISTRY = getCustomEmojiRegistry();
+
+afterEach(() => {
+  setEmojiMode("unicode"); // restore default
+  setCustomEmojiRegistry(SEED_REGISTRY); // restore the hardcoded seed
+});
 
 test("every command maps to a real game with a source", () => {
   for (const gameKey of Object.values(COMMAND_GAME_MAP)) {
@@ -53,4 +60,47 @@ test("setEmojiMode rejects invalid values and leaves mode unchanged", () => {
   assert.equal(setEmojiMode("custom"), true);
   assert.equal(setEmojiMode("rainbow"), false);
   assert.equal(getEmojiMode(), "custom");
+});
+
+test("setCustomEmojiRegistry applies provisioned ids while un-provisioned keywords keep Unicode", () => {
+  setEmojiMode("custom");
+  const applied = setCustomEmojiRegistry({
+    "mystic enhancement ore": ":01ABCDEFGHJKMNPQRSTVWXYZ0:",
+  });
+
+  assert.equal(applied, 1);
+  assert.equal(
+    getEmojiMap()["mystic enhancement ore"],
+    ":01ABCDEFGHJKMNPQRSTVWXYZ0:"
+  );
+  // A keyword the registry never touched keeps its Unicode fallback.
+  assert.equal(getEmojiMap().resin, "🌙");
+});
+
+test("setCustomEmojiRegistry drops malformed entries and keeps the seed", () => {
+  setEmojiMode("custom");
+  const before = getEmojiMap().primogem;
+
+  const applied = setCustomEmojiRegistry({
+    primogem: "nope",
+    mora: ":bad id:",
+    resin: 123,
+    "fine enhancement ore": null,
+  });
+
+  assert.equal(applied, 0);
+  assert.equal(getEmojiMap().primogem, before);
+});
+
+test("unicode mode ignores the custom registry entirely", () => {
+  setCustomEmojiRegistry({ primogem: ":01ABCDEFGHJKMNPQRSTVWXYZ0:" });
+  assert.equal(getEmojiMode(), "unicode");
+  assert.equal(getEmojiMap().primogem, "💎");
+});
+
+test("an empty registry leaves the seeded ids intact", () => {
+  setEmojiMode("custom");
+  setCustomEmojiRegistry({});
+  assert.match(getEmojiMap().primogem, /^:.*:$/);
+  assert.equal(getEmojiMap().primogem, SEED_REGISTRY.primogem);
 });

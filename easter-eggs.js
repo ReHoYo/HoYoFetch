@@ -63,12 +63,17 @@ export async function uploadEasterEggAttachment({
   }
 }
 
+// Autumn buckets this uploader is allowed to target. Never interpolate a
+// caller-supplied string into the upload URL unchecked.
+const AUTUMN_BUCKETS = new Set(["attachments", "emojis"]);
+
 /**
- * Upload raw bytes to the Autumn attachments bucket and return the new
- * attachment id. Shared by easter eggs and audit-log evidence re-hosting.
+ * Upload raw bytes to an Autumn bucket and return the new attachment id.
+ * Shared by easter eggs, audit-log evidence re-hosting, and emoji
+ * provisioning (which uses bucket: "emojis" instead of the default).
  * @param {{bytes: Buffer|Uint8Array, filename: string, contentType: string,
  *          autumnUrl: string, authenticationHeader: [string, string],
- *          fetchImpl?: Function}} opts
+ *          bucket?: string, fetchImpl?: Function}} opts
  * @return {Promise<string>} the new Autumn attachment id
  */
 export async function uploadAttachmentBytes({
@@ -77,13 +82,14 @@ export async function uploadAttachmentBytes({
   contentType,
   autumnUrl,
   authenticationHeader,
+  bucket = "attachments",
   fetchImpl = fetch,
 }) {
   if (!bytes || !filename || !contentType) {
     throw new Error("Attachment upload configuration is invalid.");
   }
 
-  const uploadUrl = getAttachmentUploadUrl(autumnUrl);
+  const uploadUrl = getUploadUrl(autumnUrl, bucket);
   const [headerName, headerValue] = authenticationHeader ?? [];
   if (
     !["X-Bot-Token", "X-Session-Token"].includes(headerName) ||
@@ -128,16 +134,19 @@ export async function uploadAttachmentBytes({
   return data.id;
 }
 
-function getAttachmentUploadUrl(autumnUrl) {
+function getUploadUrl(autumnUrl, bucket) {
   if (typeof autumnUrl !== "string" || !autumnUrl) {
-    throw new Error("Easter egg media service is unavailable.");
+    throw new Error("Media service is unavailable.");
+  }
+  if (!AUTUMN_BUCKETS.has(bucket)) {
+    throw new Error(`Unknown Autumn bucket: ${bucket}`);
   }
 
   try {
     const baseUrl = new URL(autumnUrl);
     if (!["http:", "https:"].includes(baseUrl.protocol)) throw new Error();
-    return `${baseUrl.toString().replace(/\/+$/, "")}/attachments`;
+    return `${baseUrl.toString().replace(/\/+$/, "")}/${bucket}`;
   } catch {
-    throw new Error("Easter egg media service is unavailable.");
+    throw new Error("Media service is unavailable.");
   }
 }

@@ -6,6 +6,7 @@ import {
   GAME8_SOURCES,
   HI3_SOURCES,
   NTE_SOURCE,
+  REWARD_BACKFILL_SOURCES,
   WUWA_SOURCE,
   getEmojiMap,
 } from "./config.js";
@@ -13,37 +14,65 @@ import { getSourceCache, setSourceCache } from "./store.js";
 
 /**
  * Fetch active codes for a given game.
- * Routes to the correct source based on game config.
+ * Routes to the correct source based on game config, then best-effort
+ * backfills reward text for any code the primary source left blank.
  *
- * @param  {string} gameKey — one of the keys in GAMES
+ * @param  {string}   gameKey — one of the keys in GAMES
+ * @param  {Object}   opts
+ * @param  {number}   opts.now
+ * @param  {Function} opts.fetchImpl
+ * @param  {Function} opts.readCache
+ * @param  {Function} opts.writeCache
+ * @param  {boolean}  opts.backfill — set false to skip the backfill pass
  * @return {Promise<Array>} — array of normalised code objects
  */
-export async function fetchCodes(gameKey) {
+export async function fetchCodes(
+  gameKey,
+  {
+    now = Date.now(),
+    fetchImpl = fetch,
+    readCache = getSourceCache,
+    writeCache = setSourceCache,
+    backfill = true,
+  } = {}
+) {
   const game = GAMES[gameKey];
   if (!game) throw new Error(`Unknown game key: ${gameKey}`);
 
-  // HI3 uses a multi-source fallback chain
+  let codes;
   if (game.source === "hi3_multi") {
-    return fetchHI3Codes();
+    // HI3 uses a multi-source fallback chain
+    codes = await fetchHI3Codes({ fetchImpl });
+  } else if (game.source === "game8") {
+    // NTE and WuWa are scraped from Game8 with independent one-hour caches.
+    codes = await fetchGame8Codes(gameKey, {
+      now,
+      fetchImpl,
+      readCache,
+      writeCache,
+    });
+  } else {
+    // All other games use seria's hoyo-codes API
+    codes = await fetchFromSeria(game.apiParam, { fetchImpl });
   }
 
-  // NTE and WuWa are scraped from Game8 with independent one-hour caches.
-  if (game.source === "game8") {
-    return fetchGame8Codes(gameKey);
-  }
-
-  // All other games use seria's hoyo-codes API
-  return fetchFromSeria(game.apiParam);
+  if (!backfill) return codes;
+  return backfillRewards(gameKey, codes, {
+    now,
+    fetchImpl,
+    readCache,
+    writeCache,
+  });
 }
 
 // ═══════════════════════════════════════════════════
 //  Source: seria (hoyo-codes.seria.moe)
 // ═══════════════════════════════════════════════════
 
-async function fetchFromSeria(apiParam) {
+async function fetchFromSeria(apiParam, { fetchImpl = fetch } = {}) {
   const url = `${CONFIG.hoyoApiBase}?game=${apiParam}`;
 
-  const res = await fetch(url, {
+  const res = await fetchImpl(url, {
     headers: { Accept: "application/json" },
     signal: AbortSignal.timeout(15_000),
   });
@@ -54,14 +83,14 @@ async function fetchFromSeria(apiParam) {
 
   const data = await res.json();
   const codes = Array.isArray(data) ? data : (data.codes ?? data.data ?? []);
-  return codes.map(normalise);
+  return codes.map((item) => normalise(item));
 }
 
 // ═══════════════════════════════════════════════════
 //  Source: HI3 multi-source fallback
 // ═══════════════════════════════════════════════════
 
-async function fetchHI3Codes() {
+async function fetchHI3Codes({ fetchImpl = fetch } = {}) {
   const errors = [];
 
   for (const source of HI3_SOURCES) {
@@ -70,9 +99,9 @@ async function fetchHI3Codes() {
       let codes;
 
       if (source.type === "json") {
-        codes = await fetchJSON(source.url);
+        codes = await fetchJSON(source.url, fetchImpl);
       } else if (source.type === "wiki") {
-        codes = await fetchFromFandomWiki(source.url);
+        codes = await fetchFromFandomWiki(source.url, { fetchImpl });
       }
 
       if (codes && codes.length > 0) {
@@ -98,8 +127,8 @@ async function fetchHI3Codes() {
 /**
  * Generic JSON fetch for any URL returning an array of code objects.
  */
-async function fetchJSON(url) {
-  const res = await fetch(url, {
+async function fetchJSON(url, fetchImpl = fetch) {
+  const res = await fetchImpl(url, {
     headers: { Accept: "application/json" },
     signal: AbortSignal.timeout(15_000),
   });
@@ -113,13 +142,9 @@ async function fetchJSON(url) {
   const arr =
     data.active ??
     (Array.isArray(data) ? data : (data.codes ?? data.data ?? []));
-  return arr.map((item) => {
-    // ennead returns rewards as an array of strings — join them
-    const rewards = Array.isArray(item.rewards)
-      ? item.rewards.join(", ")
-      : item.rewards;
-    return normalise({ ...item, rewards });
-  });
+  // normalise()'s reward coercion already handles ennead's array-of-strings
+  // rewards field, so no ad-hoc join is needed here.
+  return arr.map((item) => normalise(item));
 }
 
 /**
@@ -128,13 +153,16 @@ async function fetchJSON(url) {
  * The wiki page has tables with codes. We look for the "Active" section
  * and extract code strings from table cells.
  */
-async function fetchFromFandomWiki(url) {
-  const res = await fetch(url, {
+async function fetchFromFandomWiki(
+  url,
+  { fetchImpl = fetch, timeoutMs = 20_000 } = {}
+) {
+  const res = await fetchImpl(url, {
     headers: {
       Accept: "text/html",
       "User-Agent": "HoyoFetch-Bot/1.0 (Revolt code fetcher)",
     },
-    signal: AbortSignal.timeout(20_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   if (!res.ok) throw new Error(`Wiki returned HTTP ${res.status}`);
@@ -224,6 +252,128 @@ async function fetchFromFandomWiki(url) {
   }
 
   return codes;
+}
+
+// ═══════════════════════════════════════════════════
+//  Reward backfill — fills in rewards a primary source left blank
+// ═══════════════════════════════════════════════════
+// A short timeout keeps a slow secondary source from doubling the
+// user-visible latency of a /Fetch* command that otherwise would have
+// resolved immediately.
+const BACKFILL_TIMEOUT_MS = 8_000;
+
+/**
+ * Best-effort reward backfill. Only makes a network/cache call when at least
+ * one code is missing rewards, and never rejects — a failure just leaves the
+ * affected codes as they were.
+ *
+ * @param  {string} gameKey
+ * @param  {Array}  codes — normalised code objects
+ * @param  {Object} opts  — { now, fetchImpl, readCache, writeCache }
+ * @return {Promise<Array>}
+ */
+async function backfillRewards(gameKey, codes, opts) {
+  const missing = codes.filter((entry) => !entry.rewards);
+  if (missing.length === 0) return codes;
+
+  const source = REWARD_BACKFILL_SOURCES[gameKey];
+  if (!source) return codes;
+
+  try {
+    const index = await getBackfillIndex(source, opts);
+    if (!index) return codes;
+
+    return codes.map((entry) => {
+      if (entry.rewards) return entry;
+      const filled = index[entry.code.trim().toUpperCase()];
+      return filled ? { ...entry, rewards: filled } : entry;
+    });
+  } catch (err) {
+    console.warn(`   [backfill] ${gameKey}: ${err.message}`);
+    return codes;
+  }
+}
+
+/**
+ * Read-through cache for a backfill source's { CODE -> reward string } index,
+ * following the same lastAttemptAt/lastSuccessAt protocol fetchGame8Codes
+ * uses so a failing secondary source can't be hammered every fetch.
+ */
+async function getBackfillIndex(
+  source,
+  { now = Date.now(), fetchImpl = fetch, readCache, writeCache }
+) {
+  const cache = readCache(source.cacheKey) || {};
+  const lastAttemptAt = Number(cache.lastAttemptAt) || 0;
+  const hasCachedIndex =
+    cache.rewardsByCode && typeof cache.rewardsByCode === "object";
+
+  if (lastAttemptAt > 0 && now - lastAttemptAt < source.cacheTtlMs) {
+    return hasCachedIndex ? cache.rewardsByCode : null;
+  }
+
+  // Write the attempt timestamp before the request so a hard failure still
+  // rate-limits the next call.
+  writeCache(source.cacheKey, { ...cache, lastAttemptAt: now });
+
+  try {
+    const rewardsByCode = await fetchBackfillIndex(source, fetchImpl);
+    writeCache(source.cacheKey, {
+      lastAttemptAt: now,
+      lastSuccessAt: now,
+      rewardsByCode,
+    });
+    return rewardsByCode;
+  } catch (err) {
+    if (hasCachedIndex) {
+      console.warn(
+        `   [backfill] ${source.name} refresh failed, using stale index: ${err.message}`
+      );
+      return cache.rewardsByCode;
+    }
+    throw err;
+  }
+}
+
+async function fetchBackfillIndex(source, fetchImpl) {
+  if (source.type === "wiki") {
+    const codes = await fetchFromFandomWiki(source.url, {
+      fetchImpl,
+      timeoutMs: BACKFILL_TIMEOUT_MS,
+    });
+    return buildRewardIndex(codes);
+  }
+
+  const res = await fetchImpl(source.url, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(BACKFILL_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const data = await res.json();
+  const active = Array.isArray(data.active) ? data.active : [];
+  const inactive = Array.isArray(data.inactive) ? data.inactive : [];
+  // active wins on collision — build inactive first, overlay active on top.
+  return buildRewardIndex([...inactive, ...active]);
+}
+
+/**
+ * Build a { CODE -> reward string } index from raw source rows or already
+ * normalise()'d entries (both shapes carry code/rewards fields).
+ */
+function buildRewardIndex(rows) {
+  const index = {};
+  for (const row of rows) {
+    const code = String(row?.code ?? row?.Code ?? "")
+      .trim()
+      .toUpperCase();
+    if (!code) continue;
+    const rewards = normaliseRewards(
+      row?.rewards ?? row?.reward ?? row?.Rewards ?? null
+    );
+    if (rewards) index[code] = rewards;
+  }
+  return index;
 }
 
 // ═══════════════════════════════════════════════════
@@ -515,12 +665,33 @@ function extractGame8Rewards(rowHtml, cells) {
       /<div\b[^>]*class=['"][^'"]*\balign\b[^'"]*['"][^>]*>[\s\S]*?<\/div>/gi
     ) || [];
   const fallback = cells.length >= 2 ? [cells[1]] : [];
-  const parts = (rewardBlocks.length ? rewardBlocks : fallback)
+  const blocks = rewardBlocks.length ? rewardBlocks : fallback;
+
+  const parts = blocks
     .map(htmlToText)
     .map((part) => part.replace(/^・\s*/, "").trim())
     .filter(Boolean);
 
-  return parts.length > 0 ? parts.join(", ") : null;
+  if (parts.length > 0) return parts.join(", ");
+
+  // Icon-only reward cells have no visible item name — the only signal left
+  // is each <img>'s alt/title text. Only tried once normal text extraction
+  // finds nothing, so blocks with visible text (the common case) never see
+  // this path or its output.
+  const iconParts = blocks.flatMap(extractImageAltTexts).filter(Boolean);
+  return iconParts.length > 0 ? iconParts.join(", ") : null;
+}
+
+function extractImageAltTexts(html) {
+  const imgs = html.match(/<img\b[^>]*>/gi) || [];
+  return imgs
+    .map((tag) => getHtmlAttr(tag, "alt") || getHtmlAttr(tag, "title") || "")
+    .map((alt) =>
+      decodeHtml(alt)
+        .replace(/\s+(Image|Icon)$/i, "")
+        .trim()
+    )
+    .filter(Boolean);
 }
 
 function getHtmlAttr(tag, name) {
@@ -603,20 +774,108 @@ function normalise(raw, { preserveCodeCase = false } = {}) {
   const code = String(raw.code ?? raw.Code ?? "").trim();
   return {
     code: preserveCodeCase ? code : code.toUpperCase(),
-    rewards: raw.rewards ?? raw.reward ?? raw.Rewards ?? null,
+    rewards: normaliseRewards(raw.rewards ?? raw.reward ?? raw.Rewards ?? null),
     date: raw.date ?? raw.added_at ?? raw.Date ?? null,
     source: raw.source ?? raw.Source ?? null,
   };
 }
 
 /**
- * Enrich the reward string with emoji from the active emoji map.
+ * Coerce a reward value of unknown shape — string, array of strings, array
+ * of {name,count}-ish objects, number, or null — into a clean display string
+ * or null. Every source funnels through this via `normalise`, so downstream
+ * code can always treat `entry.rewards` as "non-empty trimmed string or
+ * null", never "" and never a non-string (the source of a long-standing
+ * TypeError when an API returned an array here).
+ *
+ * @param  {*} value
+ * @return {string|null}
  */
-export function formatRewards(rawRewards, _gameKey) {
+export function normaliseRewards(value) {
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === "number" || typeof value === "bigint") {
+    return cleanRewardText(String(value));
+  }
+
+  if (Array.isArray(value)) {
+    const parts = value.map(normaliseRewardItem).filter(Boolean);
+    return parts.length > 0 ? cleanRewardText(parts.join(", ")) : null;
+  }
+
+  if (typeof value === "string") {
+    return cleanRewardText(value);
+  }
+
+  if (typeof value === "object") {
+    const part = normaliseRewardItem(value);
+    return part ? cleanRewardText(part) : null;
+  }
+
+  return null;
+}
+
+/**
+ * Coerce a single reward element (string, number, or a {name,count}-shaped
+ * object) into a display fragment. Returns "" when nothing usable is present.
+ */
+function normaliseRewardItem(item) {
+  if (typeof item === "string") return item;
+  if (typeof item === "number" || typeof item === "bigint") return String(item);
+  if (!item || typeof item !== "object") return "";
+
+  const name = item.name ?? item.item ?? item.title;
+  const count = item.count ?? item.amount ?? item.quantity ?? item.num;
+  if (typeof name !== "string" || !name.trim()) return "";
+
+  return count !== undefined && count !== null && Number.isFinite(Number(count))
+    ? `${name.trim()} ×${count}`
+    : name.trim();
+}
+
+/**
+ * Strip control characters and collapse whitespace left over from a coerced
+ * reward value, returning null (not "") once trimmed to empty — the tail
+ * every normaliseRewards() branch shares.
+ */
+function cleanRewardText(text) {
+  const cleaned = text
+    // eslint-disable-next-line no-control-regex -- stripping stray control bytes from third-party API text
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || null;
+}
+
+/**
+ * Enrich the reward string with emoji from the active emoji map. When no
+ * reward text is available, point at the game's human-readable code article
+ * instead of a dead end.
+ *
+ * @param  {string|null} rawRewards
+ * @param  {string}      gameKey
+ * @param  {Object}      opts
+ * @param  {boolean}     opts.includeArticleLink — set false to keep the
+ *   fallback line short (used for every rewardless code after the first in
+ *   a batch, so a 10-code embed can't blow the 2000-char description cap)
+ * @return {string}
+ */
+export function formatRewards(
+  rawRewards,
+  gameKey,
+  { includeArticleLink = true } = {}
+) {
   const emojiMap = getEmojiMap();
 
-  if (!rawRewards || rawRewards.trim() === "") {
-    return "_Reward details unavailable — check in-game mail after redeeming._";
+  if (
+    !rawRewards ||
+    (typeof rawRewards === "string" && rawRewards.trim() === "")
+  ) {
+    const game = GAMES[gameKey];
+    if (includeArticleLink && game?.codesArticleUrl) {
+      return `_Rewards not listed by this source — see the [${game.name} code list](${game.codesArticleUrl})._`;
+    }
+    return "_Rewards not listed by this source._";
   }
 
   // Limit input length to prevent ReDoS on maliciously crafted API responses

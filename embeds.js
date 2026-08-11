@@ -37,14 +37,18 @@ export function buildCodesEmbed(
     : `🎁 Active ${game.name} Code${codes.length > 1 ? "s" : ""}${pageLabel}`;
 
   const lines = [];
+  let articleLinkShown = false;
 
   for (const entry of codes) {
     // Code header
     lines.push(`**\`${entry.code}\`**`);
 
-    // Rewards with emoji
-    const rewards = formatRewards(entry.rewards, gameKey);
-    lines.push(rewards);
+    // Rewards with emoji. Only the first rewardless code in a batch links the
+    // source article — repeating a ~60-char URL on every line of a 10-code
+    // batch risks the 2000-char embed cap for no added benefit.
+    const includeArticleLink = !entry.rewards && !articleLinkShown;
+    if (includeArticleLink) articleLinkShown = true;
+    lines.push(formatRewards(entry.rewards, gameKey, { includeArticleLink }));
 
     // Clickable redeem link or game-specific in-game instructions.
     if (game.redeemUrl) {
@@ -62,7 +66,7 @@ export function buildCodesEmbed(
 
   return {
     title,
-    description: lines.join("\n"),
+    description: clampDescription(lines.join("\n")),
     colour: game.colour,
     icon_url: game.icon,
   };
@@ -151,6 +155,19 @@ export function buildStatusEmbed(title, description, colour = "#2ECC71") {
 
 // Revolt's embed description cap; leave headroom for the notice itself.
 const MAX_DESCRIPTION_LENGTH = 2000;
+
+/**
+ * Hard-clamp a description to Revolt's cap. buildCodesEmbed has no per-line
+ * budget the way buildAuditEmbed does, so this is the backstop against a
+ * long run of reward text or article links ever producing a rejected send.
+ * @param  {string} text
+ * @return {string}
+ */
+function clampDescription(text) {
+  return text.length > MAX_DESCRIPTION_LENGTH
+    ? `${text.slice(0, MAX_DESCRIPTION_LENGTH - 1)}…`
+    : text;
+}
 
 /**
  * Build the tamper notice appended to a restored audit-log message.

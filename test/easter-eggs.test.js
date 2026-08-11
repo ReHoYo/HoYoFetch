@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import {
   EASTER_EGG_COMMAND_NAMES,
   EASTER_EGG_COMMANDS,
+  uploadAttachmentBytes,
   uploadEasterEggAttachment,
 } from "../easter-eggs.js";
 import { buildHelpEmbeds } from "../embeds.js";
@@ -161,5 +162,58 @@ test("attachment upload rejects HTTP failures and malformed IDs", async () => {
       }),
     }),
     { message: "Easter egg upload returned an invalid response." }
+  );
+});
+
+test("uploadAttachmentBytes defaults to the attachments bucket", async () => {
+  let request;
+  const id = await uploadAttachmentBytes({
+    bytes: Buffer.from("icon bytes"),
+    filename: "primogem.png",
+    contentType: "image/png",
+    autumnUrl: "https://autumn.example.test",
+    authenticationHeader: ["X-Bot-Token", "secret-token"],
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return { ok: true, json: async () => ({ id: "ATTACHMENT_ABC" }) };
+    },
+  });
+
+  assert.equal(request.url, "https://autumn.example.test/attachments");
+  assert.equal(id, "ATTACHMENT_ABC");
+});
+
+test("uploadAttachmentBytes posts to the emojis bucket when requested", async () => {
+  let request;
+  await uploadAttachmentBytes({
+    bytes: Buffer.from("icon bytes"),
+    filename: "primogem.png",
+    contentType: "image/png",
+    autumnUrl: "https://autumn.example.test",
+    authenticationHeader: ["X-Bot-Token", "secret-token"],
+    bucket: "emojis",
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return { ok: true, json: async () => ({ id: "EMOJI_ABC" }) };
+    },
+  });
+
+  assert.equal(request.url, "https://autumn.example.test/emojis");
+});
+
+test("uploadAttachmentBytes rejects an unknown bucket instead of interpolating it", async () => {
+  await assert.rejects(
+    uploadAttachmentBytes({
+      bytes: Buffer.from("icon bytes"),
+      filename: "primogem.png",
+      contentType: "image/png",
+      autumnUrl: "https://autumn.example.test",
+      authenticationHeader: ["X-Bot-Token", "secret-token"],
+      bucket: "../admin",
+      fetchImpl: async () => {
+        throw new Error("should not fetch");
+      },
+    }),
+    /Unknown Autumn bucket/
   );
 });
