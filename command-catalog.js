@@ -433,8 +433,8 @@ export const COMMAND_CATALOG = Object.freeze([
       "Rejecting discards the held content and increases the author's automod strike stage; it does not apply a timeout by itself.",
       "Deny + Hold User (🔒) also places the author in Post Gate, so every later message they send is held until a moderator releases them. A persistent control card in the review channel records who held them and when.",
       "Release (🔓 or `/Post-Gate release @member`) restores normal posting straight away; messages already in the review queue stay queued and are reviewed individually.",
-      "A standing hold never expires on its own. After 24 hours (configurable with POST_GATE_HOLD_REMINDER_HOURS) Irminsul reminds moderators and offers Release / Continue Holding.",
-      "Unreviewed holds expire and are discarded after 7 days.",
+      "A standing hold never expires on a timer while the account remains a member. After 24 hours (configurable with POST_GATE_HOLD_REMINDER_HOURS) Irminsul reminds moderators and offers Release / Continue Holding. Leaving, being kicked, or being banned removes the account-level hold automatically.",
+      "Unreviewed held posts expire and are discarded without a strike after 7 days; one notice summarizes all entries expiring in the same hourly sweep.",
     ],
   },
   {

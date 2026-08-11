@@ -221,6 +221,16 @@ client.on("serverMemberJoin", (member) => {
       )
     );
 });
+client.on("serverMemberLeave", (member) => {
+  postGate
+    .handleMemberLeave(member)
+    .catch((error) =>
+      console.error(
+        "post-gate: member-leave cleanup failed:",
+        error?.message || error
+      )
+    );
+});
 client.on("serverMemberUpdate", (member, previousMember) => {
   postGate
     .handleMemberUpdate(member, previousMember)

@@ -1631,20 +1631,31 @@ test("rejecting a legacy queue entry with no recorded author id resolves it with
   assert.doesNotMatch(JSON.stringify(outcomeEmbed), /undefined/);
 });
 
-test("an unreviewed held post expires after 7 days with no strike", async () => {
+test("expired held posts are discarded without strikes and share one notice", async () => {
   const harness = makeHarness();
   await enableHold(harness);
-  await harness.postGate.handleMessage(
-    newAccountMessage({ id: "MSGEXPIRE1", content: "https://example.com" })
-  );
-  const [record] = [...harness.store.queue.values()];
+  for (const id of ["MSGEXPIRE1", "MSGEXPIRE2", "MSGEXPIRE3"]) {
+    await harness.postGate.handleMessage(
+      newAccountMessage({ id, content: "https://example.com" })
+    );
+  }
+  const records = [...harness.store.queue.values()];
 
   harness.advance(8 * 24 * 60 * 60 * 1000);
   await harness.postGate.maintainQueue();
 
-  assert.equal(harness.store.getHeldPost(record.queueId).status, "expired");
-  assert.ok(harness.deletedMessageIds.includes(record.reviewMessageId));
+  for (const record of records) {
+    assert.equal(harness.store.getHeldPost(record.queueId).status, "expired");
+    assert.ok(harness.deletedMessageIds.includes(record.reviewMessageId));
+  }
   assert.equal(harness.store.getAutomodStrike(SERVER_ID, NEW_USER_ID), null);
+  const expiryNotices = harness.protectedLogs.filter((entry) =>
+    /Held Posts Expired/.test(entry.payload.embeds[0].title)
+  );
+  assert.equal(expiryNotices.length, 1);
+  const text = JSON.stringify(expiryNotices[0].payload);
+  assert.match(text, /Expired.*3 held posts/);
+  for (const record of records) assert.match(text, new RegExp(record.queueId));
 });
 
 test("enabling the post gate requires an Enka-approved code and leaves state unchanged when denied", async () => {
@@ -2837,7 +2848,7 @@ test("the hourly sweep reminds moderators about a hold older than the reminder w
   assert.match(text, /Held by/);
   assert.match(text, /🔓/);
   assert.match(text, /⏳/);
-  assert.match(text, /never releases a hold by itself/);
+  assert.match(text, /automatically only if the member leaves or is removed/);
   // The user is still held — a reminder is not a deadline.
   assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), true);
 });
@@ -2923,7 +2934,7 @@ test("⏳ on the control card is ignored — continue holding is only offered on
   );
 });
 
-test("a hold is never auto-released, even after many reminder windows", async () => {
+test("a current member's hold is never auto-released after reminder windows", async () => {
   const harness = makeHarness();
   await enableHold(harness);
   await holdUserViaDenyHold(harness);
@@ -2937,6 +2948,74 @@ test("a hold is never auto-released, even after many reminder windows", async ()
   assert.equal(
     harness.store.getUserHold(SERVER_ID, NEW_USER_ID).releasedAt,
     null
+  );
+});
+
+test("a member departure removes the account hold and its reminder cards", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await holdUserViaDenyHold(harness);
+  harness.advance(25 * 60 * 60 * 1_000);
+  await harness.postGate.maintainQueue();
+  const hold = harness.store.getUserHold(SERVER_ID, NEW_USER_ID);
+  assert.ok(hold.cardMessageId);
+  assert.ok(hold.lastReminderMessageId);
+  const remindersBefore = harness.protectedLogs.filter((entry) =>
+    /User Still Held/.test(entry.payload.embeds[0].title)
+  ).length;
+
+  const result = await harness.postGate.handleRawEvent({
+    type: "ServerMemberLeave",
+    id: SERVER_ID,
+    user: NEW_USER_ID,
+    reason: "Ban",
+  });
+
+  assert.equal(result, undefined);
+  const released = harness.store.getUserHold(SERVER_ID, NEW_USER_ID);
+  assert.equal(released.active, false);
+  assert.equal(released.releaseReason, "member_departure");
+  assert.ok(harness.deletedMessageIds.includes(hold.cardMessageId));
+  assert.ok(harness.deletedMessageIds.includes(hold.lastReminderMessageId));
+  const notice = harness.protectedLogs.find((entry) =>
+    /Departed User Removed/.test(entry.payload.embeds[0].title)
+  );
+  assert.ok(notice);
+  assert.match(JSON.stringify(notice.payload), /was banned from the server/);
+
+  harness.advance(2 * 24 * 60 * 60 * 1_000);
+  await harness.postGate.maintainQueue();
+  assert.equal(
+    harness.protectedLogs.filter((entry) =>
+      /User Still Held/.test(entry.payload.embeds[0].title)
+    ).length,
+    remindersBefore
+  );
+});
+
+test("hydrated and alternate raw departure shapes share idempotent cleanup", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await holdUserViaDenyHold(harness);
+
+  const first = await harness.postGate.handleMemberLeave({
+    id: { server: SERVER_ID, user: NEW_USER_ID },
+    reason: "Kick",
+  });
+  const duplicate = await harness.postGate.handleRawEvent({
+    type: "ServerMemberLeave",
+    server: SERVER_ID,
+    user_id: NEW_USER_ID,
+    reason: "Kick",
+  });
+
+  assert.equal(first.outcome, "released");
+  assert.equal(duplicate, undefined);
+  assert.equal(
+    harness.protectedLogs.filter((entry) =>
+      /Departed User Removed/.test(entry.payload.embeds[0].title)
+    ).length,
+    1
   );
 });
 
@@ -3112,27 +3191,28 @@ test("a hold survives a restart with its control card id and reminder timing int
   assert.equal(restarted.store.isUserHeld(SERVER_ID, NEW_USER_ID), false);
 });
 
-test("a hold survives the user leaving and rejoining the server", async () => {
+test("a rejoining user does not inherit the account hold removed on departure", async () => {
   const harness = makeHarness();
   await enableHold(harness);
   await holdUserViaDenyHold(harness);
 
-  // A rejoin looks like a brand-new member record with a fresh join date; the
-  // hold is keyed on server + user, so none of that matters.
+  await harness.postGate.handleMemberLeave({
+    id: { server: SERVER_ID, user: NEW_USER_ID },
+    reason: "Leave",
+  });
+
+  // A later rejoin starts without the departed membership's full-user hold.
   harness.advance(7 * 24 * 60 * 60 * 1_000);
   await harness.postGate.handleMessage(
-    newAccountMessage({
+    establishedMessage({
       id: "MSGREJOINED",
       content: "hello again",
-      joinedAt: new Date(1_800_000_000_000 + 7 * 24 * 60 * 60 * 1_000),
+      authorId: NEW_USER_ID,
     })
   );
 
-  assert.ok(harness.deletedMessageIds.includes("MSGREJOINED"));
-  const held = harness.store
-    .getPendingHeldPosts(SERVER_ID)
-    .find((entry) => entry.messageId === "MSGREJOINED");
-  assert.equal(held.trigger, "user_hold");
+  assert.equal(harness.deletedMessageIds.includes("MSGREJOINED"), false);
+  assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), false);
 });
 
 test("turning the post gate off leaves hold records inert and honours them again when it is re-enabled", async () => {

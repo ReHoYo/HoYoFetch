@@ -2119,6 +2119,76 @@ export function createPostGate(
     });
   }
 
+  function memberIdsFromDeparture(event) {
+    const asId = (value) => (typeof value === "string" && value ? value : null);
+    return {
+      serverId: asId(event?.id?.server ?? event?.server ?? event?.id),
+      userId: asId(event?.user ?? event?.user_id ?? event?.id?.user),
+    };
+  }
+
+  function departureReasonLabel(reason) {
+    if (reason === "Leave") return "left the server";
+    if (reason === "Kick") return "was kicked from the server";
+    if (reason === "Ban") return "was banned from the server";
+    return "left or was removed from the server";
+  }
+
+  /**
+   * A full-user hold is meaningful only while the account is a member. Both
+   * the hydrated and raw gateway paths call this function; the per-user lock
+   * and active-state re-check make the duplicate delivery a harmless no-op.
+   */
+  async function handleMemberLeave(memberOrEvent) {
+    const { serverId, userId } = memberIdsFromDeparture(memberOrEvent);
+    if (!isSafeId(serverId) || !isSafeId(userId)) {
+      return { outcome: "invalid_departure" };
+    }
+    return withLock(userHoldLocks, `${serverId}:${userId}`, async () => {
+      const existing = store.getUserHold(serverId, userId);
+      if (!existing?.active) return { outcome: "not_held" };
+
+      const releasedAt = now();
+      const { released, record } = store.releaseUserHold(serverId, userId, {
+        releasedAt,
+        reason: "member_departure",
+      });
+      if (!released) return { outcome: "not_held" };
+
+      const cardDeletes = await Promise.allSettled([
+        deleteCard(record.cardChannelId, record.cardMessageId),
+        deleteCard(record.cardChannelId, record.lastReminderMessageId),
+      ]);
+      if (
+        cardDeletes.some(
+          (result) => result.status === "rejected" || result.value === false
+        )
+      ) {
+        logger.warn?.(
+          `post-gate: departed-user card cleanup incomplete actor=${auditAlias(userId)}`
+        );
+      }
+      const pending = pendingHeldCountFor(serverId, userId);
+      const departure = departureReasonLabel(memberOrEvent?.reason);
+      await sendAccountability(
+        serverId,
+        "📤 Post Gate — Departed User Removed",
+        [
+          `${holdActorLabel(record)} was removed from Post Gate automatically because the account ${departure}.`,
+          "",
+          `**Held by:** ${holdSourceLabel(record)} since ${timestampLabel(record.heldAt)}`,
+          `**Held for:** ${durationLabel(releasedAt - (record.heldAt ?? releasedAt))}`,
+          `**Still queued:** ${pending} held message(s) remain pending individual review; the departure only stops the account-level hold and its reminders.`,
+        ],
+        "#E67E22"
+      );
+      logger.log?.(
+        `🛑  post-gate departed-user-released server=${auditAlias(serverId)} actor=${auditAlias(userId)} reason=${memberOrEvent?.reason ?? "unknown"} pending=${pending}`
+      );
+      return { outcome: "released", pending, record };
+    });
+  }
+
   // ── Review ───────────────────────────────────────────────────
 
   async function notifyReviewOutcome(
@@ -2367,7 +2437,7 @@ export function createPostGate(
       "",
       `React ${RELEASE_EMOJI} to release them, or use \`${commandName()} release <@${record.userId}>\`.`,
       "Releasing restores normal posting straight away. Messages already in the review queue stay queued and are reviewed individually.",
-      "This hold never expires on its own — it ends only when a moderator releases it."
+      "This hold never expires on a timer while the account remains a member. A moderator release or member departure ends it."
     );
     return buildAuditEmbed("🔒 Post Gate — User Held", lines, "#E67E22");
   }
@@ -2383,7 +2453,7 @@ export function createPostGate(
         `**Still queued:** ${pending} held message(s) awaiting review`,
         "",
         `React ${RELEASE_EMOJI} to release them, or ${CONTINUE_EMOJI} to keep holding and be reminded again in ${durationLabel(reminderMs)}.`,
-        "Irminsul never releases a hold by itself; this is a reminder, not a deadline.",
+        "This is a reminder, not a deadline. Irminsul releases the hold automatically only if the member leaves or is removed.",
       ],
       "#E67E22"
     );
@@ -2737,6 +2807,10 @@ export function createPostGate(
   }
 
   async function handleRawEvent(event) {
+    if (event?.type === "ServerMemberLeave") {
+      await handleMemberLeave(event);
+      return;
+    }
     if (event?.type === "ServerUpdate") {
       schedulePermissionReconcile(event.id);
       return;
@@ -3016,6 +3090,7 @@ export function createPostGate(
 
   async function expireOverdue() {
     const current = now();
+    const expiredByServer = new Map();
     for (const record of store.getExpiredPendingPosts(current)) {
       const reviewDeleted = await deleteReviewCard(record);
       if (!reviewDeleted)
@@ -3024,13 +3099,26 @@ export function createPostGate(
         status: "expired",
         reviewedAt: current,
       });
+      const expired = expiredByServer.get(record.serverId) ?? [];
+      expired.push(record);
+      expiredByServer.set(record.serverId, expired);
+    }
+    for (const [serverId, records] of expiredByServer) {
+      const shown = records.slice(0, 20);
+      const omitted = records.length - shown.length;
       await sendAccountability(
-        record.serverId,
-        "⌛ Held Post Expired",
+        serverId,
+        "⌛ Held Posts Expired",
         [
-          `**Queue ID:** \`${record.queueId}\``,
-          `**Author:** ${queueActorLabel(record)}`,
-          "The 7-day review window elapsed with no moderator decision; the content was discarded.",
+          `**Expired:** ${records.length} held post${records.length === 1 ? "" : "s"}`,
+          ...shown.map(
+            (record) => `- \`${record.queueId}\` — ${queueActorLabel(record)}`
+          ),
+          ...(omitted > 0
+            ? [`- …and ${omitted} more expired queue entries`]
+            : []),
+          "",
+          "The 7-day review window elapsed with no moderator decision. The content was discarded with no automod strike.",
         ],
         "#E67E22"
       );
@@ -3103,6 +3191,7 @@ export function createPostGate(
     handleLevelCommand,
     handleMessage,
     handleMemberJoin,
+    handleMemberLeave,
     handleMemberUpdate,
     handleRawEvent,
     handleDirectMessage: gate.handleDirectMessage,
