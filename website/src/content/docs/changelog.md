@@ -17,6 +17,7 @@ description: Major public Irminsul capabilities and documentation milestones.
 - Provisioning is idempotent: it reads the hub server's existing emoji first, so an already-provisioned keyword is reused rather than re-uploaded, and a wiped local registry self-heals from the server's own state on the next run.
 - `/EmojiSetup` only uploads inside the server configured as `EMOJI_HUB_SERVER_ID`; run anywhere else (or with `/EmojiSetup status`), it reports coverage without touching the hub's emoji budget.
 - `custom_emojis.json`, which no code actually read despite being the documented config file, is removed. The 11 previously-provisioned emoji IDs are preserved as a fallback seed.
+- `EMOJI_HUB_SERVER_ID` now defaults to Irminsul's own in-house hub server, so this deployment needs no `.env` change to use `/EmojiSetup`; the variable still overrides it for a different install.
 
 ## Version 3.2.3
 
