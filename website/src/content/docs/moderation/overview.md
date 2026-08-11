@@ -7,7 +7,7 @@ Irminsul moderation is designed around exact permission checks, explicit reasons
 
 Member safety reports use the same protected-record destination but are not moderation actions. A report can raise a staff-review priority when several independent members report the same account, but it never changes the target's account or server state.
 
-Anti-abuse coverage is layered: automod reacts to _behavior_ (message bursts, floods, join surges) that needs several messages to show itself, while the [Post Gate and server levels](/HoYoFetch/moderation/post-gate/) can review a new member's first link/media, a prohibited term, every message from a held member, or place the whole server into lockdown. Holding a post does not change the author's automod strike stage; rejecting it advances the shared four-stage timeout ladder without immediately applying a timeout.
+Anti-abuse coverage is layered but uses one effective server policy. A five-member join surge establishes a persisted 30-minute Level 2 floor; [Post Gate and server levels](/HoYoFetch/moderation/post-gate/) widen targeted link/media checks, while enabled Automod applies the same recent-identity windows to actual message behavior. The surge alone never punishes anyone and never enters lockdown. Post Gate can also review a prohibited term, every message from a held member, or place the whole server into Level 3–4 lockdown. Holding a post does not change the author's automod strike stage; rejecting it advances the shared four-stage timeout ladder without immediately applying a timeout.
 
 ## Before the first action
 

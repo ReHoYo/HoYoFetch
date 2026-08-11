@@ -16,6 +16,7 @@ import {
   getPostGateConfig,
 } from "./store.js";
 import { getAuditDiagnostics } from "./auditlog.js";
+import { resolveModerationPolicy } from "./moderation-policy.js";
 
 const require = createRequire(import.meta.url);
 const APP_VERSION = require("./package.json").version;
@@ -104,7 +105,7 @@ export function buildServerInfoEmbed(client, serverId, overrides = {}) {
     `**Policy:** ${integer(policy.retentionMonths)} months · ${formatInteger(policy.maxMessages)} message installation cap`,
     "",
     "**Features · this server**",
-    `**Moderation level:** ${moderationLevelSummary(postGate)}`,
+    `**Moderation level:** ${moderationLevelSummary(postGate, now)}`,
     `**Auto-fetch:** ${fetchSummary(fetchChannels)}`,
     `**Audit log:** ${featureChannel(audit.enabled, audit.channelId)} · ${auditHealth(audit)}`,
     `**Member events:** ${memberEventHealth(audit.memberEvents)}`,
@@ -235,15 +236,27 @@ function modeChannel(mode = "off", channelId) {
     : label;
 }
 
-function moderationLevelSummary(level) {
+function moderationLevelSummary(level, now) {
   const names = {
     1: "link/media review",
-    2: "link/media review",
+    2: "heightened link/media review",
     3: "lockdown",
     4: "automatic-ban lockdown",
   };
-  const value = Number(level?.level);
-  return names[value] ? `${value} — ${names[value]}` : "off";
+  const policy = resolveModerationPolicy(level, now);
+  const configured = Number(level?.level);
+  if (!names[configured]) {
+    return policy.raidActive
+      ? `off · shared raid policy Level 2 for Automod until ${new Date(policy.raidModeExpiresAt).toISOString()}`
+      : "off";
+  }
+  if (policy.effectiveLevel !== configured) {
+    return `${configured} — ${names[configured]} · effective ${policy.effectiveLevel} — ${names[policy.effectiveLevel]} until ${new Date(policy.raidModeExpiresAt).toISOString()}`;
+  }
+  const raidSuffix = policy.raidActive
+    ? ` · shared raid active until ${new Date(policy.raidModeExpiresAt).toISOString()}`
+    : "";
+  return `${configured} — ${names[configured]}${raidSuffix}`;
 }
 
 function auditHealth(audit) {

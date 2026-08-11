@@ -339,6 +339,7 @@ test("post-gate configuration defaults off and persists mode + review channel", 
     mode: "off",
     level: 0,
     defaultSendLock: null,
+    raidMode: null,
     reviewChannelId: null,
     updatedAt: null,
   });
@@ -368,6 +369,30 @@ test("post-gate configuration defaults off and persists mode + review channel", 
   assert.doesNotThrow(() =>
     JSON.parse(readFileSync(join(dataDir, "post_gate.json"), "utf-8"))
   );
+});
+
+test("shared raid state persists without changing moderator configuration time", () => {
+  const serverId = "server-raid-state";
+  store.setPostGateConfig(serverId, {
+    mode: "hold",
+    level: 1,
+    reviewChannelId: "raid-review",
+  });
+  const before = store.getPostGateConfig(serverId).updatedAt;
+  const raidMode = {
+    startedAt: 1_800_000_000_000,
+    lastRefreshAt: 1_800_000_000_000,
+    expiresAt: 1_800_001_800_000,
+  };
+  store.setPostGateRaidMode(serverId, raidMode);
+  assert.deepEqual(store.getPostGateConfig(serverId).raidMode, raidMode);
+  assert.equal(store.getPostGateConfig(serverId).updatedAt, before);
+  store.setPostGateRaidMode(serverId, {
+    startedAt: 10,
+    lastRefreshAt: 9,
+    expiresAt: 5,
+  });
+  assert.equal(store.getPostGateConfig(serverId).raidMode, null);
 });
 
 test("post-gate queue supports lookup by id and by review message, pending listing, and eviction cleanup", () => {

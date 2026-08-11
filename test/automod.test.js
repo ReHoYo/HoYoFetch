@@ -65,6 +65,15 @@ function makeMemoryStore({ mode = "off", quorum = 2 } = {}) {
         }
       );
     },
+    getPostGateConfig() {
+      return {
+        mode: "hold",
+        level: 1,
+        raidMode: null,
+        reviewChannelId: "REVIEW123",
+        updatedAt: null,
+      };
+    },
     setAutomodConfig(serverId, patch) {
       const previous = this.getAutomodConfig(serverId);
       const current = { ...previous, ...patch, updatedAt: "now" };
@@ -442,24 +451,33 @@ test("expired messages leave the sliding window", () => {
   assert.equal(result.triggered, false);
 });
 
-test("five joins activate raid weighting without punishing on join alone", () => {
-  let now = 1_800_000_000_000;
+test("heightened policy widens identity scoring without adding a raid point", () => {
+  const now = 1_800_000_000_000;
   const detector = new AntiRaidDetector({ now: () => now });
-  let join;
+  let result;
   for (let index = 0; index < 5; index += 1) {
-    join = detector.recordJoin(SERVER_ID, `JOINER${index}`);
-    now += 1_000;
+    result = detector.recordMessage({
+      serverId: SERVER_ID,
+      userId: TARGET_ID,
+      messageId: `HEIGHTENED${index}`,
+      channelId: CHANNEL_ID,
+      content: `message ${index}`,
+      accountCreatedAt: new Date(now - 10 * 24 * 60 * 60 * 1_000),
+      joinedAt: new Date(now - 10 * 24 * 60 * 60 * 1_000),
+      policy: {
+        level: 2,
+        effectiveLevel: 2,
+        recentAccountMs: 14 * 24 * 60 * 60 * 1_000,
+        recentMemberMs: 3 * 24 * 60 * 60 * 1_000,
+        scoreThreshold: 2,
+      },
+    });
   }
-  assert.equal(join.raidActivated, true);
-  const oneMessage = detector.recordMessage({
-    serverId: SERVER_ID,
-    userId: "JOINER4",
-    messageId: "JOINMSG1",
-    channelId: CHANNEL_ID,
-    content: "hello",
-  });
-  assert.equal(oneMessage.signals.joinedDuringRaid, true);
-  assert.equal(oneMessage.triggered, false);
+  assert.equal(result.signals.recentIdentity, true);
+  assert.equal("joinedDuringRaid" in result.signals, false);
+  assert.equal(result.score, 2);
+  assert.equal(result.triggered, true);
+  assert.equal(result.policyLevel, 2);
 });
 
 test("monitor mode records a protected case without member mutations", async () => {
@@ -697,21 +715,4 @@ test("configuration commands are opt-in and keep case quorum snapshots", async (
   const off = await harness.automod.handleCommand(commandMessage, ["off"]);
   assert.match(off.title, /Disabled/);
   assert.equal(harness.store.getAutomodConfig(SERVER_ID).mode, "off");
-});
-
-test("join surge posts one protected warning and performs no moderation", async () => {
-  const harness = makeHarness({ mode: "monitor" });
-  for (let index = 0; index < 5; index += 1) {
-    await harness.automod.handleMemberJoin({
-      id: { server: SERVER_ID, user: `JOINER${index}` },
-      user: {},
-    });
-    harness.clock += 1_000;
-  }
-  assert.equal(harness.protectedLogs.length, 1);
-  assert.match(
-    harness.protectedLogs[0].payload.embeds[0].description,
-    /No member was punished/
-  );
-  assert.equal(harness.requests.length, 0);
 });

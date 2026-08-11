@@ -3,6 +3,16 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Version 3.3.0
+
+### Unified Raid Mode and Post Gate
+
+- Five unique non-bot joins within 60 seconds now activate one shared, persisted Raid Mode when either Post Gate or Automod is enabled. It creates a restart-safe 30-minute effective Level 2 floor, refreshes during continuing bursts, and posts one protected activation and expiry notice to each unique configured review/logger destination.
+- The automatic floor never enables Post Gate, never lowers a manual level, and never automatically enters Level 3 or 4. Post Gate-off/Automod-on installations still receive the shared heightened Automod policy; when both layers are off, joins are not tracked.
+- Level 2 now widens targeted link/media review and Automod's recent-identity point to accounts under 14 days and memberships under 3 days. Ordinary text still flows, Automod retains its score-2 behavioral requirement, and contact/profile screening keeps its narrower 7-day/24-hour privacy boundary.
+- Removed Automod's separate `joined during active raid mode` score point. The join surge itself adds no score, opens no case, and changes no member.
+- `/Level status`, `/Post-Gate status`, `/Automod status`, and `/Server-Info` now distinguish configured and effective policy and show the automatic window and expiry.
+
 ## Version 3.2.4
 
 ### Reward backfill and article-link fallback

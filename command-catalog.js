@@ -242,6 +242,7 @@ export const COMMAND_CATALOG = Object.freeze([
     notes: [
       "Turning the gate on, moving its review channel, and turning it off each require a fresh one-time code sent to Enka#4961.",
       "A message is held when its author is already in Post Gate, when it matches the prohibited-term filter, or when it carries a link or attachment from an account created under 7 days ago, a member who joined under 24 hours ago, or a member with no other archived message in this server.",
+      "At effective Level 2, link/media review widens to accounts under 14 days and members under 3 days. Ordinary text still flows, and contact/profile screening keeps its narrower 7-day/24-hour privacy boundary.",
       "Link checks normalize common spacing, invisible-character, Unicode-punctuation, bracketed-dot, hxxp, domain, and IP obfuscations before deciding whether to hold the original post.",
       "The prohibited-term filter matches whole words and phrases after Unicode, case, invisible-character, homoglyph, and leetspeak normalization, keeps an allowlist for known false positives, and only ever holds — it never bans, times out, or strikes on its own.",
       "The same filter screens usernames, display names, and server nicknames on join, on nickname change, and on every message; a match places the account in full Post Gate automatically, and the offending name is never shown on a card — only the rule id and which field matched.",
@@ -268,7 +269,9 @@ export const COMMAND_CATALOG = Object.freeze([
     ],
     notes: [
       "An Enka-approved Post Gate review channel must be configured first.",
-      "Levels 1 and 2 hold qualifying links/media; Levels 3 and 4 remove Send Messages from the server default role and delete slipped regular-member posts without queueing them.",
+      "Level 1 uses 7-day account/24-hour membership checks. Level 2 uses 14 days/3 days without holding ordinary text; five non-bot joins in 60 seconds establish a persisted 30-minute automatic Level 2 floor.",
+      "The automatic floor never enters Level 3 or 4, never lowers a manual level, and does not enable Post Gate when it is off. `/Level status` distinguishes configured and effective policy.",
+      "Levels 3 and 4 remove Send Messages from the server default role and delete slipped regular-member posts without queueing them.",
       "Irminsul needs Manage Permissions and explicit review-channel View/Send access; trusted staff and bot roles also need explicit Send Messages during lockdown.",
       "Level 4 requires a two-minute invoker-only reaction confirmation and automatically bans authors whose messages reach Irminsul through an explicit permission override.",
     ],
@@ -463,6 +466,10 @@ export const COMMAND_CATALOG = Object.freeze([
       "/Automod quorum 2",
       "/Automod approve CASE_ID",
       "/Automod off",
+    ],
+    notes: [
+      "Automod and Post Gate consume one shared effective server policy. Automod keeps its independent off/monitor/enforce setting and still requires message behavior plus a score of 2.",
+      "Five non-bot joins in 60 seconds activate a persisted 30-minute Level 2 floor when either Automod or Post Gate is enabled; the join surge alone never opens a case or changes a member.",
     ],
   },
 ]);

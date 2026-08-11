@@ -78,6 +78,7 @@ import { createHelpMenu } from "./help-menu.js";
 import { createSpamReporter } from "./spam-report.js";
 import { createChannelExclusion } from "./channel-exclusion.js";
 import { createPostGate } from "./post-gate.js";
+import { createRaidModeCoordinator } from "./raid-mode.js";
 import { DOCS_URL } from "./command-catalog.js";
 import { getCommandDispatch, parseAutoFetchScope } from "./command-routing.js";
 import { buildLookupProbes, resolveAccountLookup } from "./account-lookup.js";
@@ -115,12 +116,17 @@ const tamperProtection = createTamperProtection(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
   request: apiRequest,
 });
+const raidMode = createRaidModeCoordinator({
+  sendProtected: tamperProtection.sendProtected,
+});
 const automod = createAutomod(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
   sendProtected: tamperProtection.sendProtected,
   request: apiRequest,
   shouldExcludeMessage: (message) =>
     postGate?.shouldExcludeMessage(message) ?? false,
+  policyForServer: raidMode.getPolicy,
+  attach: false,
 });
 const moderation = createModeration(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
@@ -157,6 +163,24 @@ postGate = createPostGate(client, {
   approvalGate,
   runIntentionalDelete: tamperProtection.runIntentionalDelete,
   holdReminderMs: CONFIG.postGateHoldReminderMs,
+  policyForServer: raidMode.getPolicy,
+});
+client.on("messageCreate", (message) => {
+  automod
+    .handleMessage(message)
+    .catch((error) =>
+      console.error("automod: message handler failed:", error?.message || error)
+    );
+});
+client.events.on("event", (event) => {
+  automod
+    .handleRawEvent(event)
+    .catch((error) =>
+      console.error(
+        "automod: reaction handler failed:",
+        error?.message || error
+      )
+    );
 });
 client.on("messageCreate", (message) => {
   postGate
@@ -183,6 +207,11 @@ client.events.on("event", (event) => {
 // neither needs a message to surface it, so these get their own listeners
 // alongside the message-based screening above.
 client.on("serverMemberJoin", (member) => {
+  raidMode
+    .handleMemberJoin(member)
+    .catch((error) =>
+      console.error("raid-mode: join handler failed:", error?.message || error)
+    );
   postGate
     .handleMemberJoin(member)
     .catch((error) =>
@@ -257,6 +286,7 @@ client.on("ready", async () => {
   }
 
   approvalGate.resolveApprover();
+  await raidMode.start();
   channelExclusion.startDigest();
   await postGate.reconcilePermissionLocks();
   postGate.startQueuePrune();
