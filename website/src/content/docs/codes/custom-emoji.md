@@ -5,11 +5,13 @@ description: Auto-provision a dedicated Revolt emoji hub for game-themed reward 
 
 Irminsul uses Unicode reward emoji by default. A self-hosted installation can instead render real game icons by pointing Irminsul at a hub server and letting it provision the emoji itself — there is no manual download/upload/copy-the-ID step.
 
+Irminsul's own in-house hub server is already pinned as the default `EMOJI_HUB_SERVER_ID` in `config.js`, so this in-house deployment only needs the bot invited there and `/EmojiSetup` run once. `EMOJI_HUB_SERVER_ID` in `.env` is for pointing a different install at its own hub.
+
 ## Set up an emoji hub
 
 1. Create a dedicated Revolt server, such as “Irminsul Emoji Hub.”
 2. Invite the bot with **Manage Customisation**.
-3. Set `EMOJI_HUB_SERVER_ID` in `.env` to that server's ID.
+3. Set `EMOJI_HUB_SERVER_ID` in `.env` to that server's ID — skip this to use the pinned default hub above.
 4. Run `/EmojiSetup` in that server (or `npm run emoji:provision` on the host). It downloads every icon listed in `emoji-icons.js` and uploads it as a server emoji, then reports what was created, reused, skipped, or failed.
 5. Set `EMOJI_MODE=custom`, or switch at runtime with `/EmojiMode custom`.
 

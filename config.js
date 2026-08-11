@@ -101,7 +101,11 @@ export const CONFIG = {
   hoyoApiBase:
     process.env.HOYO_API_BASE || "https://hoyo-codes.seria.moe/codes",
   emergencyServerId: process.env.EMERGENCY_SERVER_ID || "",
-  emojiHubServerId: process.env.EMOJI_HUB_SERVER_ID || "",
+  // This is Irminsul's own in-house emoji hub — not a secret, just a server
+  // id — so it's pinned here rather than requiring every deployment to set
+  // it. EMOJI_HUB_SERVER_ID still overrides it for a different install.
+  emojiHubServerId:
+    process.env.EMOJI_HUB_SERVER_ID || "01KJ9DNB94BTZ9594Z9YR93H9M",
   stoatApiBase: process.env.STOAT_API_BASE || "https://api.stoat.chat",
   postGateHoldReminderMs: postGateHoldReminderHours * 60 * 60 * 1_000,
 };

@@ -261,10 +261,12 @@ The hoyo-codes API returns an array of `{code, rewards, date, source}`. The enne
 
 You can use custom Revolt server emoji instead of Unicode emoji for reward icons (💎→ actual Primogem icon, etc.). Irminsul provisions these itself — there's no manual download/upload/copy-the-ID chore.
 
+Irminsul's own in-house emoji hub is already pinned as the default `EMOJI_HUB_SERVER_ID` in `config.js`, so a stock deployment needs nothing further here — just invite the bot to that server with **Manage Customisation** and run `/EmojiSetup`. `EMOJI_HUB_SERVER_ID` in `.env` only needs setting to point a different install at its own hub.
+
 ### How it works
 
 1. **Create a server** on Revolt (e.g. "Irminsul Emoji Hub") and invite the bot with **Manage Customisation**
-2. **Set `EMOJI_HUB_SERVER_ID`** in `.env` to that server's ID
+2. **Set `EMOJI_HUB_SERVER_ID`** in `.env` to that server's ID — skip this step to use the pinned default hub above
 3. **Run `/EmojiSetup`** in that server (or `npm run emoji:provision` from the host) — it downloads each icon named in `emoji-icons.js` and uploads it as a server emoji, reporting exactly what succeeded, was skipped, or failed
 4. **Switch rendering** with `/EmojiMode custom`
 
@@ -347,7 +349,7 @@ All settings are in `.env`:
 | `FETCH_INTERVAL`      | `60`                                 | Auto-fetch interval in minutes                                                     |
 | `FETCH_COOLDOWN`      | `10`                                 | Min seconds between manual `/Fetch*` commands per channel (`0` disables)           |
 | `EMOJI_MODE`          | `unicode`                            | Initial emoji mode (`unicode` or `custom`); switchable at runtime via `/EmojiMode` |
-| `EMOJI_HUB_SERVER_ID` | _(required for `/EmojiSetup`)_       | Server Irminsul auto-provisions reward icons onto (needs Manage Customisation)     |
+| `EMOJI_HUB_SERVER_ID` | Irminsul's in-house hub              | Server Irminsul auto-provisions reward icons onto (needs Manage Customisation)     |
 | `HOYO_API_BASE`       | `https://hoyo-codes.seria.moe/codes` | GI/HSR/ZZZ API                                                                     |
 | `HOYOFETCH_DATA_DIR`  | `./data`                             | Where `channels.json` / `known_codes.json` / `source_cache.json` are stored        |
 
@@ -412,6 +414,7 @@ docker run -d --name hoyofetch --restart unless-stopped \
 - Fixed the long-standing "Reward details unavailable" fallback: `hoyo-codes.seria.moe` periodically returns a blank reward field for an otherwise-valid code, and Irminsul now backfills it from a secondary source (ennead for GI/HSR/ZZZ, the Fandom wiki for HI3) by matching code identity, cached and best-effort so a slow or failing secondary never blocks a fetch. When no source has reward text at all, the line now links the game's Game8 (or, for HI3, Fandom) code article instead of a dead end
 - Coerced reward values of any shape (array of strings, array of `{name,count}` objects, number) into a clean display string in one place, fixing a latent crash where an API returning an array for `rewards` could throw inside emoji formatting
 - Reward icons are now auto-provisioned: `/EmojiSetup` (or `npm run emoji:provision`) downloads item icons and uploads them as custom emoji on a configured hub server, replacing the old manual download/upload/copy-the-ID workflow. Re-running it is safe and free — an already-provisioned keyword is reused, never re-uploaded. `custom_emojis.json`, which nothing actually read, is removed
+- `EMOJI_HUB_SERVER_ID` now defaults to Irminsul's own in-house hub server, so this deployment needs no `.env` change to use `/EmojiSetup`; the variable still overrides it for a different install
 
 ### v3.2.3
 
