@@ -296,7 +296,9 @@ export const GAMES = {
     apiParam: "hkrpg",
     name: "Honkai: Star Rail",
     colour: "#FFD700",
-    icon: "https://img-os-static.hoyolab.com/communityWeb/upload/473aee1166b3c22d093ee74c6a4f8e1e.png",
+    // The original img-os-static.hoyolab.com community-upload icon rotted
+    // (404) — swapped for Game8's HSR hub icon, verified reachable.
+    icon: "https://img.game8.co/3642210/daaaa1c27a3ad015412368150d5f712a.png/thumb",
     redeemUrl: "https://hsr.hoyoverse.com/gift?code=",
     source: "seria",
     codesArticleUrl: "https://game8.co/games/Honkai-Star-Rail/archives/410296",
@@ -307,7 +309,8 @@ export const GAMES = {
     apiParam: "nap",
     name: "Zenless Zone Zero",
     colour: "#FF6347",
-    icon: "https://img-os-static.hoyolab.com/communityWeb/upload/1db8126f4554985a3610985bf5a69249.png",
+    // Same rot as hkrpg above — swapped for Game8's ZZZ hub icon.
+    icon: "https://img.game8.co/3804018/ed32cdf4c8269ac713071bb4fb3b2358.png/thumb",
     redeemUrl: "https://zenless.hoyoverse.com/redemption?code=",
     source: "seria",
     codesArticleUrl: "https://game8.co/games/Zenless-Zone-Zero/archives/435683",
@@ -318,7 +321,10 @@ export const GAMES = {
     apiParam: "honkai3rd",
     name: "Honkai Impact 3rd",
     colour: "#9B59B6",
-    icon: "https://img-os-static.hoyolab.com/communityWeb/upload/bbb364aaa7d51897a2c74f16c2a71521.png",
+    // Same rot as above, but Game8 has no HI3 hub to fall back to (its
+    // page 404s) — the official site's favicon is the only verified
+    // fallback found; lower quality than the others but at least live.
+    icon: "https://honkaiimpact3.hoyoverse.com/favicon.ico",
     redeemUrl: null, // HI3 codes must be redeemed in-game
     redeemInstructions: "Account → Exchange Rewards",
     source: "hi3_multi",
