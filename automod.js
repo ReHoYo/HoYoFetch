@@ -4,12 +4,18 @@ import { randomBytes } from "crypto";
 import { parseChannelArg } from "./auditlog.js";
 import { buildStatusEmbed } from "./embeds.js";
 import {
+  DEFAULT_MODERATION_POLICY,
+  RAID_MODE_POLICY,
+  resolveModerationPolicy,
+} from "./moderation-policy.js";
+import {
   createAutomodCase,
   findActiveAutomodCase,
   findAutomodCaseByPromptMessage,
   getAutomodCase,
   getAutomodConfig,
   getAutomodStrike,
+  getPostGateConfig,
   isChannelExcluded,
   pruneAutomodCases,
   setAutomodConfig,
@@ -40,9 +46,9 @@ export const AUTOMOD_LIMITS = Object.freeze({
   mentionWindowMs: 10_000,
   recentAccountMs: 7 * 24 * 60 * 60 * 1_000,
   recentMemberMs: 24 * 60 * 60 * 1_000,
-  joinSurgeCount: 5,
-  joinSurgeWindowMs: 60_000,
-  raidModeMs: 10 * 60 * 1_000,
+  joinSurgeCount: RAID_MODE_POLICY.joinSurgeCount,
+  joinSurgeWindowMs: RAID_MODE_POLICY.joinSurgeWindowMs,
+  raidModeMs: RAID_MODE_POLICY.durationMs,
   timeoutMs: 10 * 60 * 1_000,
   strikeResetMs: 14 * 24 * 60 * 60 * 1_000,
   approvalWindowMs: 10 * 60 * 1_000,
@@ -51,16 +57,6 @@ export const AUTOMOD_LIMITS = Object.freeze({
 
 const MAX_ACTORS = 5_000;
 const MAX_MESSAGES_PER_ACTOR = 40;
-const MAX_JOIN_SERVERS = 1_000;
-const MAX_JOINS_PER_SERVER = 100;
-const MAX_RAID_JOINERS_PER_SERVER = 500;
-const DEFAULT_POLICY = Object.freeze({
-  recentAccountMs: AUTOMOD_LIMITS.recentAccountMs,
-  recentMemberMs: AUTOMOD_LIMITS.recentMemberMs,
-  scoreThreshold: 2,
-  joinSurgeCount: AUTOMOD_LIMITS.joinSurgeCount,
-  raidModeMs: AUTOMOD_LIMITS.raidModeMs,
-});
 
 const DEFAULT_STORE = Object.freeze({
   createAutomodCase,
@@ -69,6 +65,7 @@ const DEFAULT_STORE = Object.freeze({
   getAutomodCase,
   getAutomodConfig,
   getAutomodStrike,
+  getPostGateConfig,
   isChannelExcluded,
   pruneAutomodCases,
   setAutomodConfig,
@@ -148,47 +145,6 @@ export class AntiRaidDetector {
   constructor({ now = Date.now } = {}) {
     this.now = now;
     this.messages = new Map();
-    this.joinStates = new Map();
-  }
-
-  recordJoin(serverId, userId, policy = DEFAULT_POLICY) {
-    const now = this.now();
-    let state = this.joinStates.get(serverId);
-    if (!state) {
-      state = { joins: [], raidUntil: 0, joinedDuringRaid: new Map() };
-      this.joinStates.set(serverId, state);
-      while (this.joinStates.size > MAX_JOIN_SERVERS) {
-        this.joinStates.delete(this.joinStates.keys().next().value);
-      }
-    }
-
-    state.joins = state.joins
-      .filter((entry) => now - entry.at < AUTOMOD_LIMITS.joinSurgeWindowMs)
-      .slice(-(MAX_JOINS_PER_SERVER - 1));
-    state.joins.push({ userId, at: now });
-    for (const [joinedUserId, expiry] of state.joinedDuringRaid) {
-      if (expiry <= now) state.joinedDuringRaid.delete(joinedUserId);
-    }
-
-    let raidActivated = false;
-    if (state.raidUntil <= now && state.joins.length >= policy.joinSurgeCount) {
-      state.raidUntil = now + policy.raidModeMs;
-      raidActivated = true;
-    }
-    if (state.raidUntil > now) {
-      state.joinedDuringRaid.set(userId, state.raidUntil);
-      while (state.joinedDuringRaid.size > MAX_RAID_JOINERS_PER_SERVER) {
-        state.joinedDuringRaid.delete(
-          state.joinedDuringRaid.keys().next().value
-        );
-      }
-    }
-
-    return {
-      raidActivated,
-      raidUntil: state.raidUntil,
-      joinCount: state.joins.length,
-    };
   }
 
   recordMessage({
@@ -200,7 +156,7 @@ export class AntiRaidDetector {
     mentionIds = [],
     accountCreatedAt,
     joinedAt,
-    policy = DEFAULT_POLICY,
+    policy = DEFAULT_MODERATION_POLICY,
   }) {
     const now = this.now();
     const key = `${serverId}:${userId}`;
@@ -232,9 +188,6 @@ export class AntiRaidDetector {
     const uniqueMentions = new Set(
       history.flatMap((entry) => entry.mentionIds)
     );
-    const raidState = this.joinStates.get(serverId);
-    const joinedDuringRaid =
-      (raidState?.joinedDuringRaid.get(userId) ?? 0) > now;
     const recentIdentity = hasRecentIdentitySignal(
       { accountCreatedAt, joinedAt },
       {
@@ -249,7 +202,6 @@ export class AntiRaidDetector {
       duplicateFlood: duplicates.length >= AUTOMOD_LIMITS.duplicateMessages,
       mentionFlood: uniqueMentions.size >= AUTOMOD_LIMITS.uniqueMentions,
       recentIdentity,
-      joinedDuringRaid,
       rapidCount: rapid.length,
       duplicateCount: duplicates.length,
       uniqueMentionCount: uniqueMentions.size,
@@ -260,15 +212,15 @@ export class AntiRaidDetector {
       (signals.rapidBurst ? 1 : 0) +
       (signals.duplicateFlood ? 2 : 0) +
       (signals.mentionFlood ? 2 : 0) +
-      (signals.recentIdentity ? 1 : 0) +
-      (signals.joinedDuringRaid ? 1 : 0);
+      (signals.recentIdentity ? 1 : 0);
 
-    // The behavioural signal stays mandatory at every level: raising the
-    // moderation level lowers how much corroboration one signal needs, but
-    // identity alone can still never trigger containment.
+    // The behavioural signal and score-two threshold stay mandatory at every
+    // level. Level 2 widens only the identity windows; identity alone can
+    // still never trigger containment.
     return {
       triggered: behaviourSignal && score >= policy.scoreThreshold,
       score,
+      policyLevel: policy.effectiveLevel ?? policy.level ?? 1,
       signals,
       messages: history.map((entry) => ({
         messageId: entry.messageId,
@@ -340,7 +292,6 @@ function formatCaseEmbed({
       ? `mention flood (${result.signals.uniqueMentionCount} unique/10s)`
       : null,
     result.signals.recentIdentity ? "recent account or server join" : null,
-    result.signals.joinedDuringRaid ? "joined during active raid mode" : null,
   ].filter(Boolean);
   const actionLines =
     mode === "monitor"
@@ -364,6 +315,7 @@ function formatCaseEmbed({
       `**Case:** \`${caseId}\``,
       `**Target:** <@${userId}>`,
       `**Mode:** ${mode}`,
+      `**Server policy:** Level ${result.policyLevel ?? 1}`,
       `**Score:** ${result.score}`,
       `**Escalation:** strike stage ${escalation.level}/4 (${formatDuration(escalation.durationMs)})${mode === "monitor" ? " projected" : ""}`,
       `**Signals:** ${activeSignals.join(", ")}`,
@@ -404,6 +356,8 @@ export function createAutomod(
     logger = console,
     now = Date.now,
     detector = new AntiRaidDetector({ now }),
+    policyForServer = (serverId) =>
+      resolveModerationPolicy(store.getPostGateConfig(serverId), now()),
     caseIdFactory = createCaseId,
     attach = true,
   } = {}
@@ -702,26 +656,9 @@ export function createAutomod(
       mentionIds: message.mentionIds,
       accountCreatedAt: message.author?.createdAt,
       joinedAt: message.member?.joinedAt,
+      policy: policyForServer(serverId),
     });
     if (result.triggered) await openCase(message, result, config);
-  }
-
-  async function handleMemberJoin(member) {
-    const serverId = member?.id?.server;
-    const userId = member?.id?.user;
-    if (!isSafeId(serverId) || !isSafeId(userId) || member.user?.bot) return;
-    const config = store.getAutomodConfig(serverId);
-    if (config.mode === "off" || !isSafeId(config.logChannelId)) return;
-    const result = detector.recordJoin(serverId, userId);
-    if (!result.raidActivated) return;
-    await postProtected(
-      config.logChannelId,
-      buildStatusEmbed(
-        "🚨 Automod Raid Mode Activated",
-        `${result.joinCount} members joined within 60 seconds. Heightened risk weighting is active for ${AUTOMOD_LIMITS.raidModeMs / 60_000} minutes. **No member was punished by the join surge alone.**`,
-        "#E67E22"
-      )
-    );
   }
 
   async function attemptBan(record) {
@@ -889,9 +826,13 @@ export function createAutomod(
       const channel = config.logChannelId
         ? `<#${config.logChannelId}>`
         : "not configured";
+      const policy = policyForServer(serverId);
+      const raidStatus = policy.raidActive
+        ? `active until ${new Date(policy.raidModeExpiresAt).toISOString()}`
+        : "inactive";
       return buildStatusEmbed(
         "🛡️ Automod Status",
-        `**Mode:** ${config.mode}\n**Logger:** ${channel}\n**Ban quorum:** ${config.quorum}\nAutomod is opt-in and permanent bans always require staff approval.`,
+        `**Mode:** ${config.mode}\n**Logger:** ${channel}\n**Ban quorum:** ${config.quorum}\n**Effective server policy:** Level ${policy.effectiveLevel}\n**Shared Raid Mode:** ${raidStatus}\nAutomod is opt-in, still requires message behavior and a score of ${policy.scoreThreshold}, and permanent bans always require staff approval.`,
         config.mode === "off" ? "#808080" : "#3498DB"
       );
     }
@@ -1028,11 +969,6 @@ export function createAutomod(
         logFailure("message handler failed", error)
       );
     });
-    client.on("serverMemberJoin", (member) => {
-      handleMemberJoin(member).catch((error) =>
-        logFailure("join handler failed", error)
-      );
-    });
     client.events.on("event", (event) => {
       handleRawEvent(event).catch((error) =>
         logFailure("reaction handler failed", error)
@@ -1044,7 +980,6 @@ export function createAutomod(
     approveCase,
     detector,
     handleCommand,
-    handleMemberJoin,
     handleMessage,
     handleRawEvent,
   };

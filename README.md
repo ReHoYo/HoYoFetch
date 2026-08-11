@@ -181,20 +181,22 @@ Signals are heuristics for a moderator to weigh, not proof that an account is a 
 | Level | Policy                                                                                     |
 | ----- | ------------------------------------------------------------------------------------------ |
 | 1     | Review qualifying links/media, prohibited terms, and recent-identity contact solicitations |
-| 2     | Same review policy as Level 1                                                              |
+| 2     | Review qualifying links/media with 14-day account and 3-day membership windows             |
 | 3     | Remove default-role sending and delete slipped posts without creating queue items          |
 | 4     | Apply Level 3 and automatically ban each slipped-message author                            |
 
 Choose the lowest level that matches the current situation:
 
-| Level | Recommended use                                                                                                                                                      |
-| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1     | **Day-to-day protection.** Reviews link or media posts from new and first-time members while normal chat continues.                                                  |
-| 2     | **Elevated watch or a small suspected bot raid.** Currently enforces the same rules as Level 1, but records that moderators intentionally raised the server posture. |
-| 3     | **A large or active raid.** Stops regular members from sending server-wide and deletes anything that slips through, without automatically banning the author.        |
-| 4     | **Emergency lockdown for the most severe raids.** Uses Level 3's message lockdown and also bans non-exempt authors whose messages bypass the permission lock.        |
+| Level | Recommended use                                                                                                                                               |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | **Day-to-day protection.** Reviews link or media posts from new and first-time members while normal chat continues.                                           |
+| 2     | **Elevated watch or a small suspected bot raid.** Widens targeted link/media and Automod identity checks without holding unrelated ordinary text.             |
+| 3     | **A large or active raid.** Stops regular members from sending server-wide and deletes anything that slips through, without automatically banning the author. |
+| 4     | **Emergency lockdown for the most severe raids.** Uses Level 3's message lockdown and also bans non-exempt authors whose messages bypass the permission lock. |
 
-Levels 1–2 reduce common link/media bot spam and review specific text signals; they do not hold unrelated ordinary messages. Level 2 is intentionally behaviorally identical to Level 1 for now; selecting it communicates an elevated posture without silently changing thresholds. Levels 3–4 are disruptive lockdown settings, not everyday filters.
+Levels 1–2 reduce common link/media bot spam and review specific text signals; they do not hold unrelated ordinary messages. Level 1 treats accounts under 7 days and memberships under 24 hours as recent. Level 2 widens only targeted link/media eligibility and Automod's identity risk window to accounts under 14 days and memberships under 3 days; Automod still requires message behavior and the same score of 2. Levels 3–4 are disruptive lockdown settings, not everyday filters.
+
+Five unique non-bot joins within 60 seconds activate **Shared Raid Mode** whenever either Post Gate or Automod is enabled. It persists a 30-minute automatic Level 2 floor, survives a restart, and refreshes during a continuing surge. The effective level is always the higher of this floor and the configured `/Level`, so it never lowers Levels 2–4 and never automatically enters lockdown. `/Level 1` during the window changes the configured baseline but remains effectively Level 2 until expiry; `/Level 2` makes the posture remain after expiry. If Post Gate is off, the window does not enable it, but an enabled Automod still consumes the shared Level 2 policy. If both layers are off, joins are not tracked.
 
 Levels 1–2 normalize common link obfuscations before deciding whether to hold a post. This includes inserted spaces or invisible characters, spaced and `hxxp` protocols, Unicode URL punctuation, bracketed dots, bare domains, and IPv4 addresses; the original message is preserved unchanged for moderator review.
 
@@ -226,9 +228,7 @@ The detector keeps bounded, in-memory message and join windows. It opens a case 
 - 4 normalized duplicates within 10 seconds: 2 points
 - 5 unique mentions within 10 seconds: 2 points
 - Account younger than 7 days or server membership younger than 24 hours: 1 point
-- Joined during heightened raid mode: 1 point
-
-Five joins within 60 seconds activate heightened weighting for 10 minutes and write a warning to the automod logger. A join surge by itself never changes a member. Bots, webhooks, the server owner, and verified moderation staff are excluded. If fresh permission verification is unavailable, an enforcement trigger is downgraded to monitor-only.
+  Shared Raid Mode replaces the old Automod-only `joined during raid` point. During its automatic Level 2 window, the recent-identity point uses the shared 14-day account and 3-day membership windows; the global raid state itself adds no score. A join surge by itself never opens a case or changes a member. Bots and webhooks are excluded from message evaluation, verified moderation staff are exempt from cases, and a failed fresh permission check downgrades enforcement to monitor-only.
 
 In enforcement mode, successful containment advances a persistent, bounded strike-stage ladder: **10 minutes → 1 hour → 24 hours → 7 days**. Further triggers remain capped at seven days, and the ladder resets after 14 quiet days. Monitor mode displays the projected strike stage without changing it. The bot then best-effort deletes the triggering messages and writes a protected evidence record. A successfully contained automod case gets a separate 10-minute ban prompt. Automod case bans are **never automatic**: two distinct authorized staff approvals are required by default, using the 🔨 reaction or `/Automod approve CASE_ID`. `/Level 4` is a separate, explicitly confirmed server-wide policy. `/Automod quorum 1` exists for a one-moderator sandbox; restore it to `2` before production use.
 
@@ -290,6 +290,8 @@ hoyofetch/
 ├── embeds.js           Revolt SendableEmbed builder
 ├── store.js            JSON persistence (channels, codes, audit, automod)
 ├── auditlog.js         Message/member audit event pipeline
+├── moderation-policy.js Shared Post Gate/Automod effective policy
+├── raid-mode.js        Persisted shared join-surge coordinator
 ├── settings-monitor.js Persistent server-setting diff and reconciliation
 ├── tamper-protection.js Always-on protected audit-message restoration
 ├── emergency-lockdown.js VPS-only default Send Messages control
@@ -408,6 +410,12 @@ docker run -d --name hoyofetch --restart unless-stopped \
 ```
 
 ## 📝 Changelog
+
+### v3.3.0
+
+- Unified Automod Raid Mode with Post Gate's server policy: five unique non-bot joins in 60 seconds now establish a persisted, restart-safe 30-minute effective Level 2 floor whenever either layer is enabled, with one protected activation/expiry notice per configured destination and no automatic escalation to Levels 3–4
+- Level 2 now has targeted behavior: qualifying link/media review and Automod's recent-identity point use 14-day account and 3-day membership windows, while ordinary text keeps flowing, Automod still requires behavior plus score 2, and contact/profile screening retains its narrower 7-day/24-hour privacy boundary
+- `/Level status`, `/Post-Gate status`, `/Automod status`, and `/Server-Info` now distinguish configured and effective policy and show the shared raid window; the separate Automod-only `joined during raid` score point has been removed
 
 ### v3.2.4
 

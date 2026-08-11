@@ -1053,10 +1053,28 @@ function normalisePostGateConfig(value = {}) {
               : null,
         }
       : null;
+  const rawRaidMode = value.raidMode;
+  const raidMode =
+    rawRaidMode &&
+    typeof rawRaidMode === "object" &&
+    Number.isFinite(rawRaidMode.startedAt) &&
+    Number.isFinite(rawRaidMode.expiresAt) &&
+    Number.isFinite(rawRaidMode.lastRefreshAt) &&
+    rawRaidMode.startedAt >= 0 &&
+    rawRaidMode.expiresAt > rawRaidMode.startedAt &&
+    rawRaidMode.lastRefreshAt >= rawRaidMode.startedAt &&
+    rawRaidMode.lastRefreshAt < rawRaidMode.expiresAt
+      ? {
+          startedAt: rawRaidMode.startedAt,
+          expiresAt: rawRaidMode.expiresAt,
+          lastRefreshAt: rawRaidMode.lastRefreshAt,
+        }
+      : null;
   return {
     mode,
     level,
     defaultSendLock,
+    raidMode,
     reviewChannelId:
       typeof value.reviewChannelId === "string" ? value.reviewChannelId : null,
     updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : null,
@@ -1081,6 +1099,17 @@ export function setPostGateConfig(serverId, patch = {}) {
     ...patch,
     updatedAt: new Date().toISOString(),
   });
+  postGateConfigs[serverId] = next;
+  writeJSON(POST_GATE_PATH, postGateConfigs);
+  return { previous, current: next };
+}
+
+// Raid Mode shares the Post Gate persistence record but is operational state,
+// not a moderator configuration change. Keep updatedAt stable so a background
+// join surge cannot invalidate an in-progress Level 4 confirmation prompt.
+export function setPostGateRaidMode(serverId, raidMode) {
+  const previous = getPostGateConfig(serverId);
+  const next = normalisePostGateConfig({ ...previous, raidMode });
   postGateConfigs[serverId] = next;
   writeJSON(POST_GATE_PATH, postGateConfigs);
   return { previous, current: next };

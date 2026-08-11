@@ -197,3 +197,26 @@ test("bounds untrusted labels to the Stoat embed limit", () => {
   assert.ok(embed.description.length <= 2000);
   assert.doesNotMatch(embed.description, /x{100}/);
 });
+
+test("shows configured and effective moderation levels during shared raid mode", () => {
+  const embed = buildServerInfoEmbed(
+    fakeClient(),
+    "serverA",
+    diagnostics({
+      postGateConfig: () => ({
+        mode: "hold",
+        level: 1,
+        reviewChannelId: "reviewA",
+        raidMode: {
+          startedAt: NOW - 60_000,
+          lastRefreshAt: NOW - 60_000,
+          expiresAt: NOW + 30 * 60_000,
+        },
+      }),
+    })
+  );
+  assert.match(
+    embed.description,
+    /Moderation level:\*\* 1 — link\/media review · effective 2 — heightened link\/media review until/
+  );
+});

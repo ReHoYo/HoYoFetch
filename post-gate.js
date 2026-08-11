@@ -35,6 +35,7 @@ import { findTargetToken, tokenizeArgs } from "./command-args.js";
 import { buildAuditEmbed, buildStatusEmbed } from "./embeds.js";
 import { matchContactSolicitation } from "./contact-solicitation.js";
 import { countArchivedMessages } from "./message-archive.js";
+import { resolveModerationPolicy } from "./moderation-policy.js";
 import {
   hasPermission,
   PERMISSION_BITS,
@@ -258,6 +259,8 @@ export function createPostGate(
     profileCacheTtlMs = PROFILE_CONTACT_CACHE_TTL_MS,
     profileRetryMs = PROFILE_CONTACT_RETRY_MS,
     profileCacheMaxEntries = PROFILE_CONTACT_CACHE_MAX_ENTRIES,
+    policyForServer = (serverId) =>
+      resolveModerationPolicy(store.getPostGateConfig(serverId), now()),
   } = {}
 ) {
   if (typeof send !== "function") {
@@ -486,13 +489,16 @@ export function createPostGate(
   async function status(message) {
     const serverId = serverIdFrom(message);
     const config = store.getPostGateConfig(serverId);
+    const policy = policyForServer(serverId);
     const pending = gate.getPending(serverId);
     const gatePending = pending?.kind === CHALLENGE_KIND ? pending : null;
     const heldCount = store.getPendingHeldPosts(serverId).length;
     const terms = ensureCompiledTerms();
     const lines = [
       `**Mode:** ${config.mode}`,
-      `**Server level:** ${config.level || "off"}`,
+      `**Configured level:** ${config.level || "off"}`,
+      `**Effective level:** ${config.mode === "hold" ? policy.effectiveLevel : "off"}`,
+      `**Shared Raid Mode:** ${policy.raidActive ? `active until ${new Date(policy.raidModeExpiresAt).toISOString()}` : "inactive"}`,
       `**Default Send Messages lock:** ${permissionLockLabel(config)}`,
       `**Review channel:** ${
         config.reviewChannelId
@@ -517,7 +523,7 @@ export function createPostGate(
       lines.join("\n"),
       config.mode === "hold" ? "#E67E22" : "#3498DB"
     );
-    return { outcome: "status", config, pending: gatePending };
+    return { outcome: "status", config, policy, pending: gatePending };
   }
 
   function configSignature(config) {
@@ -830,6 +836,7 @@ export function createPostGate(
       }
     }
     const { previous, current } = store.setPostGateConfig(serverId, { level });
+    const effectivePolicy = policyForServer(serverId);
     clearLockdownActors(serverId);
 
     const title =
@@ -843,10 +850,16 @@ export function createPostGate(
         ? "Level 4 lockdown is currently enabled. Default Send Messages is locked, slipped posts are automatically denied, and the authors of messages that reach Irminsul are automatically banned. Individual messages are not added to the moderation queue."
         : level === 3
           ? "Lockdown mode is currently enabled. Default Send Messages is locked, and slipped posts are automatically denied to avoid flooding the moderation queue."
-          : "Links and media from new or first-time members will be held for moderator review.";
+          : level === 2
+            ? "Links and media from accounts under 14 days, members under 3 days, or first-time posters will be held for moderator review. Ordinary text continues to flow."
+            : "Links and media from accounts under 7 days, members under 24 hours, or first-time posters will be held for moderator review.";
     const fallbackWarning =
       level >= 3 && !lockdownPreflight?.deletionFallbackAvailable
         ? "Irminsul could not verify Manage Messages in the protected review channel. The permission lock is active, but deletion of any slipped messages is best effort until that permission is granted."
+        : null;
+    const automaticFloorNote =
+      effectivePolicy.effectiveLevel !== current.level
+        ? `Shared Raid Mode keeps the effective policy at Level ${effectivePolicy.effectiveLevel} until ${new Date(effectivePolicy.raidModeExpiresAt).toISOString()}.`
         : null;
 
     await sendAccountability(
@@ -855,8 +868,10 @@ export function createPostGate(
       [
         `**Changed by:** ${actorLabel(actorId)}`,
         `**Previous level:** ${previous.level || "off"}`,
-        `**Current level:** ${current.level}`,
+        `**Configured level:** ${current.level}`,
+        `**Effective level:** ${effectivePolicy.effectiveLevel}`,
         description,
+        ...(automaticFloorNote ? [automaticFloorNote] : []),
         ...(fallbackWarning ? [`⚠️ ${fallbackWarning}`] : []),
       ],
       level >= 3 ? "#E74C3C" : "#E67E22"
@@ -866,15 +881,19 @@ export function createPostGate(
         responseChannelId,
         title,
         fallbackWarning
-          ? `${description}\n\n⚠️ ${fallbackWarning}`
-          : description,
+          ? `${description}${automaticFloorNote ? `\n\n${automaticFloorNote}` : ""}\n\n⚠️ ${fallbackWarning}`
+          : `${description}${automaticFloorNote ? `\n\n${automaticFloorNote}` : ""}`,
         level >= 3 ? "#E74C3C" : "#E67E22"
       );
     }
     logger.log?.(
       `🛑  post-gate level=${level} actor=${auditAlias(actorId)} server=${auditAlias(serverId)}`
     );
-    return { outcome: "level_changed", level };
+    return {
+      outcome: "level_changed",
+      level,
+      effectiveLevel: effectivePolicy.effectiveLevel,
+    };
   }
 
   async function openLevelFourPrompt(message, config) {
@@ -928,6 +947,7 @@ export function createPostGate(
     }
 
     const config = store.getPostGateConfig(serverId);
+    const policy = policyForServer(serverId);
     const [rawAction = "status", rawConfirm, ...extra] = args;
     const action = String(rawAction).toLowerCase();
     if (!args.length || action === "status") {
@@ -935,15 +955,17 @@ export function createPostGate(
         responseChannelId,
         "🛡️ Server Moderation Level",
         [
-          `**Level:** ${config.level || "off"}`,
+          `**Configured level:** ${config.level || "off"}`,
+          `**Effective level:** ${config.mode === "hold" ? policy.effectiveLevel : "off"}`,
+          `**Shared Raid Mode:** ${policy.raidActive ? `active until ${new Date(policy.raidModeExpiresAt).toISOString()}` : "inactive"}`,
           `**Post Gate:** ${config.mode}`,
           `**Review channel:** ${config.reviewChannelId ? channelLabel(config.reviewChannelId) : "not configured"}`,
           `**Default Send Messages lock:** ${permissionLockLabel(config)}`,
-          "Levels 1–2 hold qualifying links/media; Level 3 locks default-role sending and deletes slipped regular-member posts; Level 4 also automatically bans slipped-message authors.",
+          "Level 1 uses 7-day account/24-hour membership checks; Level 2 widens them to 14 days/3 days without holding ordinary text. Level 3 locks default-role sending and Level 4 also automatically bans slipped-message authors.",
         ].join("\n"),
         config.level >= 3 ? "#E74C3C" : "#3498DB"
       );
-      return { outcome: "status", config };
+      return { outcome: "status", config, policy };
     }
 
     if (!["1", "2", "3", "4"].includes(action) || extra.length) {
@@ -984,10 +1006,13 @@ export function createPostGate(
       return { outcome: "post_gate_required" };
     }
     if (config.level === level) {
+      const automaticFloor = policy.raidActive && level === 1;
       await respond(
         responseChannelId,
         "ℹ️ No Change Needed",
-        `Moderation Level ${level} is already enabled.`,
+        automaticFloor
+          ? `Configured Level 1 is already set. Shared Raid Mode keeps the effective policy at Level 2 until ${new Date(policy.raidModeExpiresAt).toISOString()}.`
+          : `Moderation Level ${level} is already enabled.`,
         "#3498DB"
       );
       return { outcome: "no_change", level };
@@ -1516,9 +1541,9 @@ export function createPostGate(
   function classifyTrigger(
     message,
     config,
-    { serverId, channelId, authorId, contactEligible }
+    { serverId, channelId, authorId, contactEligible, policy }
   ) {
-    if (config.level >= 3) return { trigger: "lockdown" };
+    if (policy.effectiveLevel >= 3) return { trigger: "lockdown" };
     if (channelId === config.reviewChannelId) return null;
     if (store.isChannelExcluded(channelId)) return null;
     if (store.isUserHeld(serverId, authorId)) return { trigger: "user_hold" };
@@ -1566,12 +1591,18 @@ export function createPostGate(
     );
   }
 
-  function isFirstPostCandidate(serverId, authorId, message) {
+  function isFirstPostCandidate(serverId, authorId, message, policy) {
     const current = now();
-    const hasRecentIdentity = isRecentIdentityCandidate(
-      authorId,
-      message,
-      current
+    const accountCreatedAt =
+      message.author?.createdAt ?? deriveAccountCreatedAt(authorId);
+    const joinedAt = message.member?.joinedAt ?? null;
+    const hasRecentIdentity = hasRecentIdentitySignal(
+      { accountCreatedAt, joinedAt },
+      {
+        now: current,
+        recentAccountMs: policy.recentAccountMs,
+        recentMemberMs: policy.recentMemberMs,
+      }
     );
     const isFirstMessage = countArchivedMessages({ serverId, authorId }) === 0;
     return hasRecentIdentity || isFirstMessage;
@@ -1870,12 +1901,14 @@ export function createPostGate(
 
     const config = store.getPostGateConfig(serverId);
     if (config.mode !== "hold" || !isSafeId(config.reviewChannelId)) return;
+    const policy = policyForServer(serverId);
     const contactEligible = isRecentIdentityCandidate(authorId, message);
     let classified = classifyTrigger(message, config, {
       serverId,
       channelId,
       authorId,
       contactEligible,
+      policy,
     });
     // The first-post signal is only meaningful for a message actually eligible
     // for a hold on that trigger, so this stays inside the gate rather than
@@ -1883,7 +1916,7 @@ export function createPostGate(
     // synchronously, before the first await below.
     if (
       classified?.trigger === "first_post" &&
-      !isFirstPostCandidate(serverId, authorId, message)
+      !isFirstPostCandidate(serverId, authorId, message, policy)
     ) {
       classified = null;
     }
@@ -2016,10 +2049,11 @@ export function createPostGate(
       return;
     }
     const config = store.getPostGateConfig(serverId);
+    const policy = policyForServer(serverId);
     if (
       config.mode !== "hold" ||
       !isSafeId(config.reviewChannelId) ||
-      config.level >= 3
+      policy.effectiveLevel >= 3
     ) {
       return;
     }
@@ -3040,6 +3074,9 @@ export function createPostGate(
     const config = isSafeId(serverId)
       ? store.getPostGateConfig(serverId)
       : { mode: "off", level: 0 };
+    const policy = isSafeId(serverId)
+      ? policyForServer(serverId)
+      : resolveModerationPolicy(config, now());
     if (config.mode !== "hold") return false;
     // Bio matching is asynchronous. The messageCreate listener above registers
     // a pending decision synchronously for every recent-identity message that
@@ -3047,7 +3084,7 @@ export function createPostGate(
     // share the exact outcome instead of racing the profile request.
     if (
       !canInspectProfile(config, { channelId: channelIdFrom(message) }) &&
-      config.level < 3
+      policy.effectiveLevel < 3
     ) {
       return false;
     }

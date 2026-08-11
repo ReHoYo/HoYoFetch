@@ -14,7 +14,7 @@ The bot persists data needed to avoid duplicate announcements and resume configu
 - audit destinations and server-setting baselines;
 - Enka-approved channel exclusions in `channel_exclusions.json`;
 - automod modes, cases, approvals, strikes, and reversible actions;
-- the post gate's mode, server moderation level, review channel, default-role Send Messages restoration marker, and pending/resolved held-post queue;
+- the post gate's mode, configured server moderation level, review channel, default-role Send Messages restoration marker, shared Raid Mode activation/refresh/expiry timestamps, and pending/resolved held-post queue;
 - full-user Post Gate holds in `post_gate_user_holds.json` — who was held, which moderator held them, when the hold began and which queue entry caused it, when the next reminder is due, and who released them and when. A released hold is kept for 7 days as an audit record and then dropped;
 - bounded spam-report correlation metadata without member-supplied reasons; and
 - protected-message records needed to restore deleted audit entries.

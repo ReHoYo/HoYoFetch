@@ -64,6 +64,7 @@ function makeStore() {
           mode: "off",
           level: 0,
           defaultSendLock: null,
+          raidMode: null,
           reviewChannelId: null,
           updatedAt: null,
         }
@@ -916,6 +917,128 @@ test("moderation level 2 still exempts an established member", async () => {
 
   assert.equal(harness.deletedMessageIds.length, 0);
   assert.equal(harness.store.queue.size, 0);
+});
+
+test("level 2 widens targeted link review to 14-day accounts and 3-day members", async () => {
+  const cases = [
+    {
+      id: "MSGLEVEL2ACCOUNTWINDOW",
+      userId: "LEVEL2ACCOUNTUSER",
+      createdAt: new Date(1_800_000_000_000 - 10 * 24 * 60 * 60 * 1_000),
+      joinedAt: new Date(1_800_000_000_000 - 30 * 24 * 60 * 60 * 1_000),
+    },
+    {
+      id: "MSGLEVEL2MEMBERWINDOW",
+      userId: "LEVEL2MEMBERUSER",
+      createdAt: new Date(1_800_000_000_000 - 400 * 24 * 60 * 60 * 1_000),
+      joinedAt: new Date(1_800_000_000_000 - 2 * 24 * 60 * 60 * 1_000),
+    },
+  ];
+
+  for (const entry of cases) {
+    const harness = makeHarness();
+    await enableHold(harness);
+    recordMessage({
+      id: `PRIOR${entry.id}`,
+      channelId: SOURCE_CHANNEL_ID,
+      serverId: SERVER_ID,
+      authorId: entry.userId,
+      content: "an earlier message",
+      createdAt: Date.now() - 90 * 24 * 60 * 60 * 1_000,
+    });
+
+    await harness.postGate.handleMessage(
+      newAccountMessage({
+        id: `LEVEL1${entry.id}`,
+        authorId: entry.userId,
+        content: "https://example.com",
+        createdAt: entry.createdAt,
+        joinedAt: entry.joinedAt,
+      })
+    );
+    assert.equal(harness.deletedMessageIds.length, 0);
+
+    harness.store.setPostGateConfig(SERVER_ID, { level: 2 });
+    await harness.postGate.handleMessage(
+      newAccountMessage({
+        id: entry.id,
+        authorId: entry.userId,
+        content: "https://example.com",
+        createdAt: entry.createdAt,
+        joinedAt: entry.joinedAt,
+      })
+    );
+    assert.deepEqual(harness.deletedMessageIds, [entry.id]);
+  }
+});
+
+test("level 2 does not widen contact screening beyond 7 days and 24 hours", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  harness.store.setPostGateConfig(SERVER_ID, { level: 2 });
+
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGLEVEL2CONTACTBOUNDARY",
+      authorId: "LEVEL2CONTACTUSER",
+      content: "DM me on Discord",
+      createdAt: new Date(1_800_000_000_000 - 10 * 24 * 60 * 60 * 1_000),
+      joinedAt: new Date(1_800_000_000_000 - 2 * 24 * 60 * 60 * 1_000),
+    })
+  );
+
+  assert.equal(harness.deletedMessageIds.length, 0);
+  assert.equal(harness.profileRequests.length, 0);
+  assert.equal(harness.store.isUserHeld(SERVER_ID, "LEVEL2CONTACTUSER"), false);
+});
+
+test("level status distinguishes configured and automatic effective policy", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  harness.store.setPostGateConfig(SERVER_ID, {
+    raidMode: {
+      startedAt: 1_800_000_000_000,
+      lastRefreshAt: 1_800_000_000_000,
+      expiresAt: 1_800_001_800_000,
+    },
+  });
+
+  const result = await harness.postGate.handleLevelCommand(
+    reviewCommandMessage(),
+    ["status"]
+  );
+  assert.equal(result.config.level, 1);
+  assert.equal(result.policy.effectiveLevel, 2);
+  const description = harness.sendCalls.at(-1).payload.embeds[0].description;
+  assert.match(description, /Configured level:\*\* 1/);
+  assert.match(description, /Effective level:\*\* 2/);
+  assert.match(description, /Shared Raid Mode:\*\* active until/);
+});
+
+test("setting Level 1 during shared Raid Mode changes only the configured baseline", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  harness.store.setPostGateConfig(SERVER_ID, {
+    level: 2,
+    raidMode: {
+      startedAt: 1_800_000_000_000,
+      lastRefreshAt: 1_800_000_000_000,
+      expiresAt: 1_800_001_800_000,
+    },
+  });
+
+  const result = await harness.postGate.handleLevelCommand(
+    reviewCommandMessage(),
+    ["1"]
+  );
+  assert.equal(result.outcome, "level_changed");
+  assert.equal(result.level, 1);
+  assert.equal(result.effectiveLevel, 2);
+  assert.equal(harness.store.getPostGateConfig(SERVER_ID).level, 1);
+  assert.match(
+    harness.sendCalls.at(-1).payload.embeds[0].description,
+    /keeps the effective policy at Level 2/
+  );
 });
 
 test("never gates a privacy-excluded channel", async () => {

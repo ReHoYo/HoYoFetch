@@ -27,10 +27,11 @@ A case opens at two points when at least one message-behavior signal is present:
 - 5 messages within 5 seconds: **1 point**
 - 4 normalized duplicates within 10 seconds: **2 points**
 - 5 unique mentions within 10 seconds: **2 points**
-- Account younger than 7 days or membership younger than 24 hours: **1 point**
-- Joined during heightened raid mode: **1 point**
+- Recent identity under the effective server policy: **1 point**
 
-Five joins within 60 seconds activate heightened weighting for ten minutes and create a warning. A join surge alone never changes a member. Bots, webhooks, the server owner, and verified moderation staff are excluded.
+At Level 1, recent identity means an account under 7 days or membership under 24 hours. At Level 2, it widens to an account under 14 days or membership under 3 days. The score threshold remains 2 at both levels, a behavioral signal remains mandatory, and the shared raid state itself adds no point.
+
+Five unique non-bot joins within 60 seconds activate [Shared Raid Mode](/HoYoFetch/moderation/post-gate/#shared-raid-mode) for 30 minutes when either Automod or Post Gate is enabled. The effective Level 2 policy survives restarts and is also consumed by Automod when Post Gate is off. A join surge alone never opens a case or changes a member. Bots and webhooks are excluded from message evaluation; the server owner and freshly verified moderation staff are exempt from cases.
 
 ## Containment strike stages
 
