@@ -156,13 +156,13 @@ Automatic cards show **Irminsul (automatic screening)** instead of a moderator, 
 
 The hold is **idempotent**: denying or automatically matching the same author again reports the existing hold, leaves its original source and time untouched, and never posts a second card. Two simultaneous triggers produce one hold, not two.
 
-State is stored on disk alongside the rest of Irminsul's moderation state, so a hold survives a bot restart — including its control card, which keeps working — and survives the member leaving and rejoining, because it is keyed on the server and the account rather than on membership. Turning the post gate off leaves hold records inert; re-enabling it honours them again. Moving the review channel reposts every control card into the new one.
+State is stored on disk alongside the rest of Irminsul's moderation state, so a hold survives a bot restart — including its control card, which keeps working. A member leaving, being kicked, or being banned automatically deactivates the account-level hold and removes its control and reminder cards. Already queued messages remain pending for individual review. Turning the post gate off leaves hold records inert; re-enabling it honours them again. Moving the review channel reposts every control card into the new one.
 
 `/Post-Gate holds` lists who is currently gated, who held them, since when, and how many of their messages are still queued.
 
 ### Reminders
 
-A hold **never expires and is never released automatically**. After 24 hours — configurable with `POST_GATE_HOLD_REMINDER_HOURS` (1–168) — Irminsul posts a reminder to the review channel with 🔓 Release and ⏳ Continue Holding. Choosing ⏳ re-arms the clock for another window. Ignoring the reminder simply repeats it one window later, not once per sweep. Reminders ride the same hourly maintenance pass as queue expiry, so one lands within an hour of coming due, and the due time is stored absolutely — a restart does not reset it.
+A hold **never expires on a timer while the account remains a member**. After 24 hours — configurable with `POST_GATE_HOLD_REMINDER_HOURS` (1–168) — Irminsul posts a reminder to the review channel with 🔓 Release and ⏳ Continue Holding. Choosing ⏳ re-arms the clock for another window. Ignoring the reminder simply repeats it one window later, not once per sweep. Reminders ride the same hourly maintenance pass as queue expiry, so one lands within an hour of coming due, and the due time is stored absolutely — a restart does not reset it. A member departure ends the account-level hold automatically instead of leaving moderators with a stale reminder.
 
 ### Releasing
 
@@ -290,7 +290,7 @@ If the queue entry predates author-id capture, the post is still denied but no h
 
 ### Expiry
 
-An unreviewed hold expires after **7 days**: the review card and its Stoat media are deleted, the queued content is discarded with no strike, and a notice is posted to the review channel.
+An unreviewed hold expires after **7 days**: the review card and its Stoat media are deleted and the queued content is discarded with no strike. All entries expiring in the same hourly sweep are listed in one review-channel notice per server.
 
 :::note[Reversible by design]
 A held post never remains visible while awaiting review. Its retained copy is discarded after an
@@ -298,7 +298,8 @@ approval, discarded with a recorded strike after a rejection, or discarded after
 decision. Review needs only one moderator because approval clears the author and rejection only
 changes future escalation; neither applies a timeout or permanent ban itself.
 
-A full-user hold is reversible on the same terms. It is never applied automatically — only a
-moderator pressing 🔒 creates one — it never expires or releases on its own, and one 🔓 ends it.
+A full-user hold is reversible on the same terms. It may be created by a moderator or automatic
+screening, never expires on a timer while the account remains a member, and one 🔓 ends it. A
+member departure ends the account-level hold automatically.
 The prohibited-term filter likewise only ever holds a message for someone to read.
 :::

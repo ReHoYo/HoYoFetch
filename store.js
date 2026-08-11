@@ -1204,7 +1204,7 @@ export function prunePostGateQueue(now = Date.now()) {
 // message from that member is held until a moderator releases them. The state
 // lives here rather than in memory so it survives a restart, and it is keyed
 // "serverId:userId" — the same convention automod_strikes.json uses — so
-// leaving and rejoining the server changes nothing.
+// a member departure deactivates the hold while preserving its audit record.
 
 const MAX_USER_HOLDS = 1_000;
 const STORE_SAFE_ID = /^[A-Za-z0-9]+$/;

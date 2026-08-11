@@ -3,6 +3,13 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Version 3.3.1
+
+### Post Gate departure cleanup and quieter expiry reporting
+
+- Fixed full-user Post Gate holds surviving after the member left, was kicked, or was banned. Any member-departure event now deactivates the account-level hold, removes its control and reminder cards, and records one protected cleanup notice; already queued messages remain available for individual review.
+- The hourly queue sweep now consolidates every held post that expires for a server into one protected notice instead of posting one card per queue entry. Each item is still discarded after seven days with no automod strike.
+
 ## Version 3.3.0
 
 ### Unified Raid Mode and Post Gate
