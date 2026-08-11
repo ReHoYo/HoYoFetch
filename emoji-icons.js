@@ -26,15 +26,22 @@
 // otherwise be exceeded: 1 = premium/soft currency, 2 = EXP/upgrade
 // materials, 3 = stamina/energy/consumables. Lower tiers provision first.
 
-// Neither Game8 nor a reachable Fandom media endpoint has per-item icons
-// for Honkai Impact 3rd (Game8 has no active HI3 hub at all) or for HSR's
-// "Adventure Log" (no dedicated Game8 page). These fall back to the game's
-// own icon — already a real, working URL (see GAMES[*].icon in config.js)
-// — rather than a guessed filename that would just add another 403/404.
-const HI3_FALLBACK_ICON =
-  "https://img-os-static.hoyolab.com/communityWeb/upload/bbb364aaa7d51897a2c74f16c2a71521.png";
+// No dedicated Game8 page carries an icon for HSR's "Adventure Log" —
+// falls back to Game8's HSR hub icon (verified reachable) rather than a
+// guessed filename that would just add another 404.
 const HSR_FALLBACK_ICON =
-  "https://img-os-static.hoyolab.com/communityWeb/upload/473aee1166b3c22d093ee74c6a4f8e1e.png";
+  "https://img.game8.co/3642210/daaaa1c27a3ad015412368150d5f712a.png/thumb";
+
+// Honkai Impact 3rd has NO manifest entries at all: Game8 has no active
+// hub for the game (its page 404s), Fandom's media endpoint is blocked
+// (see above), and every img-os-static.hoyolab.com community-upload icon
+// tried for it has rotted (404, confirmed with a HEAD request) — including
+// the one GAMES.honkai3rd.icon used to point at (config.js now uses the
+// official site's favicon there instead, a lower-risk fallback for a
+// plain embed <img> than for something Autumn has to store as an emoji).
+// HI3 reward keywords simply render via their Unicode fallback in custom
+// mode too, since getEmojiMap() merges Unicode for any unprovisioned
+// keyword — add real entries here if a reliable source ever turns up.
 
 export const EMOJI_ICON_MANIFEST = [
   // ── Genshin Impact ──────────────────────────────
@@ -154,18 +161,7 @@ export const EMOJI_ICON_MANIFEST = [
     tier: 3,
     url: "https://img.game8.co/3893767/6c55ed4353a05bf13114f2049640b594.png/show",
   },
-  // ── Honkai Impact 3rd (see HI3_FALLBACK_ICON above) ─────
-  { keyword: "crystal", name: "crystal", tier: 1, url: HI3_FALLBACK_ICON },
-  { keyword: "asterite", name: "asterite", tier: 1, url: HI3_FALLBACK_ICON },
-  {
-    keyword: "stamina potion",
-    name: "stamina_potion",
-    tier: 3,
-    url: HI3_FALLBACK_ICON,
-  },
-  { keyword: "coin", name: "hi3_coin", tier: 2, url: HI3_FALLBACK_ICON },
-  { keyword: "stamina", name: "stamina", tier: 3, url: HI3_FALLBACK_ICON },
-  { keyword: "mithril", name: "mithril", tier: 2, url: HI3_FALLBACK_ICON },
+  // Honkai Impact 3rd: intentionally no entries — see the comment above.
   // ── Neverness to Everness ───────────────────────
   {
     keyword: "annulith",
