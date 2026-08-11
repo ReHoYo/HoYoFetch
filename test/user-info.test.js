@@ -332,6 +332,18 @@ test("parseUserInfoCommand prefers a mention over a bare ULID in the same messag
   });
 });
 
+test("parseUserInfoCommand accepts a bare full-length account ID anywhere in the arguments, not only first", () => {
+  const result = parseUserInfoCommand([
+    "please",
+    "check",
+    "01HZY3M6Q8V7N2K4J5T9W0XAAA",
+  ]);
+  assert.deepEqual(result, {
+    ok: true,
+    targetId: "01HZY3M6Q8V7N2K4J5T9W0XAAA",
+  });
+});
+
 test("collectUserInfo leaves the message count null when no archive is supplied (join-log path)", () => {
   const client = makeClientWithUser(OLD_USER_ID);
   let archiveCalls = 0;

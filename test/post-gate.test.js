@@ -1606,6 +1606,31 @@ function useOperatorTerms(harness, { terms = [], allowlist = [] } = {}) {
   harness.postGate.reloadProhibitedTerms();
 }
 
+// Attaches a username/display name/nickname to an otherwise ordinary test
+// message, for the prohibited-term identity screener.
+function withIdentity(message, { username, displayName, nickname } = {}) {
+  return {
+    ...message,
+    author: { ...message.author, username, displayName },
+    member: { ...message.member, nickname },
+  };
+}
+
+// Shape of a revolt.js ServerMember, as delivered to serverMemberJoin/Update.
+function memberObject({
+  userId,
+  username,
+  displayName,
+  nickname,
+  bot = false,
+} = {}) {
+  return {
+    id: { server: SERVER_ID, user: userId },
+    user: { username, displayName, bot },
+    nickname,
+  };
+}
+
 const reviewCommandMessage = (authorId = MOD_USER_ID) => ({
   server: { id: SERVER_ID },
   channelId: REVIEW_CHANNEL_ID,
@@ -1640,10 +1665,7 @@ test("a contact solicitation automatically holds a recent-identity account witho
     harness.store.getAutomodStrike(SERVER_ID, ESTABLISHED_USER_ID),
     null
   );
-  assert.match(
-    JSON.stringify(harness.protectedLogs),
-    /automatic contact screening/
-  );
+  assert.match(JSON.stringify(harness.protectedLogs), /automatic screening/);
 });
 
 test("contact screening accepts either recent-account or recent-membership identity risk", async () => {
@@ -2147,6 +2169,195 @@ test("prohibited-term matching never punishes on its own — no strike is record
   assert.equal(harness.store.getAutomodStrike(SERVER_ID, NEW_USER_ID), null);
   assert.equal(harness.bans.length, 0);
   assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), false);
+});
+
+// ══════════════════════════════════════════════════════════════
+//  Prohibited-term identity screening (username/display name/nickname)
+// ══════════════════════════════════════════════════════════════
+
+for (const [index, [surface, field]] of [
+  ["username", "username"],
+  ["display_name", "displayName"],
+  ["nickname", "nickname"],
+].entries()) {
+  test(`a prohibited term used as a ${surface} holds the message, places a full Post Gate hold, and never repeats the name`, async () => {
+    const harness = makeHarness();
+    await enableHold(harness);
+    useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+
+    await harness.postGate.handleMessage(
+      withIdentity(
+        newAccountMessage({
+          id: `MSGIDENTITY${index}`,
+          content: "hello there",
+        }),
+        { [field]: `raid_${OPERATOR_TERM}` }
+      )
+    );
+
+    const [record] = [...harness.store.queue.values()];
+    assert.equal(record.trigger, "prohibited_identity");
+    assert.equal(record.triggerSurface, surface);
+
+    const hold = harness.store.getUserHold(SERVER_ID, NEW_USER_ID);
+    assert.equal(hold.active, true);
+    assert.equal(hold.holdSource, "automatic");
+    assert.equal(hold.triggerSurface, surface);
+    assert.equal(hold.triggerRuleId, record.ruleId);
+
+    const cardText = JSON.stringify(harness.protectedLogs);
+    assert.equal(
+      cardText.includes(OPERATOR_TERM),
+      false,
+      "a review or control card must never repeat the offending name"
+    );
+    assert.match(cardText, /prohibited-term filter \(username\/nickname\)/);
+  });
+}
+
+test("an allowlisted identity is not held", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, {
+    terms: [OPERATOR_TERM],
+    allowlist: [`ok_${OPERATOR_TERM}`],
+  });
+
+  await harness.postGate.handleMessage(
+    withIdentity(newAccountMessage({ id: "MSGIDENTITYALLOW1" }), {
+      username: `ok_${OPERATOR_TERM}`,
+    })
+  );
+
+  assert.equal(harness.store.queue.size, 0);
+  assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), false);
+});
+
+test("joining with a prohibited-term username places a full Post Gate hold without any message", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+
+  await harness.postGate.handleMemberJoin(
+    memberObject({ userId: NEW_USER_ID, username: `raid_${OPERATOR_TERM}` })
+  );
+
+  const hold = harness.store.getUserHold(SERVER_ID, NEW_USER_ID);
+  assert.equal(hold.active, true);
+  assert.equal(hold.holdSource, "automatic");
+  assert.equal(hold.triggerSurface, "username");
+  assert.equal(harness.store.queue.size, 0);
+});
+
+test("joining with a clean username does not create a hold", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+
+  await harness.postGate.handleMemberJoin(
+    memberObject({ userId: NEW_USER_ID, username: "ordinary_name" })
+  );
+
+  assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), false);
+});
+
+test("a bot account is never identity-screened on join", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+
+  await harness.postGate.handleMemberJoin(
+    memberObject({
+      userId: BOT_ID,
+      username: `raid_${OPERATOR_TERM}`,
+      bot: true,
+    })
+  );
+
+  assert.equal(harness.store.isUserHeld(SERVER_ID, BOT_ID), false);
+});
+
+test("a recognized moderator with a matching username is exempt on join", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+
+  await harness.postGate.handleMemberJoin(
+    memberObject({ userId: MOD_USER_ID, username: `raid_${OPERATOR_TERM}` })
+  );
+
+  assert.equal(harness.store.isUserHeld(SERVER_ID, MOD_USER_ID), false);
+});
+
+test("identity screening on join requires hold mode and does nothing below level 3 gating rules", async () => {
+  const harness = makeHarness();
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+  // Post Gate was never enabled — mode defaults to "off".
+
+  await harness.postGate.handleMemberJoin(
+    memberObject({ userId: NEW_USER_ID, username: `raid_${OPERATOR_TERM}` })
+  );
+
+  assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), false);
+});
+
+test("changing a nickname to a prohibited term places a full Post Gate hold", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+
+  await harness.postGate.handleMemberUpdate(
+    memberObject({ userId: NEW_USER_ID, nickname: `raid_${OPERATOR_TERM}` }),
+    memberObject({ userId: NEW_USER_ID, nickname: null })
+  );
+
+  const hold = harness.store.getUserHold(SERVER_ID, NEW_USER_ID);
+  assert.equal(hold.active, true);
+  assert.equal(hold.triggerSurface, "nickname");
+});
+
+test("a member update that does not change the nickname is ignored, even with a matching username", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+
+  const before = memberObject({
+    userId: NEW_USER_ID,
+    username: `raid_${OPERATOR_TERM}`,
+    nickname: "same",
+  });
+  const after = memberObject({
+    userId: NEW_USER_ID,
+    username: `raid_${OPERATOR_TERM}`,
+    nickname: "same",
+  });
+  await harness.postGate.handleMemberUpdate(after, before);
+
+  // Only a nickname change is screened here; a stale username on an
+  // unrelated update is left to the next message, exactly as documented.
+  assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), false);
+});
+
+test("an account already held is left alone by member-join and member-update screening", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+  harness.store.createUserHold({
+    serverId: SERVER_ID,
+    userId: NEW_USER_ID,
+    heldAt: 1,
+    heldBy: "SOMEMOD",
+    holdSource: "manual",
+  });
+
+  await harness.postGate.handleMemberJoin(
+    memberObject({ userId: NEW_USER_ID, username: `raid_${OPERATOR_TERM}` })
+  );
+
+  // Still exactly the original manual hold — no automatic hold overwrote it.
+  const hold = harness.store.getUserHold(SERVER_ID, NEW_USER_ID);
+  assert.equal(hold.holdSource, "manual");
+  assert.equal(hold.heldBy, "SOMEMOD");
 });
 
 // ══════════════════════════════════════════════════════════════

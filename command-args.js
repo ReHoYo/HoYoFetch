@@ -3,13 +3,22 @@
 import { isSafeId } from "./security.js";
 
 const MENTION_PATTERN = /^<@!?([A-Za-z0-9]+)>$/;
-// Stoat IDs are ULIDs. isSafeId() alone accepts any alphanumeric word, so a
-// bare ID is only recognized mid-sentence when it has the full ULID shape.
+// Stoat IDs are ULIDs (26 characters). This is used for account-age
+// derivation, not for target parsing — see ACCOUNT_ID_PATTERN below for that.
 export const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 // A bare leading token is only read as a user ID when it is long and carries a
 // digit or capital, so `/Kick for raiding` asks for a member instead of trying
 // to moderate someone called "for".
 export const BARE_ID_PATTERN = /^(?=.{8,})(?=.*[0-9A-Z])[A-Za-z0-9]+$/;
+// A bare token *anywhere else* in the sentence is only read as a user ID when
+// it is at least as long as a real Stoat account ID (26 characters) and
+// carries a digit or capital. Previously this required the strict Crockford
+// ULID shape, so a moderator who wrapped a valid ID in `<@…>` could target it
+// from anywhere in the sentence, but the same bare ID mid-sentence was
+// rejected with an error that told them a user ID should have worked. A
+// 20-character floor comfortably covers every real account ID while staying
+// well above anything an ordinary reason word reaches.
+export const ACCOUNT_ID_PATTERN = /^(?=.{20,})(?=.*[0-9A-Z])[A-Za-z0-9]+$/;
 // Leading filler between the member and the reason, so `/Ban @member for
 // spamming` records "spamming" rather than "for spamming".
 const REASON_PREFIX_PATTERN =
@@ -26,7 +35,8 @@ export function tokenizeArgs(args = []) {
 
 /**
  * Locate the member being acted on anywhere in the sentence. A mention wins
- * over a bare ULID so `/Ban 01ABC… @member for spam` targets the mention.
+ * over a bare account ID so `/Ban 01ABC… @member for spam` targets the
+ * mention.
  */
 export function findTargetToken(tokens) {
   for (const [index, token] of tokens.entries()) {
@@ -36,7 +46,9 @@ export function findTargetToken(tokens) {
     }
   }
   for (const [index, token] of tokens.entries()) {
-    if (ULID_PATTERN.test(token)) return { targetId: token, index };
+    if (ACCOUNT_ID_PATTERN.test(token) && isSafeId(token)) {
+      return { targetId: token, index };
+    }
   }
   return null;
 }

@@ -464,6 +464,62 @@ test("fresh snapshots authorize every moderator capability for manager commands"
   assert.equal(refreshed.reason, "moderator");
 });
 
+test("SERVER_MODERATOR passes every server moderation permission and admin, but never channel-only Manage Messages", async () => {
+  for (const permission of ["KickMembers", "BanMembers", "TimeoutMembers"]) {
+    const message = makeMessage({ serverPermissions: [permission] });
+    assert.equal(
+      authorizeCommand(message, COMMAND_ACCESS.SERVER_MODERATOR).reason,
+      "moderator",
+      permission
+    );
+  }
+  assert.equal(
+    authorizeCommand(
+      makeMessage({ owner: true }),
+      COMMAND_ACCESS.SERVER_MODERATOR
+    ).allowed,
+    true
+  );
+
+  // The load-bearing distinction from FETCH_MANAGER: a grant that only holds
+  // in one channel — such as a review channel's default permissions — must
+  // not exempt an otherwise ordinary member from server-wide identity
+  // screening (see post-gate.js's screenIdentity).
+  const channelOnly = makeMessage({ channelPermissions: ["ManageMessages"] });
+  assert.equal(
+    authorizeCommand(channelOnly, COMMAND_ACCESS.SERVER_MODERATOR).allowed,
+    false
+  );
+
+  const channelSnapshots = makePermissionSnapshots({
+    memberRoles: ["CHANNELMOD"],
+    roles: {
+      CHANNELMOD: {
+        name: "Channel Moderator",
+        rank: 1,
+        permissions: { a: 0, d: 0 },
+      },
+    },
+    channelRoles: {
+      CHANNELMOD: { a: PERMISSIONS.ManageMessages, d: 0 },
+    },
+  });
+  const cached = authorizeCommand(
+    makeMessage(),
+    COMMAND_ACCESS.SERVER_MODERATOR
+  );
+  const refreshed = await refreshCommandAuthorization(
+    makeRefreshClient(channelSnapshots),
+    cached,
+    COMMAND_ACCESS.SERVER_MODERATOR
+  );
+  assert.equal(
+    refreshed.allowed,
+    false,
+    "a channel-only Manage Messages grant must not satisfy SERVER_MODERATOR even after a fresh refresh"
+  );
+});
+
 test("timeouts, malformed snapshots, cross-server data, and API failures fail closed", async () => {
   const timedOut = makePermissionSnapshots({
     defaultPermissions: PERMISSIONS.ManageServer,

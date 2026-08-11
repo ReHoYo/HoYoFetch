@@ -225,6 +225,7 @@ export const COMMAND_CATALOG = Object.freeze([
       "A message is held when its author is already in Post Gate, when it matches the prohibited-term filter, or when it carries a link or attachment from an account created under 7 days ago, a member who joined under 24 hours ago, or a member with no other archived message in this server.",
       "Link checks normalize common spacing, invisible-character, Unicode-punctuation, bracketed-dot, hxxp, domain, and IP obfuscations before deciding whether to hold the original post.",
       "The prohibited-term filter matches whole words and phrases after Unicode, case, invisible-character, homoglyph, and leetspeak normalization, keeps an allowlist for known false positives, and only ever holds — it never bans, times out, or strikes on its own.",
+      "The same filter screens usernames, display names, and server nicknames on join, on nickname change, and on every message; a match places the account in full Post Gate automatically, and the offending name is never shown on a card — only the rule id and which field matched.",
       "`/Post-Gate terms` reports the active term list and reloads `prohibited_terms.json` from the data directory without a restart; `/Post-Gate holds` lists the members currently in Post Gate.",
       "Recognized moderators are always exempt, and privacy-excluded channels are never queued at Levels 1–2.",
     ],
@@ -298,10 +299,11 @@ export const COMMAND_CATALOG = Object.freeze([
     examples: [
       "/Ban @member for spamming and stuff",
       "/Ban 01ABCDEFGHJKMNPQRSTVWXYZ12 for coordinating a raid",
+      "/Ban for coordinating a raid 01ABCDEFGHJKMNPQRSTVWXYZ12",
     ],
     notes: [
-      "Write the reason in plain words; the account, an optional window, and the reason may appear in any order.",
-      "Stoat's native ban endpoint accepts raw account IDs, so the target does not need to be a current or former server member.",
+      "Write the reason in plain words; the account, an optional window, and the reason may appear in any order — a bare account ID is recognized anywhere in the command, not only first.",
+      "Stoat's native ban endpoint accepts raw account IDs, so the target does not need to be a current or former server member. Use this for a departed or never-joined account; /Kick and /Mute require a current member.",
       "Nothing happens until the moderator who ran the command reacts ✅ to the confirmation naming the target and reason.",
       "Undo unbans the account but cannot restore server membership or deleted messages.",
     ],
@@ -322,6 +324,7 @@ export const COMMAND_CATALOG = Object.freeze([
     ],
     notes: [
       "Because a kick cannot be undone, nothing happens until the moderator who ran the command reacts ✅.",
+      "The target must be a current server member; use /Ban for a departed or never-joined account.",
     ],
   },
   {
@@ -340,6 +343,7 @@ export const COMMAND_CATALOG = Object.freeze([
     ],
     notes: [
       "Choosing a duration from the picker is itself the confirmation, so only a typed duration shows a separate ✅/❌ prompt.",
+      "The target must be a current server member; a departed account cannot be muted.",
     ],
   },
   {
