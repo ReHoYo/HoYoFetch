@@ -157,6 +157,24 @@ export const COMMAND_CATALOG = Object.freeze([
     examples: ["/EmojiMode", "/EmojiMode custom", "/EmojiMode unicode"],
   },
   {
+    id: "emoji-setup",
+    section: COMMAND_SECTIONS.SETUP,
+    route: "emojisetup",
+    access: "server_moderator",
+    syntax: "/EmojiSetup [status]",
+    summary:
+      "Auto-provision reward icons as custom emoji on the configured hub server.",
+    help: "Auto-provision reward icons as custom emoji, or check progress _(admins/mods only)_",
+    permission: "Server owner, Kick/Ban/Timeout Members, or admin",
+    examples: ["/EmojiSetup", "/EmojiSetup status"],
+    notes: [
+      "Only runs in the server set as EMOJI_HUB_SERVER_ID — elsewhere it reports registry status without uploading anything.",
+      "Safe to run repeatedly: an already-provisioned keyword is reused, never re-uploaded.",
+      "Downloads and uploads happen one icon at a time; a broken icon URL is reported but does not stop the rest.",
+      "Switch rendering over to the result with `/EmojiMode custom`.",
+    ],
+  },
+  {
     id: "audit-log",
     section: COMMAND_SECTIONS.SETUP,
     route: "auditlog",

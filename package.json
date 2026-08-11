@@ -1,6 +1,6 @@
 {
   "name": "hoyofetch",
-  "version": "3.2.3",
+  "version": "3.2.4",
   "description": "HoYoverse redemption code fetcher bot for Revolt/Stoat.chat",
   "main": "bot.js",
   "type": "module",
@@ -10,6 +10,7 @@
     "emergency:lock": "node emergency-lockdown.js lock",
     "emergency:status": "node emergency-lockdown.js status",
     "emergency:unlock": "node emergency-lockdown.js unlock",
+    "emoji:provision": "node emoji-provision.js",
     "test": "node --test",
     "lint": "eslint .",
     "docs:build": "ASTRO_TELEMETRY_DISABLED=1 npm --prefix website run check",

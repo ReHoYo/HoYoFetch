@@ -9,6 +9,7 @@ const ALLOWED_ENV_KEYS = new Set([
   "FETCH_INTERVAL",
   "FETCH_COOLDOWN",
   "EMOJI_MODE",
+  "EMOJI_HUB_SERVER_ID",
   "HOYO_API_BASE",
   "EMERGENCY_SERVER_ID",
   "STOAT_API_BASE",
@@ -100,6 +101,7 @@ export const CONFIG = {
   hoyoApiBase:
     process.env.HOYO_API_BASE || "https://hoyo-codes.seria.moe/codes",
   emergencyServerId: process.env.EMERGENCY_SERVER_ID || "",
+  emojiHubServerId: process.env.EMOJI_HUB_SERVER_ID || "",
   stoatApiBase: process.env.STOAT_API_BASE || "https://api.stoat.chat",
   postGateHoldReminderMs: postGateHoldReminderHours * 60 * 60 * 1_000,
 };
@@ -108,14 +110,17 @@ export const CONFIG = {
 //  Emoji system
 // ═══════════════════════════════════════════════════
 // "unicode" → built-in fallback emoji (works everywhere, default)
-// "custom"  → Revolt server custom emoji (requires uploading icons)
+// "custom"  → Revolt server custom emoji, auto-provisioned from icon URLs
 //
 // HOW TO SET UP CUSTOM EMOJI:
-//   1. Download item icons (see ASSET GUIDE at bottom of file)
-//   2. Upload each as server emoji on your Revolt server
-//   3. Get each emoji's ID from the emoji picker or server settings
-//   4. Replace the placeholder IDs in CUSTOM_EMOJI below
-//   5. Set EMOJI_MODE=custom in your .env file
+//   1. Create (or reuse) a Revolt server and invite this bot with
+//      Manage Customisation, then set EMOJI_HUB_SERVER_ID to its id
+//   2. Run `/EmojiSetup` in that server (or `npm run emoji:provision`)
+//      to download icons from emoji-icons.js and upload them as emoji
+//   3. Set EMOJI_MODE=custom in your .env file
+//
+// Provisioning persists provisioned ids to data/emoji_registry.json and
+// calls setCustomEmojiRegistry() below so it applies without a restart.
 
 // Runtime-mutable emoji mode (seeded from .env, toggleable via /EmojiMode).
 let emojiMode = process.env.EMOJI_MODE === "custom" ? "custom" : "unicode";
@@ -190,31 +195,76 @@ const UNICODE_EMOJI = {
   "nutrient block": "🍱",
 };
 
-// Fill in your server emoji IDs after uploading icons.
-// Format: ":REVOLT_EMOJI_ID:" — e.g. ":01JF7K9ABCDEF:"
-const CUSTOM_EMOJI = {
+// Pre-provisioning fallback: emoji already uploaded to the historical hub
+// before /EmojiSetup existed. setCustomEmojiRegistry() merges the live
+// provisioned registry over this seed, so these ids keep working even with
+// an empty data/ directory, and provisioning only ever adds or replaces.
+// Format: bare ULID — getCustomEmojiRegistry() wraps it as ":ULID:".
+const SEED_CUSTOM_EMOJI = {
   // ── Genshin Impact ──────────────────────────────
-  primogem: ":01KJ9DT9PFV146B7RT8E7GF5RK:",
-  mora: ":01KJ9DTH3SJ3QWNYG63HCBQE2K:",
-  "hero's wit": ":01KJ9H1PJ7Z7KCYS1DGDWD9MRS:",
-  "adventurer's experience": ":01KJ9H0T8V0HFZHWPYS49K10S0:",
+  primogem: "01KJ9DT9PFV146B7RT8E7GF5RK",
+  mora: "01KJ9DTH3SJ3QWNYG63HCBQE2K",
+  "hero's wit": "01KJ9H1PJ7Z7KCYS1DGDWD9MRS",
+  "adventurer's experience": "01KJ9H0T8V0HFZHWPYS49K10S0",
   // ── Honkai: Star Rail ───────────────────────────
-  "stellar jade": ":01KJ9E3A1G9QZ31YXH2SWGNMYH:",
-  credit: ":01KJ9E3ZDQ58WJE7T88N2DCAK4:",
+  "stellar jade": "01KJ9E3A1G9QZ31YXH2SWGNMYH",
+  credit: "01KJ9E3ZDQ58WJE7T88N2DCAK4",
   // ── Zenless Zone Zero ───────────────────────────
-  polychrome: ":01KJ9DWBQAH7RRY47Z7WXTSE3B:",
-  dennies: ":01KJ9DVYCN9Q1Y3DKP8ATGPRJC:",
+  polychrome: "01KJ9DWBQAH7RRY47Z7WXTSE3B",
+  dennies: "01KJ9DVYCN9Q1Y3DKP8ATGPRJC",
   // ── Honkai Impact 3rd ───────────────────────────
-  crystal: ":01KJ9EYTYBY44P9QN9PTAHCWHR:",
-  asterite: ":01KJ9GZCP7CMNT9506X9GGQDFJ:",
-  coin: ":01KJ9EYMKX900EDHY97FRE3JTZ:",
+  crystal: "01KJ9EYTYBY44P9QN9PTAHCWHR",
+  asterite: "01KJ9GZCP7CMNT9506X9GGQDFJ",
+  coin: "01KJ9EYMKX900EDHY97FRE3JTZ",
 };
+
+const EMOJI_ID_PATTERN = /^:[A-Za-z0-9]{1,64}:$/;
+
+function seedRegistry() {
+  return Object.fromEntries(
+    Object.entries(SEED_CUSTOM_EMOJI).map(([keyword, id]) => [
+      keyword,
+      `:${id}:`,
+    ])
+  );
+}
+
+// Runtime-mutable custom emoji registry. Seeded from the hardcoded fallback
+// above; /EmojiSetup (via provisionEmoji) merges its results on top with
+// setCustomEmojiRegistry(), and bot.js re-applies the persisted registry on
+// every start.
+let customEmojiRegistry = seedRegistry();
+
+/**
+ * Replace the live custom emoji registry, merged over the hardcoded seed so
+ * un-provisioned keywords keep their pre-existing id. Malformed entries
+ * (wrong shape, not ":ID:") are dropped rather than applied.
+ *
+ * @param  {Object<string,string>} map — { keyword: ":ULID:" }
+ * @return {number} count of entries actually applied
+ */
+export function setCustomEmojiRegistry(map) {
+  const next = seedRegistry();
+  let applied = 0;
+  for (const [keyword, value] of Object.entries(map ?? {})) {
+    if (typeof keyword !== "string" || !keyword) continue;
+    if (typeof value !== "string" || !EMOJI_ID_PATTERN.test(value)) continue;
+    next[keyword] = value;
+    applied += 1;
+  }
+  customEmojiRegistry = next;
+  return applied;
+}
+
+export function getCustomEmojiRegistry() {
+  return { ...customEmojiRegistry };
+}
 
 export function getEmojiMap() {
   if (emojiMode !== "custom") return UNICODE_EMOJI;
 
   const customOverrides = Object.fromEntries(
-    Object.entries(CUSTOM_EMOJI).filter(([, value]) => value)
+    Object.entries(customEmojiRegistry).filter(([, value]) => value)
   );
   return { ...UNICODE_EMOJI, ...customOverrides };
 }
@@ -232,6 +282,9 @@ export const GAMES = {
     icon: "https://img-os-static.hoyolab.com/communityWeb/upload/1d7dd8f33c5ccdfdeac86e1e86ddd652.png",
     redeemUrl: "https://genshin.hoyoverse.com/en/gift?code=",
     source: "seria",
+    // Human-readable article to point to when no source has reward text for
+    // a code — distinct from sourceUrl, which is what a scraper hits.
+    codesArticleUrl: "https://game8.co/games/Genshin-Impact/archives/304759",
     deprecated: false,
   },
   hkrpg: {
@@ -242,6 +295,7 @@ export const GAMES = {
     icon: "https://img-os-static.hoyolab.com/communityWeb/upload/473aee1166b3c22d093ee74c6a4f8e1e.png",
     redeemUrl: "https://hsr.hoyoverse.com/gift?code=",
     source: "seria",
+    codesArticleUrl: "https://game8.co/games/Honkai-Star-Rail/archives/410296",
     deprecated: false,
   },
   nap: {
@@ -252,6 +306,7 @@ export const GAMES = {
     icon: "https://img-os-static.hoyolab.com/communityWeb/upload/1db8126f4554985a3610985bf5a69249.png",
     redeemUrl: "https://zenless.hoyoverse.com/redemption?code=",
     source: "seria",
+    codesArticleUrl: "https://game8.co/games/Zenless-Zone-Zero/archives/435683",
     deprecated: false,
   },
   honkai3rd: {
@@ -263,6 +318,8 @@ export const GAMES = {
     redeemUrl: null, // HI3 codes must be redeemed in-game
     redeemInstructions: "Account → Exchange Rewards",
     source: "hi3_multi",
+    // Game8 has no HI3 codes article — this is the page Irminsul already scrapes.
+    codesArticleUrl: "https://honkaiimpact3.fandom.com/wiki/Exchange_Rewards",
     deprecated: false,
   },
   nte: {
@@ -275,6 +332,10 @@ export const GAMES = {
     redeemInstructions: "Redeem Code menu",
     source: "game8",
     sourceUrl: "https://game8.co/games/Neverness-to-Everness/archives/593718",
+    // Deliberately its own literal rather than aliasing sourceUrl, so the two
+    // can diverge later without a silent behaviour change.
+    codesArticleUrl:
+      "https://game8.co/games/Neverness-to-Everness/archives/593718",
     deprecated: false,
   },
   wuwa: {
@@ -287,6 +348,7 @@ export const GAMES = {
     redeemInstructions: "Settings → Other Settings → Redemption Code",
     source: "game8",
     sourceUrl: "https://game8.co/games/Wuthering-Waves/archives/453149",
+    codesArticleUrl: "https://game8.co/games/Wuthering-Waves/archives/453149",
     deprecated: false,
   },
 };
@@ -325,6 +387,46 @@ export const HI3_SOURCES = [
 ];
 
 // ═══════════════════════════════════════════════════
+//  Reward backfill sources
+// ═══════════════════════════════════════════════════
+// The primary source for a game sometimes omits reward text for a code (e.g.
+// seria periodically returns rewards: "" for an otherwise-valid code). When
+// that happens, fetchCodes consults a secondary source here and fills in by
+// code identity. Games with no entry (nte/wuwa) fall back to the code
+// article link instead — Game8 already *is* the human-readable source there.
+export const REWARD_BACKFILL_SOURCES = {
+  genshin: {
+    name: "ennead API",
+    url: "https://api.ennead.cc/mihoyo/genshin/codes",
+    type: "json",
+    cacheKey: "ennead:genshin",
+    cacheTtlMs: 30 * 60 * 1000,
+  },
+  hkrpg: {
+    name: "ennead API",
+    url: "https://api.ennead.cc/mihoyo/starrail/codes",
+    type: "json",
+    cacheKey: "ennead:starrail",
+    cacheTtlMs: 30 * 60 * 1000,
+  },
+  nap: {
+    name: "ennead API",
+    url: "https://api.ennead.cc/mihoyo/zenless/codes",
+    type: "json",
+    cacheKey: "ennead:zenless",
+    cacheTtlMs: 30 * 60 * 1000,
+  },
+  // ennead is already the primary HI3 source, so its secondary is the wiki.
+  honkai3rd: {
+    name: "Fandom Wiki",
+    url: HI3_SOURCES[1].url,
+    type: "wiki",
+    cacheKey: "hi3wiki:rewards",
+    cacheTtlMs: 60 * 60 * 1000,
+  },
+};
+
+// ═══════════════════════════════════════════════════
 //  Game8 sources
 // ═══════════════════════════════════════════════════
 
@@ -353,42 +455,6 @@ export const GAME8_SOURCES = {
   [WUWA_GAME_KEY]: WUWA_SOURCE,
 };
 
-// ═══════════════════════════════════════════════════
-//  ASSET DOWNLOAD GUIDE
-// ═══════════════════════════════════════════════════
-//
-//  Where to get item icons for custom Revolt emoji:
-//
-//  GENSHIN IMPACT
-//    Ambr.top (best quality):  https://ambr.top/en/archive/material
-//    Wiki:  https://genshin-impact.fandom.com/wiki/Primogem
-//           → right-click icon → Open image in new tab → Save
-//    Key items to download:
-//      Item_Primogem.png, Item_Mora.png, Item_Heros_Wit.png,
-//      Item_Adventurers_Experience.png, Item_Mystic_Enhancement_Ore.png,
-//      Item_Original_Resin.png
-//
-//  HONKAI: STAR RAIL
-//    Yatta.moe:  https://hsr.yatta.moe/
-//    Wiki:  https://honkai-star-rail.fandom.com/wiki/Stellar_Jade
-//    Key items: Stellar_Jade.png, Credit.png, Trailblaze_Power.png,
-//      Traveler's_Guide.png, Refined_Aether.png
-//
-//  ZENLESS ZONE ZERO
-//    Hakush.in:  https://zzz.hakush.in/
-//    Wiki:  https://zenless-zone-zero.fandom.com/wiki/Polychrome
-//    Key items: Polychrome.png, Dennies.png, Battery_Charge.png
-//
-//  HONKAI IMPACT 3RD
-//    Wiki:  https://honkaiimpact3.fandom.com/wiki/Crystal_(Currency)
-//    Key items: Crystal.png, Asterite.png, Stamina.png, Mithril.png
-//
-//  RECOMMENDED SPEC
-//    • 128×128 or 256×256 px, square
-//    • PNG with transparent background
-//    • Under 500 KB
-//    • Name them clearly: "primogem", "stellarjade", etc.
-//
-//  UPLOAD ON REVOLT
-//    Server Settings → Emojis → Upload Emoji
-//    After uploading, grab the emoji ID and put it in CUSTOM_EMOJI above.
+// Item icon sourcing, sizing spec, and upload/provisioning now live in
+// emoji-icons.js (the manifest) and emoji-provision.js (the uploader) —
+// see /EmojiSetup or `npm run emoji:provision`.

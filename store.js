@@ -23,6 +23,7 @@ if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 const CHANNELS_PATH = join(DATA_DIR, "channels.json");
 const KNOWN_CODES_PATH = join(DATA_DIR, "known_codes.json");
 const SOURCE_CACHE_PATH = join(DATA_DIR, "source_cache.json");
+const EMOJI_REGISTRY_PATH = join(DATA_DIR, "emoji_registry.json");
 const PROTECTED_PATH = join(DATA_DIR, "protected_messages.json");
 const AUDITLOG_PATH = join(DATA_DIR, "auditlog.json");
 const SETTINGS_SNAPSHOTS_PATH = join(
@@ -318,6 +319,69 @@ export function getSourceCache(sourceKey) {
 export function setSourceCache(sourceKey, entry) {
   sourceCache[sourceKey] = entry;
   writeJSON(SOURCE_CACHE_PATH, sourceCache);
+}
+
+// ═══════════════════════════════════════════════════
+//  Emoji registry (custom emoji provisioned on the hub server)
+// ═══════════════════════════════════════════════════
+// Shape: {
+//   version: 1,
+//   serverId: "<hub server id>",
+//   updatedAt: <epoch ms>,
+//   entries: {
+//     "<keyword>": { emojiId, name, iconUrl, provisionedAt }
+//   }
+// }
+// emojiId is stored bare (no colons) — getEmojiRegistryMap() wraps it as
+// ":<id>:" for display, keeping the colon-rendering detail out of storage.
+
+const EMPTY_EMOJI_REGISTRY = Object.freeze({
+  version: 1,
+  serverId: "",
+  updatedAt: 0,
+  entries: {},
+});
+
+let emojiRegistry = readJSON(EMOJI_REGISTRY_PATH, EMPTY_EMOJI_REGISTRY);
+
+/**
+ * Read the full persisted emoji registry.
+ * @return {Object}
+ */
+export function loadEmojiRegistry() {
+  return structuredClone(emojiRegistry);
+}
+
+/**
+ * Persist the full emoji registry record.
+ * @param {Object} record — { version, serverId, updatedAt, entries }
+ */
+export function saveEmojiRegistry(record) {
+  emojiRegistry = {
+    version: 1,
+    serverId: typeof record?.serverId === "string" ? record.serverId : "",
+    updatedAt: Number.isFinite(record?.updatedAt) ? record.updatedAt : 0,
+    entries:
+      record?.entries && typeof record.entries === "object"
+        ? structuredClone(record.entries)
+        : {},
+  };
+  writeJSON(EMOJI_REGISTRY_PATH, emojiRegistry);
+}
+
+/**
+ * Derive a flat { keyword -> ":ULID:" } map from the registry, ready to feed
+ * config.js's setCustomEmojiRegistry().
+ * @return {Object<string,string>}
+ */
+export function getEmojiRegistryMap() {
+  const map = {};
+  for (const [keyword, entry] of Object.entries(emojiRegistry.entries ?? {})) {
+    if (typeof entry?.emojiId === "string" && entry.emojiId) {
+      map[keyword] = `:${entry.emojiId}:`;
+    }
+  }
+  return map;
 }
 
 // ═══════════════════════════════════════════════════
