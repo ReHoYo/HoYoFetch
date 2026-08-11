@@ -96,6 +96,8 @@ function makeHarness({
   deletePacingMs = 0,
   rateLimitCooldownMs = 0,
   cleanupRateLimitRetries = 1,
+  // Accounts Irminsul already has cached, for the @Username#1234 resolver.
+  cachedUsers = [],
 } = {}) {
   let clock = 1_900_000_000_000;
   let messageCounter = 0;
@@ -113,6 +115,11 @@ function makeHarness({
   const client = {
     user: { id: BOT_ID },
     events: new EventEmitter(),
+    users: {
+      find(predicate) {
+        return cachedUsers.find((user) => predicate(user));
+      },
+    },
     api: {
       async get(path) {
         apiGetPaths.push(path);
@@ -439,6 +446,37 @@ test("ban sends a never-joined raw account ID straight to Stoat", async () => {
     false
   );
   assert.match(harness.sent.at(-2).payload.embeds[0].title, /Account Banned/);
+});
+
+test("ban resolves a plain-text @Username#1234 against a cached account", async () => {
+  const harness = makeHarness({
+    missingMemberIds: [TARGET_ID],
+    cachedUsers: [
+      { id: TARGET_ID, username: "EdgarAI", discriminator: "7456" },
+    ],
+  });
+  await harness.run("ban", ["@EdgarAI#7456", "for", "raiding"]);
+
+  assert.ok(
+    harness.requests.some(
+      (entry) =>
+        entry.method === "PUT" &&
+        entry.path === `/servers/${SERVER_ID}/bans/${TARGET_ID}`
+    )
+  );
+});
+
+test("ban explains a plain-text @Username#1234 it cannot resolve, instead of the generic target error", async () => {
+  const harness = makeHarness();
+  await harness.moderation.handleCommand(harness.message, "ban", [
+    "@EdgarAI#7456",
+    "for",
+    "raiding",
+  ]);
+
+  const embed = harness.sent.at(-1).payload.embeds[0];
+  assert.match(embed.description, /EdgarAI#7456/);
+  assert.match(embed.description, /Get-Info/);
 });
 
 test("ban still rejects the moderator, bot, and server owner", async () => {

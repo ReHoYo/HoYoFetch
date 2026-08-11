@@ -11,8 +11,14 @@ description: Privately report suspected friend-request, DM, commission, or scam 
 ```
 
 Describe what happened in your own words, the way the moderation commands read. The reported account
-may be mentioned anywhere in the sentence, and a leading `for` or `because` is treated as filler.
-The removed `reason:` delimiter is rejected with a plain-language example.
+may be mentioned anywhere in the sentence — a real `@mention`, or a bare account ID at least
+20 characters long — and a leading `for` or `because` is treated as filler. The removed `reason:`
+delimiter is rejected with a plain-language example.
+
+A plain-text `@Username#1234` (typed by hand rather than selected from the mention picker) resolves
+only if Irminsul already has that exact account cached from a shared server — Stoat's only
+username-resolution API is "send friend request," which this deliberately never calls. An uncached
+account needs a real `@mention` or an account ID from [`/Get-Info`](/HoYoFetch/moderation/account-checks/) instead.
 
 The description must contain 10–300 characters. The target must be a current member of the same
 server.

@@ -109,6 +109,7 @@ export const COMMAND_CATALOG = Object.freeze([
     notes: [
       "Describe what happened in plain words, between 10 and 300 characters.",
       "The command works only where Irminsul can remove the invocation. Reports never punish an account automatically.",
+      "A plain-text @Username#1234 (not a real mention) resolves only if Irminsul already has that exact account cached from a shared server; otherwise use an actual @mention or an ID from /Get-Info.",
     ],
   },
   {
@@ -304,6 +305,7 @@ export const COMMAND_CATALOG = Object.freeze([
     notes: [
       "Write the reason in plain words; the account, an optional window, and the reason may appear in any order — a bare account ID is recognized anywhere in the command, not only first.",
       "Stoat's native ban endpoint accepts raw account IDs, so the target does not need to be a current or former server member. Use this for a departed or never-joined account; /Kick and /Mute require a current member.",
+      "A plain-text @Username#1234 (not a real mention) resolves only if Irminsul already has that exact account cached from a shared server; otherwise use an actual @mention or a raw account ID.",
       "Nothing happens until the moderator who ran the command reacts ✅ to the confirmation naming the target and reason.",
       "Undo unbans the account but cannot restore server membership or deleted messages.",
     ],
@@ -379,6 +381,7 @@ export const COMMAND_CATALOG = Object.freeze([
       "The lookup scope states whether the target is current, banned, former, visible elsewhere, platform-only, or inconclusive.",
       "Ban reasons require Irminsul to have Ban Members; without it, the report states that a local ban could not be ruled out.",
       "For accounts cached in another mutual server, the report names up to three of those servers to authorized moderators.",
+      "A plain-text @Username#1234 (not a real mention) resolves only if Irminsul already has that exact account cached from a shared server; Stoat has no username search, so an uncached non-member can only be looked up by account ID.",
       "Signals are heuristics for a moderator to look at, not proof an account is a bot.",
       "Messages sent counts only what the archive observed while audit logging was active; deleted and purged messages are excluded.",
     ],
