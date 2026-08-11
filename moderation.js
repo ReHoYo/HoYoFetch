@@ -310,7 +310,8 @@ export function parseModerationCommand(command, args = []) {
   if (!targetId) {
     return {
       ok: false,
-      error: "Mention one member or provide one valid user ID.",
+      error:
+        "Mention one member, or give the full account ID — a short ID must come first; the full 26-character ID may appear anywhere.",
     };
   }
 
@@ -594,6 +595,22 @@ export function createModeration(
       if (!requireMember) return true;
       const user = await client.api.get(`/users/${targetId}`);
       if (user?._id !== targetId) throw new Error("target identity mismatch");
+    } catch (error) {
+      logFailure("target verification failed", error);
+      await respond(
+        message.channelId,
+        "⚠️ Target Verification Failed",
+        "The target could not be safely checked against this server.",
+        "#E74C3C"
+      );
+      return false;
+    }
+    // A member lookup failure is reported separately from the checks above:
+    // an account that is simply not a current member is an ordinary, expected
+    // outcome (a departed or never-joined account belongs in `/Ban` instead),
+    // not a verification problem. Only a genuine failure to reach or parse
+    // the members endpoint gets the generic "could not be verified" message.
+    try {
       const response = await client.api.get(
         `/servers/${serverId}/members/${targetId}`,
         { roles: false }
@@ -602,17 +619,21 @@ export function createModeration(
       const memberUserId = member?._id?.user ?? member?.id?.user;
       const memberServerId = member?._id?.server ?? member?.id?.server;
       if (memberUserId !== targetId || memberServerId !== serverId) {
-        throw new Error("target member mismatch");
+        await respond(
+          message.channelId,
+          "⚠️ Not a Server Member",
+          "That account is not currently a member of this server. Use `/Ban` to act on a departed or never-joined account by ID.",
+          "#E74C3C"
+        );
+        return false;
       }
       return true;
     } catch (error) {
-      logFailure("target verification failed", error);
+      logFailure("member lookup failed", error);
       await respond(
         message.channelId,
         "⚠️ Target Verification Failed",
-        requireMember
-          ? "The target could not be freshly verified as a member of this server."
-          : "The target could not be safely checked against this server.",
+        "The target could not be freshly verified as a member of this server.",
         "#E74C3C"
       );
       return false;

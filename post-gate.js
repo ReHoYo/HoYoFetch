@@ -119,9 +119,19 @@ const REVIEW_EMOJI = new Set([
 const TRIGGER_LABELS = Object.freeze({
   first_post: "link or attachment from a new or first-time poster",
   prohibited_term: "prohibited-term filter",
+  prohibited_identity: "prohibited-term filter (username/nickname)",
   contact_solicitation: "DM or off-platform contact solicitation",
   user_hold: "author is currently in Post Gate",
 });
+// Surfaces the identity screener checks, in the fixed order matchIdentityTerm
+// reports them, plus the label each renders as on a review or control card —
+// never the matched text itself.
+const IDENTITY_SURFACE_LABELS = Object.freeze({
+  username: "username",
+  display_name: "display name",
+  nickname: "server nickname",
+});
+const IDENTITY_TRIGGER_SURFACES = new Set(Object.keys(IDENTITY_SURFACE_LABELS));
 const LOCKDOWN_BAN_REASON =
   "Irminsul Level 4 lockdown: posted through the server permission lock while automatic bans were enabled";
 // Stoat messages are much shorter than this, but keep normalization bounded
@@ -345,6 +355,28 @@ export function createPostGate(
     return compiledTerms;
   }
 
+  /**
+   * Screen an account's identity fields — username, display name, and server
+   * nickname — against the same compiled prohibited-term list message
+   * content is screened against, so a slur used as an identity is caught
+   * exactly as a slur posted in a message would be. Checked in a fixed order
+   * (matching IDENTITY_SURFACE_LABELS) so which surface gets reported is
+   * deterministic. Unlike the contact-solicitation bio check, this is
+   * synchronous and I/O-free — no API call, no cache — so it is cheap enough
+   * to run on every message and every join or nickname change.
+   */
+  function matchIdentityTerm({ username, displayName, nickname } = {}) {
+    const compiled = ensureCompiledTerms();
+    const fields = { username, display_name: displayName, nickname };
+    for (const surface of Object.keys(IDENTITY_SURFACE_LABELS)) {
+      const value = fields[surface];
+      if (!value) continue;
+      const match = matchProhibitedTerm(value, compiled);
+      if (match) return { ...match, surface };
+    }
+    return null;
+  }
+
   function commandName() {
     return `${prefix}Post-Gate`;
   }
@@ -357,6 +389,31 @@ export function createPostGate(
     if (!isSafeId(userId)) return "*(unknown — author id not recorded)*";
     const username = client.users?.get?.(userId)?.username;
     return username ? `@${username} (<@${userId}>)` : `<@${userId}>`;
+  }
+
+  // Same as actorLabel, but omits the username. Used whenever an account's
+  // own name is the thing that triggered the record: a review or control
+  // card that flags a slur used as a username, display name, or nickname
+  // must not repeat it, the same discipline the prohibited-term message
+  // filter already applies by naming only a rule id.
+  function redactedActorLabel(userId) {
+    return isSafeId(userId)
+      ? `<@${userId}>`
+      : "*(unknown — author id not recorded)*";
+  }
+
+  /** actorLabel for a held-post queue record, redacted for an identity trigger. */
+  function queueActorLabel(record) {
+    return record?.trigger === "prohibited_identity"
+      ? redactedActorLabel(record.userId)
+      : actorLabel(record.userId);
+  }
+
+  /** actorLabel for a user-hold record, redacted for an identity-sourced hold. */
+  function holdActorLabel(record) {
+    return IDENTITY_TRIGGER_SURFACES.has(record?.triggerSurface)
+      ? redactedActorLabel(record.userId)
+      : actorLabel(record.userId);
   }
 
   function channelLabel(channelId) {
@@ -444,7 +501,7 @@ export function createPostGate(
       }`,
       `**Currently held for review:** ${heldCount}`,
       `**Users in Post Gate:** ${store.getActiveUserHolds(serverId).length}`,
-      `**Prohibited terms:** ${describeProhibitedTermList(terms, terms.list ?? {})}`,
+      `**Prohibited terms:** ${describeProhibitedTermList(terms, terms.list ?? {})} — also screened against usernames, display names, and server nicknames on join, nickname change, and every message.`,
     ];
     if (gatePending) {
       lines.push(
@@ -1448,6 +1505,12 @@ export function createPostGate(
    *  - a prohibited term follows, ahead of the first-post gate, because a
    *    slur has to be reviewable no matter how long the author has been here,
    *    so it deliberately never consults isFirstPostCandidate;
+   *  - a prohibited term used as the author's username, display name, or
+   *    server nickname comes right after, for the same reason — this is a
+   *    safety net for a member who joined or renamed before a restart picked
+   *    up the current term list, since the join/nickname-change listeners
+   *    below normally catch it first and place a full hold before any
+   *    message is ever sent;
    *  - links and attachments stay last, unchanged.
    */
   function classifyTrigger(
@@ -1471,6 +1534,18 @@ export function createPostGate(
     }
     const match = matchProhibitedTerm(message?.content, ensureCompiledTerms());
     if (match) return { trigger: "prohibited_term", match };
+    const identityMatch = matchIdentityTerm({
+      username: message?.author?.username,
+      displayName: message?.author?.displayName,
+      nickname: message?.member?.nickname,
+    });
+    if (identityMatch) {
+      return {
+        trigger: "prohibited_identity",
+        match: identityMatch,
+        triggerSurface: identityMatch.surface,
+      };
+    }
     if (hasLinkOrAttachment(message)) return { trigger: "first_post" };
     return null;
   }
@@ -1512,7 +1587,7 @@ export function createPostGate(
   function buildHoldReviewEmbed(record) {
     const lines = [
       `**Queue ID:** \`${record.queueId}\``,
-      `**Author:** ${actorLabel(record.userId)}`,
+      `**Author:** ${queueActorLabel(record)}`,
       `**Channel:** ${channelLabel(record.channelId)}`,
       `**Reason:** ${TRIGGER_LABELS[record.trigger] ?? TRIGGER_LABELS.first_post}`,
     ];
@@ -1526,6 +1601,13 @@ export function createPostGate(
     ) {
       lines.push(
         `**Signal source:** ${record.triggerSurface === "bio" ? "profile bio (content withheld)" : "message"}`
+      );
+    } else if (
+      record.trigger === "prohibited_identity" &&
+      IDENTITY_TRIGGER_SURFACES.has(record.triggerSurface)
+    ) {
+      lines.push(
+        `**Signal source:** ${IDENTITY_SURFACE_LABELS[record.triggerSurface]} (name withheld)`
       );
     }
     lines.push(
@@ -1892,7 +1974,10 @@ export function createPostGate(
           config.level
         );
       } else {
-        if (classified.trigger === "contact_solicitation") {
+        if (
+          classified.trigger === "contact_solicitation" ||
+          classified.trigger === "prohibited_identity"
+        ) {
           await holdUser(serverId, authorId, null, {
             holdSource: "automatic",
             triggerSurface: classified.triggerSurface,
@@ -1908,6 +1993,96 @@ export function createPostGate(
     } finally {
       pendingDecisions.delete(messageId);
     }
+  }
+
+  // ── Identity screening (join / nickname change) ─────────────────
+
+  /**
+   * Shared preconditions and moderator exemption for the join and
+   * nickname-change entry points below. Mirrors the checks handleMessage
+   * applies before creating an automatic hold: Post Gate must be in hold
+   * mode with a review channel configured, Levels 3–4 lockdown takes
+   * precedence over the queue entirely, an already-held account is left
+   * alone, and a verified moderator is always exempt — failing closed
+   * whenever that verification itself is unavailable, exactly as
+   * handleMessage does.
+   */
+  async function screenIdentity(serverId, userId, fields) {
+    if (
+      !isSafeId(serverId) ||
+      !isSafeId(userId) ||
+      userId === client.user?.id
+    ) {
+      return;
+    }
+    const config = store.getPostGateConfig(serverId);
+    if (
+      config.mode !== "hold" ||
+      !isSafeId(config.reviewChannelId) ||
+      config.level >= 3
+    ) {
+      return;
+    }
+    if (store.isUserHeld(serverId, userId)) return;
+
+    const match = matchIdentityTerm(fields);
+    if (!match) return;
+
+    // SERVER_MODERATOR, not FETCH_MANAGER: there is no message channel here
+    // to check the account's permission *in*, and the review channel often
+    // grants Manage Messages broadly by default — checking FETCH_MANAGER
+    // against it would exempt any ordinary member posting there, not just
+    // moderators. The review channel id is still required to satisfy the
+    // permission-refresh plumbing; SERVER_MODERATOR simply ignores it.
+    const authorization = await authorizeServerActor(
+      client,
+      { serverId, channelId: config.reviewChannelId, authorId: userId },
+      COMMAND_ACCESS.SERVER_MODERATOR,
+      { logger }
+    );
+    if (
+      authorization.isBot ||
+      !authorization.identityVerified ||
+      authorization.permissionSource !== "refreshed" ||
+      authorization.allowed
+    ) {
+      return;
+    }
+
+    await holdUser(serverId, userId, null, {
+      holdSource: "automatic",
+      triggerSurface: match.surface,
+      triggerRuleId: match.ruleId,
+    });
+  }
+
+  /**
+   * A raid or harassment account can carry its slur in the username or
+   * display name from the moment it joins, before it has ever posted a
+   * message for classifyTrigger to inspect. Screening on join closes that
+   * window instead of waiting for a first message that may never come.
+   */
+  async function handleMemberJoin(member) {
+    if (member?.user?.bot) return;
+    await screenIdentity(member?.id?.server, member?.id?.user, {
+      username: member?.user?.username,
+      displayName: member?.user?.displayName,
+      nickname: member?.nickname,
+    });
+  }
+
+  /**
+   * A server nickname can be changed to a slur at any time after joining,
+   * independent of posting a message, so it gets its own listener rather
+   * than waiting on the next message. Username and display-name changes are
+   * still caught the next time the account posts, via classifyTrigger.
+   */
+  async function handleMemberUpdate(member, previousMember) {
+    if (member?.user?.bot) return;
+    if (member?.nickname === previousMember?.nickname) return;
+    await screenIdentity(member?.id?.server, member?.id?.user, {
+      nickname: member?.nickname,
+    });
   }
 
   // ── Review ───────────────────────────────────────────────────
@@ -1928,9 +2103,9 @@ export function createPostGate(
     const description =
       outcome === "approved"
         ? authorStillHeld
-          ? `This queue item from ${actorLabel(record.userId)} was approved${strikeCleared ? " and their automod strike was reset" : ""}, but the account remains in Post Gate until a moderator releases it. The content was **not** reposted to ${channelLabel(record.channelId)}.`
-          : `${actorLabel(record.userId)} was cleared${strikeCleared ? " and their automod strike was reset" : ""}. The content was **not** reposted to ${channelLabel(record.channelId)} — they can post it again themselves.`
-        : `The held content from ${actorLabel(record.userId)} was discarded${strikeSkipped ? " (no automod strike was recorded — the original author's id was not captured)" : " and their automod strike stage was increased"}.`;
+          ? `This queue item from ${queueActorLabel(record)} was approved${strikeCleared ? " and their automod strike was reset" : ""}, but the account remains in Post Gate until a moderator releases it. The content was **not** reposted to ${channelLabel(record.channelId)}.`
+          : `${queueActorLabel(record)} was cleared${strikeCleared ? " and their automod strike was reset" : ""}. The content was **not** reposted to ${channelLabel(record.channelId)} — they can post it again themselves.`
+        : `The held content from ${queueActorLabel(record)} was discarded${strikeSkipped ? " (no automod strike was recorded — the original author's id was not captured)" : " and their automod strike stage was increased"}.`;
     await sendAccountability(
       record.serverId,
       title,
@@ -2116,13 +2291,30 @@ export function createPostGate(
 
   function holdSourceLabel(record) {
     return record.holdSource === "automatic"
-      ? "Irminsul (automatic contact screening)"
+      ? "Irminsul (automatic screening)"
       : actorLabel(record.heldBy);
+  }
+
+  // Never "content withheld" for message/bio and "name withheld" for an
+  // identity surface by accident — one lookup keeps the two families in sync.
+  const HOLD_SIGNAL_SOURCE_LABELS = Object.freeze({
+    message: "message",
+    bio: "profile bio (content withheld)",
+    ...Object.fromEntries(
+      Object.entries(IDENTITY_SURFACE_LABELS).map(([surface, label]) => [
+        surface,
+        `${label} (name withheld)`,
+      ])
+    ),
+  });
+
+  function describeHoldSignalSource(triggerSurface) {
+    return HOLD_SIGNAL_SOURCE_LABELS[triggerSurface] ?? "unknown";
   }
 
   function buildUserHoldCardEmbed(record) {
     const lines = [
-      `${actorLabel(record.userId)} is currently in Post Gate.`,
+      `${holdActorLabel(record)} is currently in Post Gate.`,
       "All new messages from this user in this server are held for moderator approval.",
       "",
       `**Held by:** ${holdSourceLabel(record)}`,
@@ -2130,8 +2322,8 @@ export function createPostGate(
     ];
     if (record.holdSource === "automatic") {
       lines.push(
-        `**Signal source:** ${record.triggerSurface === "bio" ? "profile bio (content withheld)" : "message"}`,
-        `**Matched rule:** \`${record.triggerRuleId ?? "contact:unknown"}\``
+        `**Signal source:** ${describeHoldSignalSource(record.triggerSurface)}`,
+        `**Matched rule:** \`${record.triggerRuleId ?? "unknown"}\``
       );
     }
     if (record.originQueueId) {
@@ -2150,7 +2342,7 @@ export function createPostGate(
     return buildAuditEmbed(
       "⏰ Post Gate — User Still Held",
       [
-        `${actorLabel(record.userId)} has been in Post Gate for ${durationLabel(now() - (record.heldAt ?? now()))}.`,
+        `${holdActorLabel(record)} has been in Post Gate for ${durationLabel(now() - (record.heldAt ?? now()))}.`,
         "",
         `**Held by:** ${holdSourceLabel(record)}`,
         `**Held since:** ${timestampLabel(record.heldAt)}`,
@@ -2268,7 +2460,7 @@ export function createPostGate(
         serverId,
         "🔓 Post Gate — User Released",
         [
-          `${actorLabel(userId)} is no longer in Post Gate and can post normally again.`,
+          `${holdActorLabel(record)} is no longer in Post Gate and can post normally again.`,
           "",
           `**Released by:** ${actorLabel(moderatorId)}`,
           `**Held by:** ${holdSourceLabel(record)} since ${timestampLabel(record.heldAt)}`,
@@ -2302,7 +2494,7 @@ export function createPostGate(
         serverId,
         "⏳ Post Gate — Hold Continued",
         [
-          `${actorLabel(moderatorId)} chose to keep ${actorLabel(userId)} in Post Gate.`,
+          `${actorLabel(moderatorId)} chose to keep ${holdActorLabel(existing)} in Post Gate.`,
           `**Next reminder:** ${timestampLabel(nextReminderAt)}`,
         ],
         "#E67E22"
@@ -2392,7 +2584,7 @@ export function createPostGate(
     const lines = [
       `**Queue ID:** \`${record.queueId}\``,
       `**Denied by:** ${actorLabel(moderatorId)}`,
-      `The held content from ${actorLabel(record.userId)} was discarded${
+      `The held content from ${queueActorLabel(record)} was discarded${
         rejection.strikeSkipped
           ? " (no automod strike was recorded — the original author's id was not captured)"
           : " and their automod strike stage was increased"
@@ -2401,13 +2593,13 @@ export function createPostGate(
     if (hold.outcome === "held") {
       lines.push(
         "",
-        `${actorLabel(record.userId)} is now in Post Gate: every message they send is held for moderator approval until a moderator releases them.`,
+        `${queueActorLabel(record)} is now in Post Gate: every message they send is held for moderator approval until a moderator releases them.`,
         `**Hold began:** ${timestampLabel(hold.record?.heldAt)}`
       );
     } else if (hold.outcome === "already_held") {
       lines.push(
         "",
-        `${actorLabel(record.userId)} was already in Post Gate — the existing hold, placed by ${holdSourceLabel(hold.record ?? {})} on ${timestampLabel(hold.record?.heldAt)}, is unchanged.`
+        `${queueActorLabel(record)} was already in Post Gate — the existing hold, placed by ${holdSourceLabel(hold.record ?? {})} on ${timestampLabel(hold.record?.heldAt)}, is unchanged.`
       );
     } else {
       lines.push(
@@ -2580,7 +2772,7 @@ export function createPostGate(
           .slice(0, 10)
           .map(
             (record) =>
-              `- ${actorLabel(record.userId)} — held by ${holdSourceLabel(record)} since ${timestampLabel(record.heldAt)} (${pendingHeldCountFor(serverId, record.userId)} message(s) queued)`
+              `- ${holdActorLabel(record)} — held by ${holdSourceLabel(record)} since ${timestampLabel(record.heldAt)} (${pendingHeldCountFor(serverId, record.userId)} message(s) queued)`
           )
       : ["No members are currently in Post Gate."];
     if (holds.length > 10) {
@@ -2643,7 +2835,7 @@ export function createPostGate(
       { reason: "command" }
     );
     const descriptions = {
-      released: `${actorLabel(target.targetId)} was released and can post normally again. ${result.pending} held message(s) from them stay queued for individual review.`,
+      released: `${result.record ? holdActorLabel(result.record) : actorLabel(target.targetId)} was released and can post normally again. ${result.pending} held message(s) from them stay queued for individual review.`,
       not_held: "That member is not currently in Post Gate.",
       unauthorized:
         "Fresh permission verification did not confirm Manage Messages in the review channel.",
@@ -2803,7 +2995,7 @@ export function createPostGate(
         "⌛ Held Post Expired",
         [
           `**Queue ID:** \`${record.queueId}\``,
-          `**Author:** ${actorLabel(record.userId)}`,
+          `**Author:** ${queueActorLabel(record)}`,
           "The 7-day review window elapsed with no moderator decision; the content was discarded.",
         ],
         "#E67E22"
@@ -2873,6 +3065,8 @@ export function createPostGate(
     handleCommand,
     handleLevelCommand,
     handleMessage,
+    handleMemberJoin,
+    handleMemberUpdate,
     handleRawEvent,
     handleDirectMessage: gate.handleDirectMessage,
     resolveApprover: gate.resolveApprover,

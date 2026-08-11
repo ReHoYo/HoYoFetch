@@ -169,6 +169,30 @@ client.events.on("event", (event) => {
       )
     );
 });
+// A prohibited-term username or display name can arrive the moment an
+// account joins, and a nickname can be changed to one at any later point —
+// neither needs a message to surface it, so these get their own listeners
+// alongside the message-based screening above.
+client.on("serverMemberJoin", (member) => {
+  postGate
+    .handleMemberJoin(member)
+    .catch((error) =>
+      console.error(
+        "post-gate: member-join identity screen failed:",
+        error?.message || error
+      )
+    );
+});
+client.on("serverMemberUpdate", (member, previousMember) => {
+  postGate
+    .handleMemberUpdate(member, previousMember)
+    .catch((error) =>
+      console.error(
+        "post-gate: member-update identity screen failed:",
+        error?.message || error
+      )
+    );
+});
 
 // ── Audit log ───────────────────────────────────────
 const auditLog = initAuditLog(client, {

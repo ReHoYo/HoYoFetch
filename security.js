@@ -5,6 +5,13 @@ import { COMMAND_ACCESS_BY_ROUTE } from "./command-catalog.js";
 export const COMMAND_ACCESS = Object.freeze({
   MEMBER: "member",
   FETCH_MANAGER: "fetch_manager",
+  // Server-level Kick/Ban/Timeout or admin only — deliberately excludes
+  // FETCH_MANAGER's channel-scoped ManageMessages carve-out. Use this when
+  // there is no message channel to check the actor *in* (a join or profile
+  // event, for example): checking ManageMessages against an arbitrary
+  // channel — such as a review channel that grants it broadly by default —
+  // would treat an ordinary member as exempt.
+  SERVER_MODERATOR: "server_moderator",
   BAN_APPROVER: "ban_approver",
   BAN: "ban",
   KICK: "kick",
@@ -147,6 +154,19 @@ export function authorizeCommand(message, access = COMMAND_ACCESS.MEMBER) {
     return denied("insufficient_permission", cachedContext);
   }
 
+  if (access === COMMAND_ACCESS.SERVER_MODERATOR) {
+    const isServerModerator = SERVER_MODERATOR_PERMISSIONS.some((permission) =>
+      hasPermission(member, server, permission)
+    );
+    if (isAdmin || isServerModerator) {
+      return {
+        ...cachedContext,
+        reason: isOwner ? "owner" : isAdmin ? "admin" : "moderator",
+      };
+    }
+    return denied("insufficient_permission", cachedContext);
+  }
+
   return denied("unknown_access_policy", cachedContext);
 }
 
@@ -213,13 +233,11 @@ export async function refreshCommandAuthorization(
         evaluated.serverPermissions,
         PERMISSION_BITS.ManageServer
       );
+    const isServerModerator = SERVER_MODERATOR_PERMISSIONS.some((permission) =>
+      hasPermissionBit(evaluated.serverPermissions, PERMISSION_BITS[permission])
+    );
     const isModerator =
-      SERVER_MODERATOR_PERMISSIONS.some((permission) =>
-        hasPermissionBit(
-          evaluated.serverPermissions,
-          PERMISSION_BITS[permission]
-        )
-      ) ||
+      isServerModerator ||
       hasPermissionBit(
         evaluated.channelPermissions,
         PERMISSION_BITS.ManageMessages
@@ -248,10 +266,12 @@ export async function refreshCommandAuthorization(
     const allowed =
       access === COMMAND_ACCESS.FETCH_MANAGER
         ? isAdmin || isModerator
-        : access === COMMAND_ACCESS.BAN_APPROVER
-          ? canApproveBan
-          : exactBit !== null &&
-            (isAdmin || hasPermissionBit(exactPermissions, exactBit));
+        : access === COMMAND_ACCESS.SERVER_MODERATOR
+          ? isAdmin || isServerModerator
+          : access === COMMAND_ACCESS.BAN_APPROVER
+            ? canApproveBan
+            : exactBit !== null &&
+              (isAdmin || hasPermissionBit(exactPermissions, exactBit));
 
     if (!allowed) {
       return denied("insufficient_permission", {

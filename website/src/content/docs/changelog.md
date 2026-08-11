@@ -3,6 +3,24 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Version 3.2.3
+
+### Prohibited-term identity screening
+
+- The prohibited-term filter now also screens **usernames, display names, and server nicknames**, not only message content. A slur used as an identity is visible on every message and in the member list without ever tripping a content filter — this closes that gap using the same compiled term list, allowlist, and normalization the message filter already uses.
+- Screening runs at three points: on join, on server nickname change, and on every message (a safety net for an account that joined or renamed before a restart picked up the current term list — username and display-name changes are not their own trigger and are caught the next time the account posts).
+- A match places the account in [full Post Gate](/HoYoFetch/moderation/post-gate/#holding-a-whole-member) immediately, the same automatic hold DM/off-platform contact solicitation creates. It never bans, times out, or applies an automod strike by itself.
+- The offending name is never shown anywhere Irminsul posts. A review or control card names only the rule id and which field matched (`username`, `display name`, or `nickname`) — the same discipline the message filter already applies by never repeating the matched text.
+- The moderator-exemption check for join and nickname-change screening is server-wide (Kick/Ban/Timeout Members or admin), independent of any single channel's permissions — deliberately not the same channel-scoped check message-triggered holds use, since a review channel that grants Manage Messages broadly by default would otherwise exempt an ordinary member.
+
+### Fixed: bare account ID rejected outside the leading word
+
+- `/Ban`, `/Report-Spam`, and `/Get-Info` accept a mention (`<@ID>`) anywhere in the command, but previously only accepted a **bare** account ID either in the very first word or in the exact 26-character Crockford ULID shape — a bare ID placed after the reason, such as `/Ban for coordinating a raid 01ABC…`, was rejected with "Mention one member or provide one valid user ID," an error that named user IDs while refusing one that fit.
+- A bare token is now recognized as the target anywhere in the command once it is at least 20 characters and carries a digit or capital letter — comfortably covering every real 26-character Stoat account ID while staying well above any ordinary reason word's length, so `/Kick for raiding` still asks for a member rather than trying to moderate someone called "for."
+- `/Kick`, `/Mute`, and `/Automod release` now distinguish "this account is not a current member of this server" from a genuine permission-verification failure, and name `/Ban` as the command for a departed or never-joined account, instead of a single generic "could not be verified" message for both cases.
+
+Version 3.2.3 is the final version of Irminsul. If Stoat grows to the point where a larger operational surface is needed, its next chapter will add an administrator dashboard and SQLite-backed persistence; until then, Irminsul ends here.
+
 ## Version 3.2.2
 
 ### Automatic contact-solicitation holds
@@ -12,7 +30,6 @@ description: Major public Irminsul capabilities and documentation milestones.
 - Automatic holds do not apply a strike, timeout, or ban. Protected cards retain only the stable rule id and whether the signal came from the message or bio; profile contents and external contact details are withheld.
 - Successful profile and no-profile checks use a ten-minute, 5,000-entry in-memory LRU cache. Concurrent posts share one lookup; unavailable profiles fail open to message-only detection with redacted diagnostics and a one-minute retry backoff.
 - Approving a queued message does not release its account-level hold. A moderator must release the account explicitly; a later match automatically holds it again only while recent-identity eligibility remains active, and cached bio results are ignored after both windows expire.
-- Version 3.2.2 is the final version of Irminsul. If Stoat grows to the point where a larger operational surface is needed, its next chapter will add an administrator dashboard and SQLite-backed persistence; until then, Irminsul ends here.
 
 ## Version 3.2.1 — breaking command cleanup
 

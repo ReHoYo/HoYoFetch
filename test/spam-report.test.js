@@ -210,7 +210,24 @@ test("parser reads plain sentences and rejects the removed delimiter", () => {
       `they friend requested me then ${TARGET_ONE} pitched a commission`
     ).ok,
     false,
-    "a bare ID is only read as the target in the leading position"
+    "a short bare ID is only read as the target in the leading position"
+  );
+});
+
+test("parser accepts a bare full-length account ID anywhere in the sentence", () => {
+  // A full-length (26-character) Stoat account ID used to be recognized only
+  // in the leading position or wrapped in a mention — see command-args.js's
+  // ACCOUNT_ID_PATTERN.
+  const LONG_ID = "01HZY3M6Q8V7N2K4J5T9W0XAAA";
+  assert.deepEqual(
+    parseSpamReportCommand(
+      `they friend requested me then ${LONG_ID} pitched a commission`
+    ),
+    {
+      ok: true,
+      targetId: LONG_ID,
+      reason: "they friend requested me then pitched a commission",
+    }
   );
 });
 

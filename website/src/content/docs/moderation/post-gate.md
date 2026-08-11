@@ -1,9 +1,9 @@
 ---
 title: Post Gate
-description: Review risky first links or media, prohibited terms, DM and off-platform contact solicitations, and every message from a held member.
+description: Review risky first links or media, prohibited terms in messages and identities, DM and off-platform contact solicitations, and every message from a held member.
 ---
 
-Automod's behavioral detection (rapid bursts, duplicate floods, mention floods) needs several messages to accumulate before it triggers. The Post Gate holds individual messages a moderator should read first — a new member's opening link, attachment, or DM/off-platform contact solicitation; a prohibited term; or anything at all from a member already in Post Gate. It also supplies the protected review destination for server moderation Levels 1–2 and the transition notices for Levels 3–4.
+Automod's behavioral detection (rapid bursts, duplicate floods, mention floods) needs several messages to accumulate before it triggers. The Post Gate holds individual messages a moderator should read first — a new member's opening link, attachment, or DM/off-platform contact solicitation; a prohibited term in a message, username, display name, or server nickname; or anything at all from a member already in Post Gate. It also supplies the protected review destination for server moderation Levels 1–2 and the transition notices for Levels 3–4.
 
 The post gate is **off by default for every server**.
 
@@ -15,16 +15,17 @@ At Levels 1–2, a message is deleted and queued for review only when **all** of
 - The channel is not the review channel itself, and is not privacy-excluded via `/Exclude-Channel` — excluded channels retain nothing, so the gate never touches them.
 - The author is not a recognized moderator. This is checked with the same fresh permission verification `/Automod` uses, and fails closed: if the check itself is unavailable, nothing is held.
 
-Given that, **any one** of four triggers queues the message:
+Given that, **any one** of five triggers queues the message:
 
-| Trigger                  | What it catches                                                                                     | Tenure matters? |
-| ------------------------ | --------------------------------------------------------------------------------------------------- | --------------- |
-| **Author in Post Gate**  | Every message from a member already in [full Post Gate](#holding-a-whole-member)                    | No              |
-| **Contact solicitation** | A matching message or the author's current [profile bio](#dm-and-off-platform-contact-solicitation) | Recent identity |
-| **Prohibited term**      | A message matching the [prohibited-term filter](#prohibited-terms)                                  | No              |
-| **First link or media**  | A link **or** at least one attachment from a new or first-time poster                               | Yes             |
+| Trigger                  | What it catches                                                                                                 | Tenure matters? |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------- | --------------- |
+| **Author in Post Gate**  | Every message from a member already in [full Post Gate](#holding-a-whole-member)                                | No              |
+| **Contact solicitation** | A matching message or the author's current [profile bio](#dm-and-off-platform-contact-solicitation)             | Recent identity |
+| **Prohibited term**      | A message matching the [prohibited-term filter](#prohibited-terms)                                              | No              |
+| **Prohibited identity**  | A [username, display name, or server nickname](#usernames-display-names-and-nicknames) matching the same filter | No              |
+| **First link or media**  | A link **or** at least one attachment from a new or first-time poster                                           | Yes             |
 
-The fourth trigger additionally requires the author to be, by locally cached or archived evidence, **new**:
+The last trigger, first link or media, additionally requires the author to be, by locally cached or archived evidence, **new**:
 
 - the account was created less than 7 days ago, or
 - the author joined this server less than 24 hours ago, or
@@ -87,6 +88,20 @@ Evasion is handled by normalizing the _message_ toward the term:
 
 Phrases may be separated by up to three non-alphanumeric characters. Work is bounded: the scan is capped at 8 KB of content, 200 terms, and 200 allowlist entries, and a cheap prefilter means no pattern actually runs on ordinary prose.
 
+### Usernames, display names, and nicknames
+
+A slur does not have to appear in a message to need review — it can sit in an account's username, display name, or server nickname, visible on every post and in the member list without ever tripping a content filter. The same compiled term list and allowlist screen those three fields, checked in that order, with the same normalization and the same **hold, never punish** rule.
+
+Screening runs at three points, so a name never has to wait for a message to be caught:
+
+- **On join** — a raid or harassment account can carry the slur from the moment it appears in the member list.
+- **On nickname change** — a nickname can be set to a slur at any point after joining. Username and display-name changes are not their own trigger; they are caught the next time the account posts, the same as any other message.
+- **On every message** — a safety net for an account that joined or renamed before a restart picked up the current term list, so the check still applies even if the join or nickname-change listener missed it.
+
+A match places the account in [full Post Gate](#holding-a-whole-member) immediately — the same automatic hold DM/off-platform contact solicitation creates — rather than waiting for a message. If the match was found while handling a message, that message is held too. **The name itself is never repeated anywhere Irminsul posts.** A review or control card names only the rule id and which field matched (`username`, `display name`, or `nickname`); the same discipline the message filter already applies by never showing the matched text.
+
+The usual preconditions still apply: Post Gate must be in `hold` mode with a review channel, Levels 3–4 lockdown takes precedence, an account already held is left alone, and a recognized moderator is exempt — checked at the server level, independent of any single channel's permissions, and failing closed if that check itself is unavailable.
+
 ### The allowlist
 
 An allowlist entry **wins over any term it overlaps**. That is precedence, not filtering: `spic and span` is allowlisted, so `pass me the spic and span` is not held, while `you spic` in the same message still is.
@@ -120,9 +135,9 @@ No word list catches novel spellings, coded language, or abuse that uses no list
 
 ## Holding a whole member
 
-Denying a held post with 🔒 places its author in **full Post Gate**. A recent-identity DM/off-platform contact match creates the same hold automatically without adding a strike. While either hold is active, _every_ message the member sends in the server is held for review — text, links, media, regardless of tenure, regardless of the term list.
+Denying a held post with 🔒 places its author in **full Post Gate**. A recent-identity DM/off-platform contact match, or a [prohibited term in a username, display name, or nickname](#usernames-display-names-and-nicknames), creates the same hold automatically without adding a strike. While any of these holds is active, _every_ message the member sends in the server is held for review — text, links, media, regardless of tenure, regardless of the term list.
 
-The preconditions above still apply in full: the review channel and privacy-excluded channels are never gated, recognized moderators are always exempt (so holding a moderator has no effect while they retain Manage Messages), and Levels 3–4 lockdown continues to take precedence over the queue.
+The preconditions above still apply in full: the review channel and privacy-excluded channels are never gated, recognized moderators are always exempt (so holding a moderator has no effect while they retain their moderation permissions), and Levels 3–4 lockdown continues to take precedence over the queue.
 
 When a hold begins, Irminsul posts one persistent control card to the review channel:
 
@@ -137,7 +152,7 @@ When a hold begins, Irminsul posts one persistent control card to the review cha
 >
 > React 🔓 to release them, or use `/Post-Gate release @user`.
 
-Automatic cards show **Irminsul (automatic contact screening)** instead of a moderator and include the signal surface and rule id without copying the bio or contact detail.
+Automatic cards show **Irminsul (automatic screening)** instead of a moderator, and a signal source and rule id — `message`, `profile bio (content withheld)`, `username (name withheld)`, `display name (name withheld)`, or `server nickname (name withheld)` — without ever copying the bio, contact detail, or offending name itself. For a name-triggered hold, the card's own opening line names only the account by mention, never the username or nickname that matched.
 
 The hold is **idempotent**: denying or automatically matching the same author again reports the existing hold, leaves its original source and time untouched, and never posts a second card. Two simultaneous triggers produce one hold, not two.
 

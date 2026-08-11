@@ -505,6 +505,24 @@ test("automatic user holds persist only their safe trigger metadata", () => {
   assert.equal(unsafe.record.triggerRuleId, null);
 });
 
+test("automatic holds accept the identity screener's trigger surfaces (username, display name, nickname)", () => {
+  let counter = 0;
+  for (const surface of ["username", "display_name", "nickname"]) {
+    counter += 1;
+    const created = store.createUserHold({
+      serverId: "IDENTITYHOLDSERVER",
+      userId: `IDENTITYHOLDUSER${counter}`,
+      heldAt: 20_000,
+      heldBy: null,
+      holdSource: "automatic",
+      triggerSurface: surface,
+      triggerRuleId: "builtin:racial-n-er",
+    });
+    assert.equal(created.record.triggerSurface, surface);
+    assert.equal(created.record.triggerRuleId, "builtin:racial-n-er");
+  }
+});
+
 test("creating a user hold twice returns the existing record without duplicating it", () => {
   store.createUserHold({
     serverId: "HOLDSERVER2",

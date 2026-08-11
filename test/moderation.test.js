@@ -87,6 +87,10 @@ function makeHarness({
   permissionBits = ALL_MOD_BITS,
   requestOverride,
   missingMemberIds = [],
+  // Distinct from missingMemberIds: this simulates the real Stoat response to
+  // a member lookup for an account that isn't a member — a well-formed body
+  // that just doesn't match — rather than a network-level failure.
+  nonMemberIds = [],
   // Real pacing would make every cleanup test wait seconds; the pacing itself
   // is asserted separately.
   deletePacingMs = 0,
@@ -105,6 +109,7 @@ function makeHarness({
   const timeouts = new Map();
   const channels = [CHANNEL_ID, SECOND_CHANNEL_ID, AUDIT_CHANNEL_ID];
   const missingMembers = new Set(missingMemberIds);
+  const nonMembers = new Set(nonMemberIds);
   const client = {
     user: { id: BOT_ID },
     events: new EventEmitter(),
@@ -125,6 +130,9 @@ function makeHarness({
         if (member) {
           if (missingMembers.has(member[1])) {
             throw new Error("member not found");
+          }
+          if (nonMembers.has(member[1])) {
+            return { type: "NotFound" };
           }
           return {
             _id: { server: SERVER_ID, user: member[1] },
@@ -317,6 +325,41 @@ test("moderation parser reads plain sentences in any order", () => {
   );
 });
 
+test("moderation parser accepts a bare full-length account ID anywhere in the sentence", () => {
+  // A full-length (26-character) Stoat account ID used to be recognized only
+  // when wrapped in a mention or placed first — a bare ID mid-sentence was
+  // rejected with an error telling the moderator a user ID should work.
+  const LONG_ID = "01HZY3M6Q8V7N2K4J5T9W0XAAA";
+  assert.deepEqual(
+    parseModerationCommand(
+      "ban",
+      `for coordinating a raid ${LONG_ID}`.split(" ")
+    ),
+    {
+      ok: true,
+      command: "ban",
+      targetId: LONG_ID,
+      reason: "coordinating a raid",
+      deleteWindow: null,
+    }
+  );
+
+  // A mention still wins over a bare ID appearing elsewhere in the sentence.
+  const OTHER_LONG_ID = "01HZY3M6Q8V7N2K4J5T9W0XBBB";
+  const withMention = parseModerationCommand(
+    "ban",
+    `${LONG_ID} <@${OTHER_LONG_ID}> for raiding`.split(" ")
+  );
+  assert.equal(withMention.targetId, OTHER_LONG_ID);
+
+  // Short reason words never get misread as an account ID, mid-sentence or
+  // otherwise.
+  assert.equal(
+    parseModerationCommand("kick", ["for", "raiding", "again"]).ok,
+    false
+  );
+});
+
 test("moderation parser rejects missing reasons, targets, and unknown options", () => {
   assert.equal(parseModerationCommand("kick", [TARGET_ID]).ok, false);
   assert.equal(
@@ -434,6 +477,31 @@ test("kick, mute, and release remain limited to current members", async () => {
       harness.sent.at(-1).payload.embeds[0].title,
       /Target Verification Failed/
     );
+  }
+});
+
+test("kick, mute, and release tell the moderator when the account is simply not a member", async () => {
+  // Distinct from a verification failure: the lookup itself succeeded and
+  // came back well-formed, it just isn't this account. That is the case a
+  // moderator hits when they try to /Kick or /Mute a departed account, and
+  // the message should point them at /Ban instead of implying a system error.
+  for (const command of ["kick", "mute", "automod-release"]) {
+    const harness = makeHarness({ nonMemberIds: [TARGET_ID] });
+    const args =
+      command === "mute" ? [TARGET_ID, "1h", "test"] : [TARGET_ID, "test"];
+    await harness.run(command, args);
+
+    assert.equal(
+      mutations(harness).some(
+        (entry) =>
+          entry.path.endsWith(`/members/${TARGET_ID}`) ||
+          entry.path.includes("/bans/")
+      ),
+      false
+    );
+    const embed = harness.sent.at(-1).payload.embeds[0];
+    assert.match(embed.title, /Not a Server Member/);
+    assert.match(embed.description, /\/Ban/);
   }
 });
 

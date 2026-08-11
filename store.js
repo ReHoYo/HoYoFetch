@@ -1115,6 +1115,16 @@ export function prunePostGateQueue(now = Date.now()) {
 
 const MAX_USER_HOLDS = 1_000;
 const STORE_SAFE_ID = /^[A-Za-z0-9]+$/;
+// "message"/"bio" come from the contact-solicitation screener; "username",
+// "display_name", and "nickname" come from the prohibited-term identity
+// screener (see post-gate.js's matchIdentityTerm).
+const USER_HOLD_TRIGGER_SURFACES = new Set([
+  "message",
+  "bio",
+  "username",
+  "display_name",
+  "nickname",
+]);
 
 let postGateUserHolds = readJSON(POST_GATE_USER_HOLDS_PATH, {});
 
@@ -1144,10 +1154,9 @@ function normalisePostGateUserHold(value = {}) {
     heldAt: finiteOrNull(value.heldAt),
     heldBy: safeStoreId(value.heldBy),
     holdSource: value.holdSource === "automatic" ? "automatic" : "manual",
-    triggerSurface:
-      value.triggerSurface === "message" || value.triggerSurface === "bio"
-        ? value.triggerSurface
-        : null,
+    triggerSurface: USER_HOLD_TRIGGER_SURFACES.has(value.triggerSurface)
+      ? value.triggerSurface
+      : null,
     triggerRuleId: safeHoldRuleId(value.triggerRuleId),
     originQueueId: safeStoreId(value.originQueueId),
     originMessageId: safeStoreId(value.originMessageId),

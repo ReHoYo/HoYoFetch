@@ -87,7 +87,8 @@ export function parseSpamReportCommand(rawArgs) {
   if (!targetId) {
     return {
       ok: false,
-      error: "Mention one current member or provide one valid user ID.",
+      error:
+        "Mention one current member, or give the full account ID — a short ID must come first; the full 26-character ID may appear anywhere.",
     };
   }
 
