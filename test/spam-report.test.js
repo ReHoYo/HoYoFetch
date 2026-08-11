@@ -61,6 +61,8 @@ function makeHarness({
   protectedFails = false,
   permissionBits = MANAGE_MESSAGES_BIT,
   missingMembers = new Set(),
+  // Accounts Irminsul already has cached, for the @Username#1234 resolver.
+  cachedUsers = [],
 } = {}) {
   let clock = 2_000_000_000_000;
   let reportCounter = 0;
@@ -81,6 +83,11 @@ function makeHarness({
   ]);
   const client = {
     user: { id: BOT_ID },
+    users: {
+      find(predicate) {
+        return cachedUsers.find((user) => predicate(user));
+      },
+    },
     api: {
       async get(path) {
         if (path === `/servers/${SERVER_ID}`) {
@@ -393,6 +400,32 @@ test("fresh membership and protected target exclusions fail closed", async () =>
     );
     assert.equal(harness.store.reports.length, 0);
   }
+});
+
+test("report-spam resolves a plain-text @Username#1234 against a cached account", async () => {
+  const harness = makeHarness({
+    cachedUsers: [
+      { id: TARGET_ONE, username: "EdgarAI", discriminator: "7456" },
+    ],
+  });
+  await harness.reporter.handleCommand(
+    harness.message(),
+    "@EdgarAI#7456 sent me a scam DM out of nowhere"
+  );
+  assert.equal(harness.store.reports.length, 1);
+  assert.equal(harness.store.reports[0].targetId, TARGET_ONE);
+});
+
+test("report-spam explains a plain-text @Username#1234 it cannot resolve, instead of the generic target error", async () => {
+  const harness = makeHarness();
+  await harness.reporter.handleCommand(
+    harness.message(),
+    "@EdgarAI#7456 sent me a scam DM out of nowhere"
+  );
+  assert.equal(harness.store.reports.length, 0);
+  const embed = harness.sent.at(-1).payload.embeds[0];
+  assert.match(embed.description, /EdgarAI#7456/);
+  assert.match(embed.description, /Get-Info/);
 });
 
 test("attempt cooldown, duplicate reports, and daily accepted limits block misuse", async () => {

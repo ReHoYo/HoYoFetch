@@ -25,6 +25,16 @@ Stoat ID (or is the very first word, where a shorter alphanumeric token is also 
 shorter bare word elsewhere in the sentence is read as part of the reason instead, the same way
 `/Kick for raiding` asks for a member rather than trying to moderate someone called "for".
 
+:::note[A typed `@Username#1234` is not a real mention]
+Stoat's actual mention is `<@ID>`, produced by selecting an account from the mention picker. If you
+type a username and discriminator by hand instead — `@EdgarAI#7456` — Irminsul resolves it only when
+it already has that exact account cached from a shared server, the same cache `/Get-Info` reads
+usernames from. Stoat's only username-lookup API is "send friend request," and Irminsul will not
+call that as a side effect of a moderation command. An uncached account needs an actual `@mention`
+or the account ID from `/Get-Info` instead — the error names the username and discriminator it
+couldn't resolve, so it's clear which is needed.
+:::
+
 Removed delimiter forms such as `reason:`, `delete:`, and `window:` are rejected with a canonical example. A reason is always required.
 Bare option words such as `1h` or `1y` are only read as options while they come before the reason —
 once the reason starts, everything that follows is part of it, so `/Mute @member for arguing for 3d

@@ -12,7 +12,7 @@ During a raid, you do not need to wait for an account to join before checking it
 /Get-Info 01ABCDEFGHJKMNPQRSTVWXYZ12
 ```
 
-Use a mention for a visible member or paste a 26-character Stoat account ID for anyone else. Stoat provides no username search for bots, so a non-member cannot be found from a username alone.
+Use a mention for a visible member or paste a 26-character Stoat account ID for anyone else. Stoat provides no username search for bots, so a non-member cannot be found from a username alone — typing a plain `@Username#1234` (rather than selecting a real mention) only resolves when Irminsul already has that exact account cached from a shared server.
 
 The account may be current, departed, banned, visible to Irminsul through another community, or entirely unrelated to this server. A permission failure or rate limit produces a partial report rather than a misleading “not found” error. A genuine “Stoat has no account with that ID” result is shown only when the platform explicitly confirms it.
 

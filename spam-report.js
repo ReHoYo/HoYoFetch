@@ -3,8 +3,10 @@ import { randomBytes } from "crypto";
 import {
   BARE_ID_PATTERN,
   buildReason,
+  describeUnresolvedUsernameToken,
   findRemovedArgumentPrefix,
   findTargetToken,
+  resolveUsernameDiscriminatorTokens,
   tokenizeArgs,
 } from "./command-args.js";
 import { buildStatusEmbed } from "./embeds.js";
@@ -313,8 +315,19 @@ export function createSpamReporter(
         return;
       }
 
-      const parsed = parseSpamReportCommand(rawArgs);
+      // A plain-text @Username#1234 is neither a real mention nor a bare ID;
+      // rewrite it to a mention when Irminsul already has that exact account
+      // cached, so the normal target parsing below picks it up for free.
+      const resolvedTokens = resolveUsernameDiscriminatorTokens(
+        client,
+        tokenizeArgs(rawArgs)
+      );
+      const parsed = parseSpamReportCommand(resolvedTokens);
       if (!parsed.ok) {
+        const usernameHint = describeUnresolvedUsernameToken(resolvedTokens);
+        if (usernameHint && parsed.error.includes("give the full account ID")) {
+          parsed.error = usernameHint;
+        }
         await respond(channelId, "⚠️ Invalid Report", parsed.error, "#E74C3C");
         return;
       }
