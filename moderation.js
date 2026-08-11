@@ -3,8 +3,10 @@ import { randomBytes } from "crypto";
 import {
   BARE_ID_PATTERN,
   buildReason,
+  describeUnresolvedUsernameToken,
   findRemovedArgumentPrefix,
   findTargetToken,
+  resolveUsernameDiscriminatorTokens,
   tokenizeArgs,
 } from "./command-args.js";
 import { buildStatusEmbed } from "./embeds.js";
@@ -1638,8 +1640,19 @@ export function createModeration(
     prunePending();
     const serverId = message.server?.id ?? message.channel?.serverId;
     if (!isSafeId(serverId)) return;
-    const parsed = parseModerationCommand(command, args);
+    // A plain-text @Username#1234 is neither a real mention nor a bare ID;
+    // rewrite it to a mention when Irminsul already has that exact account
+    // cached, so the normal target parsing below picks it up for free.
+    const resolvedTokens = resolveUsernameDiscriminatorTokens(
+      client,
+      tokenizeArgs(args)
+    );
+    const parsed = parseModerationCommand(command, resolvedTokens);
     if (!parsed.ok) {
+      const usernameHint = describeUnresolvedUsernameToken(resolvedTokens);
+      if (usernameHint && parsed.error.includes("give the full account ID")) {
+        parsed.error = usernameHint;
+      }
       await respond(
         message.channelId,
         "⚠️ Invalid Moderation Command",

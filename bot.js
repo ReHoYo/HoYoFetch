@@ -78,6 +78,11 @@ import { DOCS_URL } from "./command-catalog.js";
 import { getCommandDispatch, parseAutoFetchScope } from "./command-routing.js";
 import { buildLookupProbes, resolveAccountLookup } from "./account-lookup.js";
 import {
+  describeUnresolvedUsernameToken,
+  resolveUsernameDiscriminatorTokens,
+  tokenizeArgs,
+} from "./command-args.js";
+import {
   buildUserInfoEmbed,
   collectUserInfo,
   DEFAULT_ARCHIVE,
@@ -680,8 +685,19 @@ async function handleTestAuditLog(message) {
 }
 
 async function handleGetInfo(message, cmdArgs) {
-  const parsed = parseUserInfoCommand(cmdArgs);
+  // A plain-text @Username#1234 is neither a real mention nor a bare ID;
+  // rewrite it to a mention when Irminsul already has that exact account
+  // cached, so the normal target parsing below picks it up for free.
+  const resolvedTokens = resolveUsernameDiscriminatorTokens(
+    client,
+    tokenizeArgs(cmdArgs)
+  );
+  const parsed = parseUserInfoCommand(resolvedTokens);
   if (!parsed.ok) {
+    const usernameHint = describeUnresolvedUsernameToken(resolvedTokens);
+    if (usernameHint && parsed.error.includes("give the full account ID")) {
+      parsed.error = usernameHint;
+    }
     await safeSend(message.channel, {
       embeds: [buildStatusEmbed("⚠️ Get-Info", parsed.error, "#E74C3C")],
     });
