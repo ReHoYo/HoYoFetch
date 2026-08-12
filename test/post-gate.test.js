@@ -1550,6 +1550,97 @@ test("approving a held post clears the queue entry without reposting", async () 
   );
   assert.equal(harness.store.getHeldPost(record.queueId).status, "approved");
   assert.ok(harness.deletedMessageIds.includes(record.reviewMessageId));
+  // Approving is itself the "this member is fine" signal — it grants the
+  // same standing exemption /Post-Gate release does.
+  assert.equal(result.exempted, true);
+  assert.equal(harness.store.isPostGateApproved(SERVER_ID, NEW_USER_ID), true);
+});
+
+test("approving a held post exempts the author from future first-post link/media queuing", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGAPPROVEEXEMPT1",
+      content: "https://example.com/first-link",
+    })
+  );
+  const [record] = [...harness.store.queue.values()];
+  await harness.postGate.handleCommand(reviewCommandMessage(), [
+    "approve",
+    record.queueId,
+  ]);
+
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGAPPROVEEXEMPT2",
+      content: "https://example.com/second-link",
+    })
+  );
+
+  assert.equal(harness.store.queue.size, 1);
+  assert.equal(harness.deletedMessageIds.includes("MSGAPPROVEEXEMPT2"), false);
+});
+
+test("approving does not exempt the author from the message-content prohibited-term (slur) filter", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGAPPROVESLUR1",
+      content: "https://example.com/first-link",
+    })
+  );
+  const [record] = [...harness.store.queue.values()];
+  await harness.postGate.handleCommand(reviewCommandMessage(), [
+    "approve",
+    record.queueId,
+  ]);
+
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGAPPROVESLUR2",
+      content: `you absolute ${OPERATOR_TERM}`,
+    })
+  );
+
+  // Both source messages were held and deleted (the first message's review
+  // card is also deleted as part of approving it — see the "removes the
+  // review card" test above for that behavior in isolation).
+  assert.ok(harness.deletedMessageIds.includes("MSGAPPROVESLUR1"));
+  assert.ok(harness.deletedMessageIds.includes("MSGAPPROVESLUR2"));
+  const held = [...harness.store.queue.values()].find(
+    (entry) => entry.content === `you absolute ${OPERATOR_TERM}`
+  );
+  assert.equal(held.trigger, "prohibited_term");
+});
+
+test("rejecting or deny-holding a queued post never grants a release exemption", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+
+  await harness.postGate.handleMessage(
+    newAccountMessage({ id: "MSGREJECTNOEXEMPT", content: "https://a.example" })
+  );
+  const [rejected] = [...harness.store.queue.values()];
+  await harness.postGate.handleCommand(reviewCommandMessage(), [
+    "reject",
+    rejected.queueId,
+  ]);
+  assert.equal(harness.store.isPostGateApproved(SERVER_ID, NEW_USER_ID), false);
+
+  await harness.postGate.handleMessage(
+    newAccountMessage({ id: "MSGDENYHOLDNOEXEMPT", content: "https://b.example" })
+  );
+  const [denied] = [...harness.store.queue.values()].filter(
+    (entry) => entry.status === "pending"
+  );
+  await harness.postGate.handleCommand(reviewCommandMessage(), [
+    "deny-hold",
+    denied.queueId,
+  ]);
+  assert.equal(harness.store.isPostGateApproved(SERVER_ID, NEW_USER_ID), false);
 });
 
 test("approving a held post resets the author's automod strike", async () => {
