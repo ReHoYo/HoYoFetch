@@ -405,6 +405,11 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ## 📝 Changelog
 
+### v3.4.3 — `/Post-Gate release` grants the exemption unconditionally
+
+- Post Gate has two independent layers — the account-level full hold, and per-message queuing (a first link/media post, a contact-solicitation or identity match) — and most accounts a moderator wants to release only ever hit the second layer, since a queued post alone never creates a full hold. `/Post-Gate release @member` no longer reports "not currently in Post Gate" and does nothing for those accounts: once authorized, it always grants the Post Gate exemption, and additionally releases the account-level hold when one happens to be active. An account with no active hold now reports "Member Exempted" instead of an error.
+- `/Post-Gate hold` and 🔒 Deny + Hold User still revoke the exemption at any time, regardless of whether approving or releasing originally granted it.
+
 ### v3.4.2 — approving a held post also grants the Post Gate exemption
 
 - Most held posts (a first link, a first attachment, a term match) never place a full account-level hold, so `/Post-Gate release` had nothing to undo for them and the v3.4.1 exemption effectively never applied in everyday moderation. Approving a held post (✅ or `/Post-Gate approve QUEUE_ID`) now grants the same standing exemption releasing does, since approving is the review outcome that actually happens for most members.

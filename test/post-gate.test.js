@@ -3030,7 +3030,7 @@ test("released users' queued messages stay pending and the release notice states
   assert.ok(stillPending.every((entry) => entry.status === "pending"));
 });
 
-test("/Post-Gate release @member releases by command and reports not_held for a user who was never held", async () => {
+test("/Post-Gate release @member releases by command and reports exempted for a user who was never held", async () => {
   const harness = makeHarness();
   await enableHold(harness);
   await holdUserViaDenyHold(harness);
@@ -3042,17 +3042,74 @@ test("/Post-Gate release @member releases by command and reports not_held for a 
   assert.equal(released.outcome, "released");
   assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), false);
 
+  // Post Gate has two independent layers — the full account hold and
+  // per-message queuing — and this account no longer has an active hold to
+  // release. A second release still grants/re-affirms the exemption rather
+  // than reporting "nothing happened".
   const again = await harness.postGate.handleCommand(reviewCommandMessage(), [
     "release",
     `<@${NEW_USER_ID}>`,
   ]);
-  assert.equal(again.outcome, "not_held");
+  assert.equal(again.outcome, "exempted");
+  assert.equal(harness.store.isPostGateApproved(SERVER_ID, NEW_USER_ID), true);
 
   const noTarget = await harness.postGate.handleCommand(
     reviewCommandMessage(),
     ["release"]
   );
   assert.equal(noTarget.outcome, "invalid_target");
+});
+
+test("/Post-Gate release grants the Post Gate exemption even for an account that was never fully held", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+
+  const result = await harness.postGate.handleCommand(reviewCommandMessage(), [
+    "release",
+    `<@${ESTABLISHED_USER_ID}>`,
+  ]);
+
+  assert.equal(result.outcome, "exempted");
+  assert.equal(harness.store.isUserHeld(SERVER_ID, ESTABLISHED_USER_ID), false);
+  assert.equal(
+    harness.store.isPostGateApproved(SERVER_ID, ESTABLISHED_USER_ID),
+    true
+  );
+  const notice = harness.protectedLogs.find((entry) =>
+    /Member Exempted/.test(entry.payload.embeds[0].title)
+  );
+  assert.ok(notice, "an accountability notice is posted for an exempt-only release");
+
+  // The exemption takes effect immediately — a subsequent first-post link
+  // from that account is no longer queued for review.
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGRELEASEEXEMPTONLY1",
+      authorId: ESTABLISHED_USER_ID,
+      content: "https://example.com/first-link",
+    })
+  );
+  assert.equal(harness.store.queue.size, 0);
+  assert.equal(
+    harness.deletedMessageIds.includes("MSGRELEASEEXEMPTONLY1"),
+    false
+  );
+});
+
+test("/Post-Gate release still requires fresh Manage Messages verification even when there is no hold to release", async () => {
+  const harness = makeHarness({ reviewChannelGrantsManageMessages: false });
+  await enableHold(harness);
+
+  const result = await harness.postGate.handleCommand(reviewCommandMessage(), [
+    "release",
+    `<@${ESTABLISHED_USER_ID}>`,
+  ]);
+
+  assert.equal(result.outcome, "unauthorized");
+  assert.equal(
+    harness.store.isPostGateApproved(SERVER_ID, ESTABLISHED_USER_ID),
+    false
+  );
 });
 
 test("/Post-Gate hold @member <reason> places an approved user back in full hold and revokes the exemption", async () => {

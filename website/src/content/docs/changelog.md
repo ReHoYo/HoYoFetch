@@ -3,6 +3,13 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Version 3.4.3 — `/Post-Gate release` grants the exemption unconditionally
+
+Post Gate has two independent layers: the account-level full hold, and per-message queuing (a first link/media post, a contact-solicitation or identity match). Most accounts a moderator wants to release only ever hit the second layer, since a queued post alone never creates a full hold — so `/Post-Gate release @member` used to report "not currently in Post Gate" and do nothing for them.
+
+- `/Post-Gate release @member` no longer requires an active full hold to do anything. Once authorized, it always grants the [Post Gate exemption](/HoYoFetch/moderation/post-gate/#post-gate-exemption), and additionally releases the account-level hold when one happens to be active. An account with no active hold now reports "Member Exempted" and posts an accountability notice, instead of an error.
+- `/Post-Gate hold` and 🔒 Deny + Hold User still revoke the exemption at any time, regardless of whether approving or releasing originally granted it.
+
 ## Version 3.4.2 — approving a held post also grants the Post Gate exemption
 
 Most held posts are a first link, a first attachment, or a term match from an otherwise ordinary member, and never place a full account-level hold — so `/Post-Gate release` had nothing to undo for them and the v3.4.1 exemption rarely applied in day-to-day moderation.
