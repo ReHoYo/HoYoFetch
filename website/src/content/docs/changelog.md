@@ -3,7 +3,7 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
-## Unreleased — breaking administrative command cleanup
+## Version 3.4.0 — breaking administrative command cleanup
 
 Administrative setup is now grouped by resource so the same controllers can later back v4.5 dashboard panels. Superseded top-level commands are removed immediately, without aliases or warning handlers. Member commands, reporting, account lookup, manual moderation, `/Level`, `/Restart`, and `/Server-Info` are unchanged.
 

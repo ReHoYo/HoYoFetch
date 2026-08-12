@@ -405,7 +405,7 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ## 📝 Changelog
 
-### Unreleased — breaking administrative command cleanup
+### v3.4.0 — breaking administrative command cleanup
 
 Administrative commands now use resource-oriented names and subcommands that map directly to the future v4.5 dashboard control panels. Superseded routes are removed immediately; there are no warning aliases, and the repository has no per-command telemetry from which to infer their real-world usage.
 
