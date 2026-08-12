@@ -2599,6 +2599,19 @@ export function createPostGate(
     });
   }
 
+  /**
+   * Post Gate has two independent layers: the account-level full hold, and
+   * per-message queuing (a first link/media post, a contact-solicitation or
+   * identity match). Most accounts a moderator wants to "release" only ever
+   * hit the second layer — a queued post never creates a full hold — so
+   * release cannot be conditioned on a hold actually existing. Once
+   * authorized, it always grants the standing Post Gate exemption from
+   * future contact-solicitation, prohibited-identity, and first-post
+   * link/media screening (never the content-based term filter), and also
+   * releases the account-level hold when one happens to be active. A
+   * moderator can withdraw the exemption at any time with /Post-Gate hold or
+   * 🔒 Deny + Hold User, regardless of which action originally granted it.
+   */
   async function releaseUser(
     serverId,
     userId,
@@ -2606,30 +2619,38 @@ export function createPostGate(
     { reason = "manual" } = {}
   ) {
     return withLock(userHoldLocks, `${serverId}:${userId}`, async () => {
-      const existing = store.getUserHold(serverId, userId);
-      if (!existing?.active) return { outcome: "not_held" };
       if (!(await authorizeReviewChannelActor(serverId, moderatorId))) {
         return { outcome: "unauthorized" };
       }
-      const current = store.getUserHold(serverId, userId);
-      if (!current?.active) return { outcome: "not_held" };
 
       const releasedAt = now();
+      store.setPostGateApproved(serverId, userId, {
+        approvedAt: releasedAt,
+        approvedBy: moderatorId,
+      });
+
       const { released, record } = store.releaseUserHold(serverId, userId, {
         releasedBy: moderatorId,
         releasedAt,
         reason,
       });
-      if (!released) return { outcome: "not_held" };
-
-      // Release is the one action that grants a standing exemption from
-      // every automatic Post Gate screening trigger going forward. It never
-      // expires on its own — only a later moderator-initiated hold (the
-      // /Post-Gate hold command, or 🔒 deny + hold user) revokes it.
-      store.setPostGateApproved(serverId, userId, {
-        approvedAt: releasedAt,
-        approvedBy: moderatorId,
-      });
+      if (!released) {
+        logger.log?.(
+          `🛑  post-gate exempted-only server=${auditAlias(serverId)} actor=${auditAlias(userId)} moderator=${auditAlias(moderatorId)}`
+        );
+        await sendAccountability(
+          serverId,
+          "✅ Post Gate — Member Exempted",
+          [
+            `${actorLabel(userId)} was not in full Post Gate, so there was no hold to release.`,
+            "",
+            `**Marked exempt by:** ${actorLabel(moderatorId)}`,
+            "They are now exempt from future contact-solicitation, prohibited-identity, and first-post link/media screening, until a moderator holds them again.",
+          ],
+          "#2ECC71"
+        );
+        return { outcome: "exempted" };
+      }
 
       await deleteCard(record.cardChannelId, record.cardMessageId);
       await deleteCard(record.cardChannelId, record.lastReminderMessageId);
@@ -3022,15 +3043,21 @@ export function createPostGate(
     );
     const descriptions = {
       released: `${result.record ? holdActorLabel(result.record) : actorLabel(target.targetId)} was released and can post normally again. ${result.pending} held message(s) from them stay queued for individual review.`,
-      not_held: "That member is not currently in Post Gate.",
+      exempted: `${actorLabel(target.targetId)} was not currently in full Post Gate, so there was no hold to release — but they've been marked exempt from future contact-solicitation, prohibited-identity, and first-post link/media screening, until a moderator holds them again.`,
       unauthorized:
         "Fresh permission verification did not confirm Manage Messages in the review channel.",
     };
+    const positiveOutcome =
+      result.outcome === "released" || result.outcome === "exempted";
     await respond(
       channelIdFrom(message),
-      result.outcome === "released" ? "🔓 User Released" : "🛑 Release Result",
+      result.outcome === "released"
+        ? "🔓 User Released"
+        : result.outcome === "exempted"
+          ? "✅ Member Exempted"
+          : "🛑 Release Result",
       descriptions[result.outcome] ?? `Release status: ${result.outcome}.`,
-      result.outcome === "released" ? "#2ECC71" : "#E74C3C"
+      positiveOutcome ? "#2ECC71" : "#E74C3C"
     );
     return result;
   }

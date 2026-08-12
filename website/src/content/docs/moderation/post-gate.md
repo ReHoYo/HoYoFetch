@@ -168,15 +168,15 @@ A hold **never expires on a timer while the account remains a member**. After 24
 
 ### Releasing
 
-Release with 🔓 on the control or reminder card, or with `/Post-Gate release @member`. Both require freshly verified Manage Messages in the review channel, the same check the review actions use. Normal posting resumes immediately and the control card is removed.
+Release with 🔓 on the control or reminder card, or with `/Post-Gate release @member`. Both require freshly verified Manage Messages in the review channel, the same check the review actions use. If the account has an active account-level hold, normal posting resumes immediately and the control card is removed.
 
 **Messages already in the review queue stay queued.** Release only stops _future_ messages from being held; anything already waiting keeps its own review card and is approved or denied individually, and the release notice states how many are outstanding. A release is a judgement about the author, not about content no moderator has looked at yet — and it must never become a way to publish a queue nobody read.
 
-Releasing the account-level hold also grants the [Post Gate exemption](#post-gate-exemption) described below, exactly as approving a queued post does.
+Post Gate has two independent layers — the account-level full hold, and per-message queuing (a first link/media post, a contact-solicitation or identity match) — and most accounts a moderator wants to release only ever hit the second layer, since a queued post alone never creates a full hold. So `/Post-Gate release @member` is not conditioned on a hold actually existing: once authorized, it always grants the [Post Gate exemption](#post-gate-exemption) below, and additionally releases the account-level hold when one happens to be active. Running it on an account with no active hold reports **"Member Exempted"** rather than an error, and still posts an accountability notice.
 
 ### Post Gate exemption
 
-Approving a held post (✅), or releasing a full account-level hold (🔓 or `/Post-Gate release @member`), marks the author **permanently exempt** from Post Gate's automatic "unknown/new account" screening: the contact-solicitation match, the prohibited-term identity match, and the first-link/media-from-a-new-account check. This is the common path — most held posts (a first link, a first attachment, a term match) never place a full account-level hold, so approving is how the great majority of members actually earn it; releasing only matters for the smaller set of members who were fully held. The exemption:
+Approving a held post (✅), or running `/Post-Gate release @member` (🔓 also releases a control/reminder card the same way), marks the author **permanently exempt** from Post Gate's automatic "unknown/new account" screening: the contact-solicitation match, the prohibited-term identity match, and the first-link/media-from-a-new-account check. Both paths grant the exact same exemption, and neither requires the account to have an active full hold first — approving is how most members earn it day to day; releasing works whether or not a hold exists, so moderators don't need to check which layer caught an account before deciding to trust it. The exemption:
 
 - **Never expires on its own** — it does not depend on account age, tenure, or the 7-day retention window that eventually prunes an old hold's audit record.
 - Is keyed to the account, not to server membership, so it **survives the member leaving and rejoining**.
