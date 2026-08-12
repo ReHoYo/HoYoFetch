@@ -199,7 +199,7 @@ Read [Commands](/HoYoFetch/commands/) and [Permissions](/HoYoFetch/permissions/)
 ### Feature ownership
 
 - Does the change extend the module that already owns the behavior?
-- For moderation, audit logging, Automod, Post Gate, code fetching, or protected messages, did the agent trace the adjacent modules rather than adding a disconnected shortcut?
+- For moderation, audit logging, Post Gate Protection, Post Gate review, code fetching, or protected messages, did the agent trace the adjacent modules rather than adding a disconnected shortcut?
 - Does failure stop before a mutation when authorization or validation is uncertain?
 
 Use [Architecture](/HoYoFetch/administration/architecture/) to locate the existing ownership boundaries.

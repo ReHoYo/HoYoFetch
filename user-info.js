@@ -233,12 +233,12 @@ export function evaluateBotSignals(record, now = Date.now()) {
 
   if (record.automodStrikeLevel) {
     signals.push(
-      `Existing automod strike (stage ${record.automodStrikeLevel}/4)`
+      `Existing protection strike (stage ${record.automodStrikeLevel}/4)`
     );
   }
 
   if (record.hasActiveAutomodCase) {
-    signals.push("Has an open automod case");
+    signals.push("Has an open protection case");
   }
 
   if (record.spamReportCount > 0) {
@@ -417,11 +417,13 @@ export function buildUserInfoLines(
     );
   }
   if (record.automodStrikeLevel || verbose) {
-    lines.push(`**Automod strike stage:** ${record.automodStrikeLevel ?? 0}/4`);
+    lines.push(
+      `**Protection strike stage:** ${record.automodStrikeLevel ?? 0}/4`
+    );
   }
   if (record.hasActiveAutomodCase || verbose) {
     lines.push(
-      `**Open automod case:** ${record.hasActiveAutomodCase ? "yes" : "no"}`
+      `**Open protection case:** ${record.hasActiveAutomodCase ? "yes" : "no"}`
     );
   }
   if (record.spamReportCount > 0 || verbose) {

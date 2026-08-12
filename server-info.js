@@ -110,7 +110,7 @@ export function buildServerInfoEmbed(client, serverId, overrides = {}) {
     `**Audit log:** ${featureChannel(audit.enabled, audit.channelId)} · ${auditHealth(audit)}`,
     `**Member events:** ${memberEventHealth(audit.memberEvents)}`,
     `**Settings monitor:** ${settingsHealth(audit.settings)}`,
-    `**Automod:** ${modeChannel(automod.mode, automod.logChannelId)} · quorum ${integer(automod.quorum)}`,
+    `**Post Gate Protection:** ${modeChannel(automod.mode, automod.logChannelId)} · quorum ${integer(automod.quorum)}`,
     `**Post-gate:** ${modeChannel(postGate.mode, postGate.reviewChannelId)}`,
     `**Privacy exclusions:** ${Array.isArray(excluded) ? excluded.length : 0} channel(s)`,
     "",
@@ -247,7 +247,7 @@ function moderationLevelSummary(level, now) {
   const configured = Number(level?.level);
   if (!names[configured]) {
     return policy.raidActive
-      ? `off · shared raid policy Level 2 for Automod until ${new Date(policy.raidModeExpiresAt).toISOString()}`
+      ? `off · shared raid policy Level 2 for protection until ${new Date(policy.raidModeExpiresAt).toISOString()}`
       : "off";
   }
   if (policy.effectiveLevel !== configured) {

@@ -495,7 +495,7 @@ test("three unique reporters raise priority without calling moderation endpoints
   );
   assert.match(
     harness.protectedLogs.at(-1).payload.embeds[0].description,
-    /No automatic timeout, deletion, kick, ban, or automod strike/
+    /No automatic timeout, deletion, kick, ban, or protection strike/
   );
   assert.ok(
     harness.requests.every(

@@ -7,14 +7,14 @@ Irminsul moderation is designed around exact permission checks, explicit reasons
 
 Member safety reports use the same protected-record destination but are not moderation actions. A report can raise a staff-review priority when several independent members report the same account, but it never changes the target's account or server state.
 
-Anti-abuse coverage is layered but uses one effective server policy. A five-member join surge establishes a persisted 30-minute Level 2 floor; [Post Gate and server levels](/HoYoFetch/moderation/post-gate/) widen targeted link/media checks, while enabled Automod applies the same recent-identity windows to actual message behavior. The surge alone never punishes anyone and never enters lockdown. Post Gate can also review a prohibited term, every message from a held member, or place the whole server into Level 3–4 lockdown. Holding a post does not change the author's automod strike stage; rejecting it advances the shared four-stage timeout ladder without immediately applying a timeout.
+Anti-abuse coverage is layered but uses one effective server policy. A five-member join surge establishes a persisted 30-minute Level 2 floor; [Post Gate and server levels](/HoYoFetch/moderation/post-gate/) widen targeted link/media checks, while enabled Post Gate Protection applies the same recent-identity windows to actual message behavior. The surge alone never punishes anyone and never enters lockdown. Post Gate can also review a prohibited term, every message from a held member, or place the whole server into Level 3–4 lockdown. Holding a post does not change the author's protection strike stage; rejecting it advances the shared four-stage timeout ladder without immediately applying a timeout.
 
 ## Before the first action
 
 Configure an audit destination and test it:
 
 ```text
-/AuditLog here
+/AuditLog set here
 /AuditLog test
 ```
 
@@ -39,7 +39,7 @@ Stoat does not provide command interaction buttons, so Irminsul uses reactions f
 - a 1h–1y message-cleanup picker after every ban, kick, and mute;
 - a window picker and then a ✅/❌ confirmation for `/Purge-User`;
 - ten-minute undo windows for bans and mutes;
-- staff approvals for automod ban cases; and
+- staff approvals for protection ban cases; and
 - ✅/❌ approve/discard review of a held first post; and
 - the invoker-only two-minute confirmation for server Level 4.
 
@@ -51,4 +51,4 @@ History cleanup covers only messages Irminsul observed while archiving was activ
 
 Results never claim complete erasure. Every message Irminsul could not delete is reported by cause — already gone from Stoat, blocked by a missing Manage Messages permission, still rate limited, or failed outright — so a partial result says what to do about it rather than only how many were lost. A message that Stoat no longer has is reconciled into the archive rather than counted as a failure, so repeat cleanups stop retrying it.
 
-Continue to [Spam reports](/HoYoFetch/moderation/spam-reports/), [Manual actions](/HoYoFetch/moderation/manual-actions/), [Audit log](/HoYoFetch/moderation/audit-log/), [Automod](/HoYoFetch/moderation/automod/), or [Post Gate](/HoYoFetch/moderation/post-gate/).
+Continue to [Spam reports](/HoYoFetch/moderation/spam-reports/), [Manual actions](/HoYoFetch/moderation/manual-actions/), [Audit log](/HoYoFetch/moderation/audit-log/), or [Post Gate](/HoYoFetch/moderation/post-gate/).

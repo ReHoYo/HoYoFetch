@@ -148,8 +148,8 @@ export function createAuditLogConfiguration(
       configured
         ? `Audit logging is active in ${channelLabel(
             configured
-          )}.${pendingLine}\nUse \`${commandName()} here\`, \`${commandName()} #channel\`, or \`${commandName()} off\` to request a change.`
-        : `Audit logging is off.${pendingLine}\nUse \`${commandName()} here\` or \`${commandName()} #channel\` to request enabling it.`,
+          )}.${pendingLine}\nUse \`${commandName()} set here\`, \`${commandName()} set #channel\`, or \`${commandName()} off\` to request a change.`
+        : `Audit logging is off.${pendingLine}\nUse \`${commandName()} set here\` or \`${commandName()} set #channel\` to request enabling it.`,
       configured ? "#3498DB" : "#808080"
     );
     return {
@@ -608,23 +608,33 @@ export function createAuditLogConfiguration(
     if (action === "off" && !second && !extra.length) {
       return requestChange(message, "disable");
     }
-    if (second || extra.length) {
+    if (action !== "set") {
       await respond(
         channelIdFrom(message),
         "⚠️ Invalid Audit Log Command",
-        `Use \`${commandName()} status\`, \`${commandName()} test\`, \`${commandName()} here\`, \`${commandName()} #channel\`, \`${commandName()} off\`, \`${commandName()} confirm CODE\`, or \`${commandName()} cancel\`.`,
+        `Use \`${commandName()} status\`, \`${commandName()} test\`, \`${commandName()} set here\`, \`${commandName()} set #channel\`, \`${commandName()} off\`, \`${commandName()} privacy ...\`, \`${commandName()} confirm CODE\`, or \`${commandName()} cancel\`.`,
         "#E74C3C"
       );
       return { outcome: "invalid_command" };
     }
-
+    if (!second || extra.length) {
+      await respond(
+        channelIdFrom(message),
+        "⚠️ Invalid Audit Log Channel",
+        `Use \`${commandName()} set here\` or \`${commandName()} set #channel\`.`,
+        "#E74C3C"
+      );
+      return { outcome: "invalid_channel" };
+    }
     const targetId =
-      action === "here" ? channelIdFrom(message) : parseChannelArg(first);
+      second.toLowerCase() === "here"
+        ? channelIdFrom(message)
+        : parseChannelArg(second);
     if (!targetId) {
       await respond(
         channelIdFrom(message),
         "⚠️ Invalid Audit Log Channel",
-        `Use \`${commandName()} here\`, a channel mention or ID, \`${commandName()} status\`, or \`${commandName()} off\`.`,
+        `Use \`${commandName()} set here\` or provide one channel mention or ID.`,
         "#E74C3C"
       );
       return { outcome: "invalid_channel" };

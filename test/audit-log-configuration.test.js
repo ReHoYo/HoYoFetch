@@ -183,6 +183,7 @@ function directMessage(authorId, content) {
 test("canonical enable waits for relayed Enka approval", async () => {
   const harness = makeHarness();
   const requested = await harness.coordinator.handleCommand(serverMessage(), [
+    "set",
     TARGET_ID,
   ]);
   assert.equal(requested.outcome, "requested");
@@ -218,7 +219,7 @@ test("test is a read-only canonical AuditLog subcommand", async () => {
 
 test("moving and disabling preserve the old destination until approval", async () => {
   const harness = makeHarness({ initialChannelId: SOURCE_ID });
-  await harness.coordinator.handleCommand(serverMessage(), [TARGET_ID]);
+  await harness.coordinator.handleCommand(serverMessage(), ["set", TARGET_ID]);
   assert.equal(harness.auditChannelId, SOURCE_ID);
   assert.ok(
     harness.protectedLogs.some(
@@ -257,9 +258,16 @@ test("status and no-op mutations do not generate approval codes", async () => {
     "status"
   );
   assert.equal(
-    (await harness.coordinator.handleCommand(serverMessage(), ["here"]))
+    (await harness.coordinator.handleCommand(serverMessage(), ["set", "here"]))
       .outcome,
     "no_change"
+  );
+  assert.equal(harness.dmPayloads.length, 0);
+
+  assert.equal(
+    (await harness.coordinator.handleCommand(serverMessage(), ["here"]))
+      .outcome,
+    "invalid_command"
   );
   assert.equal(harness.dmPayloads.length, 0);
 
@@ -274,7 +282,7 @@ test("status and no-op mutations do not generate approval codes", async () => {
 
 test("only Enka DMs can approve or deny an audit change", async () => {
   const harness = makeHarness();
-  await harness.coordinator.handleCommand(serverMessage(), [TARGET_ID]);
+  await harness.coordinator.handleCommand(serverMessage(), ["set", TARGET_ID]);
   assert.equal(
     await harness.gate.handleDirectMessage(
       directMessage(OTHER_USER_ID, "123456")
@@ -311,7 +319,7 @@ test("failed Enka DM opening or delivery leaves configuration unchanged", async 
 
 test("wrong and expired codes cannot change audit configuration", async () => {
   const harness = makeHarness();
-  await harness.coordinator.handleCommand(serverMessage(), [TARGET_ID]);
+  await harness.coordinator.handleCommand(serverMessage(), ["set", TARGET_ID]);
   for (const code of ["000000", "000001"]) {
     assert.equal(
       (
@@ -334,7 +342,7 @@ test("wrong and expired codes cannot change audit configuration", async () => {
   );
   assert.equal(harness.auditChannelId, null);
 
-  await harness.coordinator.handleCommand(serverMessage(), [TARGET_ID]);
+  await harness.coordinator.handleCommand(serverMessage(), ["set", TARGET_ID]);
   harness.advance(APPROVAL_CHALLENGE_TTL_MS + 1);
   assert.equal(
     (
@@ -350,7 +358,7 @@ test("wrong and expired codes cannot change audit configuration", async () => {
 
 test("only the requester or Enka can cancel an audit request", async () => {
   const harness = makeHarness();
-  await harness.coordinator.handleCommand(serverMessage(), [TARGET_ID]);
+  await harness.coordinator.handleCommand(serverMessage(), ["set", TARGET_ID]);
   assert.equal(
     (
       await harness.coordinator.handleCommand(serverMessage(OTHER_USER_ID), [
@@ -374,7 +382,10 @@ test("only the requester or Enka can cancel an audit request", async () => {
 
 test("approval revalidates the previous state and target permission", async () => {
   const staleState = makeHarness();
-  await staleState.coordinator.handleCommand(serverMessage(), [TARGET_ID]);
+  await staleState.coordinator.handleCommand(serverMessage(), [
+    "set",
+    TARGET_ID,
+  ]);
   staleState.setAuditChannel(SOURCE_ID);
   assert.equal(
     (
@@ -389,7 +400,10 @@ test("approval revalidates the previous state and target permission", async () =
   assert.equal(staleState.configurationChanges, 0);
 
   const staleTarget = makeHarness();
-  await staleTarget.coordinator.handleCommand(serverMessage(), [TARGET_ID]);
+  await staleTarget.coordinator.handleCommand(serverMessage(), [
+    "set",
+    TARGET_ID,
+  ]);
   staleTarget.setTargetCanSend(false);
   assert.equal(
     (
@@ -416,6 +430,7 @@ test("one shared gate rejects conflicting protected actions per server", async (
     onApproved: async () => ({ outcome: "excluded" }),
   });
   const result = await harness.coordinator.handleCommand(serverMessage(), [
+    "set",
     TARGET_ID,
   ]);
   assert.equal(result.outcome, "pending_exists");
@@ -424,7 +439,7 @@ test("one shared gate rejects conflicting protected actions per server", async (
 
 test("default DM lookup is pinned to Enka and never uses bot-owner lookup", async () => {
   const harness = makeHarness();
-  await harness.coordinator.handleCommand(serverMessage(), [TARGET_ID]);
+  await harness.coordinator.handleCommand(serverMessage(), ["set", TARGET_ID]);
   assert.ok(
     harness.requests.some(
       ({ method, path }) =>

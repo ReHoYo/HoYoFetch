@@ -43,7 +43,7 @@ The bot token grants control of the bot account. Keep it in secret storage on th
 
 ## Runtime changes
 
-`/EmojiMode unicode` and `/EmojiMode custom` change the current process without editing `.env`. `/EmojiSetup`, run in the configured `EMOJI_HUB_SERVER_ID` server, auto-provisions the custom emoji `/EmojiMode custom` then renders — see [Custom emoji](/HoYoFetch/codes/custom-emoji/). Channel subscriptions, audit configuration, automod configuration, cases, strikes, spam-report correlation metadata, protected records, known codes, and the provisioned emoji registry are persisted locally.
+`/Emoji mode unicode` and `/Emoji mode custom` change the current process without editing `.env`. `/Emoji provision`, run in the configured `EMOJI_HUB_SERVER_ID` server, auto-provisions the custom emoji `/Emoji mode custom` then renders — see [Custom emoji](/HoYoFetch/codes/custom-emoji/). Channel subscriptions, audit configuration, Post Gate Protection configuration, cases, strikes, spam-report correlation metadata, protected records, known codes, and the provisioned emoji registry are persisted locally.
 
 ## Debug logging
 
@@ -51,4 +51,4 @@ The bot token grants control of the bot account. Keep it in secret storage on th
 
 ## Sensitive-action approver
 
-This in-house deployment sends audit-log configuration and `/Exclude-Channel` approval codes exclusively to **Enka#4961**. The approver is pinned in the application and has no environment-variable override. If Irminsul cannot open or send the DM, the request fails closed: audit configuration and privacy exclusions remain unchanged.
+This in-house deployment sends `/AuditLog` destination and privacy approval codes exclusively to **Enka#4961**. The approver is pinned in the application and has no environment-variable override. If Irminsul cannot open or send the DM, the request fails closed: audit configuration and privacy exclusions remain unchanged.

@@ -109,7 +109,7 @@ export function createRaidModeCoordinator({
     await notify(
       serverId,
       "✅ Shared Raid Mode Ended",
-      `The automatic Level 2 floor expired. The effective server policy is now Level ${policy.effectiveLevel}${policy.configuredLevel ? ` (configured Level ${policy.configuredLevel})` : " for Automod only"}.`,
+      `The automatic Level 2 floor expired. The effective server policy is now Level ${policy.effectiveLevel}${policy.configuredLevel ? ` (configured Level ${policy.configuredLevel})` : " for Post Gate Protection only"}.`,
       "#2ECC71"
     );
     logger.log?.(`✅  raid-mode expired server=${auditAlias(serverId)}`);
@@ -179,7 +179,7 @@ export function createRaidModeCoordinator({
       await notify(
         serverId,
         "🚨 Shared Raid Mode Activated",
-        `${state.joins.length} members joined within 60 seconds. A temporary Level 2 floor is active until ${new Date(raidMode.expiresAt).toISOString()}. Post Gate uses targeted 14-day account and 3-day membership checks when enabled; Automod still requires message behavior and a score of 2. **No member was punished by the join surge alone.**`,
+        `${state.joins.length} members joined within 60 seconds. A temporary Level 2 floor is active until ${new Date(raidMode.expiresAt).toISOString()}. Post Gate uses targeted 14-day account and 3-day membership checks when enabled; protection still requires message behavior and a score of 2. **No member was punished by the join surge alone.**`,
         "#E67E22"
       );
       logger.log?.(

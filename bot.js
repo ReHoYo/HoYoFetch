@@ -45,6 +45,7 @@ import {
   enableChannel,
   disableChannel,
   isChannelEnabled,
+  getChannelScope,
   getEnabledChannels,
   detectNewCodes,
   seedKnownCodes,
@@ -71,6 +72,9 @@ import {
 } from "./auditlog.js";
 import { createEnkaApprovalGate } from "./approval-gate.js";
 import { createAuditLogConfiguration } from "./audit-log-configuration.js";
+import { createAuditLogCommand } from "./audit-log-command.js";
+import { createAutoFetchCommand } from "./auto-fetch-command.js";
+import { createEmojiCommand } from "./emoji-command.js";
 import { createTamperProtection } from "./tamper-protection.js";
 import { createAutomod } from "./automod.js";
 import { createModeration } from "./moderation.js";
@@ -80,7 +84,7 @@ import { createChannelExclusion } from "./channel-exclusion.js";
 import { createPostGate } from "./post-gate.js";
 import { createRaidModeCoordinator } from "./raid-mode.js";
 import { DOCS_URL } from "./command-catalog.js";
-import { getCommandDispatch, parseAutoFetchScope } from "./command-routing.js";
+import { getCommandDispatch } from "./command-routing.js";
 import { buildLookupProbes, resolveAccountLookup } from "./account-lookup.js";
 import {
   describeUnresolvedUsernameToken,
@@ -115,6 +119,27 @@ let postGate = null;
 const tamperProtection = createTamperProtection(client, {
   send: (channelId, data) => safeSend({ id: channelId }, data),
   request: apiRequest,
+});
+const autoFetchCommand = createAutoFetchCommand({
+  sendProtected: tamperProtection.sendProtected,
+  store: {
+    enableChannel,
+    disableChannel,
+    isChannelEnabled,
+    getChannelScope,
+  },
+  prefix: CONFIG.prefix,
+});
+const emojiCommand = createEmojiCommand({
+  client,
+  send: (channel, data) => safeSend(channel, data),
+  prefix: CONFIG.prefix,
+  emojiHubServerId: CONFIG.emojiHubServerId,
+  manifestLength: EMOJI_ICON_MANIFEST.length,
+  getEmojiMode,
+  setEmojiMode,
+  getRegistry: getEmojiRegistryMap,
+  provision: provisionEmoji,
 });
 const raidMode = createRaidModeCoordinator({
   sendProtected: tamperProtection.sendProtected,
@@ -261,6 +286,10 @@ const auditLogConfiguration = createAuditLogConfiguration(client, {
   testAuditLog: handleTestAuditLog,
   configurationChanged: (serverId) => auditLog.configurationChanged(serverId),
 });
+const auditLogCommand = createAuditLogCommand({
+  auditLogConfiguration,
+  channelExclusion,
+});
 
 // ── Error handler ──────────────────────────────────
 client.on("error", (err) => {
@@ -289,7 +318,7 @@ client.on("ready", async () => {
   console.log(`   Enabled channels: ${getEnabledChannels().length}`);
 
   // Apply any previously-provisioned custom emoji on top of the hardcoded
-  // seed, so a restart doesn't lose emoji /EmojiSetup already created.
+  // seed, so a restart doesn't lose emoji /Emoji provision already created.
   const provisionedEmojiCount = setCustomEmojiRegistry(getEmojiRegistryMap());
   if (provisionedEmojiCount > 0) {
     console.log(`   Custom emoji: ${provisionedEmojiCount} provisioned`);
@@ -417,25 +446,8 @@ client.on("messageCreate", async (message) => {
       case "fetch":
         await handleFetchCommand(message, COMMAND_GAME_MAP[cmd]);
         return;
-      case "enable_fetch": {
-        const parsed = parseAutoFetchScope(cmdArgs);
-        if (!parsed.ok) {
-          await safeSend(message.channel, {
-            embeds: [
-              buildStatusEmbed(
-                "⚠️ Invalid Auto-Fetch Scope",
-                `Use \`${CONFIG.prefix}EnableFetch [all|hoyo|nte|wuwa|nte-wuwa]\`.`,
-                "#E74C3C"
-              ),
-            ],
-          });
-          return;
-        }
-        await handleEnableFetch(message, parsed.scope);
-        return;
-      }
-      case "disable_fetch":
-        await handleDisableFetch(message);
+      case "auto_fetch":
+        await autoFetchCommand.handleCommand(message, cmdArgs);
         return;
       case "restart":
         await handleRestart(message);
@@ -451,38 +463,39 @@ client.on("messageCreate", async (message) => {
       case "docs":
         await handleDocs(message);
         return;
-      case "emoji_mode":
-        await handleEmojiMode(message, cmdArgs.join(" ").toLowerCase());
-        return;
-      case "emoji_setup":
-        await handleEmojiSetup(message, cmdArgs.join(" ").toLowerCase());
+      case "emoji":
+        await emojiCommand.handleCommand(message, cmdArgs);
         return;
       case "audit_log":
-        await auditLogConfiguration.handleCommand(message, cmdArgs);
-        return;
-      case "exclude_channel":
-        await channelExclusion.handleCommand(message, cmdArgs);
+        await auditLogCommand.handleCommand(message, cmdArgs);
         return;
       case "post_gate":
+        if (cmdArgs[0]?.toLowerCase() === "protection") {
+          const protectionArgs = cmdArgs.slice(1);
+          if (protectionArgs[0]?.toLowerCase() === "release") {
+            await moderation.handleCommand(
+              message,
+              "automod-release",
+              protectionArgs.slice(1)
+            );
+            return;
+          }
+          await safeSend(message.channel, {
+            embeds: [
+              await automod.handleCommand(
+                message,
+                protectionArgs,
+                `${CONFIG.prefix}Post-Gate protection`,
+                { allowStatus: false }
+              ),
+            ],
+          });
+          return;
+        }
         await postGate.handleCommand(message, cmdArgs);
         return;
       case "level":
         await postGate.handleLevelCommand(message, cmdArgs);
-        return;
-      case "automod":
-        if (cmdArgs[0]?.toLowerCase() === "release") {
-          await moderation.handleCommand(
-            message,
-            "automod-release",
-            cmdArgs.slice(1)
-          );
-          return;
-        }
-        await safeSend(message.channel, {
-          embeds: [
-            await automod.handleCommand(message, cmdArgs, CONFIG.prefix),
-          ],
-        });
         return;
       case "manual_moderation":
         await moderation.handleCommand(message, cmd, cmdArgs);
@@ -602,67 +615,6 @@ async function handleFetchCommand(message, gameKey) {
   if (loadingMsg?._id) await safeDelete(message.channel.id, loadingMsg._id);
 }
 
-async function handleEnableFetch(message, scope = "all") {
-  const channelId = message.channelId;
-  const result = enableChannel(channelId, scope);
-  const scopeLabel = getScopeLabel(result.currentScope);
-
-  if (result.wasEnabled && !result.changed) {
-    await tamperProtection.sendProtected(message.channel, {
-      embeds: [
-        buildStatusEmbed(
-          "ℹ️ Already Enabled",
-          `Auto-fetch is already active in this channel for ${scopeLabel}.`,
-          "#3498DB"
-        ),
-      ],
-    });
-    return;
-  }
-
-  const title = result.wasEnabled
-    ? "✅ Auto-Fetch Updated"
-    : "✅ Auto-Fetch Enabled";
-  await tamperProtection.sendProtected(message.channel, {
-    embeds: [
-      buildStatusEmbed(
-        title,
-        `This channel will now receive new ${scopeLabel} automatically every hour.\n` +
-          `Use \`${CONFIG.prefix}DisableFetch\` to stop.`,
-        "#2ECC71"
-      ),
-    ],
-  });
-}
-
-async function handleDisableFetch(message) {
-  const channelId = message.channelId;
-
-  if (!isChannelEnabled(channelId)) {
-    await tamperProtection.sendProtected(message.channel, {
-      embeds: [
-        buildStatusEmbed(
-          "ℹ️ Already Disabled",
-          "Auto-fetch is not active in this channel.",
-          "#3498DB"
-        ),
-      ],
-    });
-    return;
-  }
-
-  disableChannel(channelId);
-  await tamperProtection.sendProtected(message.channel, {
-    embeds: [
-      buildStatusEmbed(
-        "🔕 Auto-Fetch Disabled",
-        "This channel will no longer receive automatic code updates.",
-        "#E67E22"
-      ),
-    ],
-  });
-}
-
 async function handleTestAuditLog(message) {
   const status = runAuditLogTest(message.server.id);
 
@@ -671,7 +623,7 @@ async function handleTestAuditLog(message) {
       embeds: [
         buildStatusEmbed(
           "ℹ️ Audit Log Not Enabled",
-          `Audit logging is not active in this server. Run \`${CONFIG.prefix}AuditLog here\` in the channel that should receive the log.`,
+          `Audit logging is not active in this server. Run \`${CONFIG.prefix}AuditLog set here\` in the channel that should receive the log.`,
           "#3498DB"
         ),
       ],
@@ -829,167 +781,8 @@ async function handleDocs(message) {
     embeds: [
       buildStatusEmbed(
         "📚 Irminsul Documentation",
-        `Use the searchable command, moderation, audit-log, and automod guides at [${DOCS_URL}](${DOCS_URL}).`,
+        `Use the searchable command, moderation, audit-log, and Post Gate Protection guides at [${DOCS_URL}](${DOCS_URL}).`,
         "#5865F2"
-      ),
-    ],
-  });
-}
-
-async function handleEmojiMode(message, arg) {
-  // No argument → report the current mode.
-  if (!arg) {
-    await safeSend(message.channel, {
-      embeds: [
-        buildStatusEmbed(
-          "🎨 Emoji Mode",
-          `Current mode: **${getEmojiMode()}**.\n` +
-            `Use \`${CONFIG.prefix}EmojiMode unicode\` or \`${CONFIG.prefix}EmojiMode custom\` to change it.`,
-          "#3498DB"
-        ),
-      ],
-    });
-    return;
-  }
-
-  if (!setEmojiMode(arg)) {
-    await safeSend(message.channel, {
-      embeds: [
-        buildStatusEmbed(
-          "⚠️ Invalid mode",
-          `\`${arg}\` is not valid. Choose **unicode** or **custom**.`,
-          "#E74C3C"
-        ),
-      ],
-    });
-    return;
-  }
-
-  await safeSend(message.channel, {
-    embeds: [
-      buildStatusEmbed(
-        "✅ Emoji Mode Updated",
-        `Emoji rendering is now set to **${getEmojiMode()}**.`,
-        "#2ECC71"
-      ),
-    ],
-  });
-}
-
-const EMOJI_SETUP_FAILURE_REASONS = {
-  hub_not_configured: "No emoji hub configured. Set `EMOJI_HUB_SERVER_ID`.",
-  fetch_emojis_failed: "Could not read the hub server's existing emoji list.",
-};
-
-/**
- * `/EmojiSetup` — auto-provisions reward icons as custom emoji. Only
- * mutates anything when run inside the configured hub server; everywhere
- * else (and with the `status` argument) it just reports coverage, so the
- * hub server is effectively the only place that can spend its emoji budget.
- */
-async function handleEmojiSetup(message, arg) {
-  const server = message.server;
-  const isHub = Boolean(
-    CONFIG.emojiHubServerId && server?.id === CONFIG.emojiHubServerId
-  );
-
-  if (arg === "status" || !isHub) {
-    const provisioned = Object.keys(getEmojiRegistryMap()).length;
-    const total = EMOJI_ICON_MANIFEST.length;
-    const hubNote = !CONFIG.emojiHubServerId
-      ? "\nNo hub server configured — set `EMOJI_HUB_SERVER_ID` first."
-      : isHub
-        ? ""
-        : "\nRun `/EmojiSetup` in the configured hub server to provision or update icons.";
-    await safeSend(message.channel, {
-      embeds: [
-        buildStatusEmbed(
-          "🎨 Emoji Setup — Status",
-          `**${provisioned} of ${total}** reward keywords have a provisioned custom emoji.\n` +
-            `Emoji mode: **${getEmojiMode()}**.${hubNote}`,
-          "#3498DB"
-        ),
-      ],
-    });
-    return;
-  }
-
-  await safeSend(message.channel, {
-    embeds: [
-      buildStatusEmbed(
-        "⏳ Provisioning…",
-        `Downloading and uploading reward icons to **${server.name ?? server.id}**. A full run can take a minute.`,
-        "#F39C12"
-      ),
-    ],
-  });
-
-  let summary;
-  try {
-    summary = await provisionEmoji({ client });
-  } catch (err) {
-    await safeSend(message.channel, {
-      embeds: [
-        buildStatusEmbed(
-          "❌ Provisioning Failed",
-          `Something went wrong: ${safeErrorSummary(err)}`,
-          "#E74C3C"
-        ),
-      ],
-    });
-    return;
-  }
-
-  if (!summary.ok) {
-    const reason =
-      summary.error === "hub_not_found"
-        ? `Irminsul is not a member of hub server \`${summary.serverId}\`.`
-        : (EMOJI_SETUP_FAILURE_REASONS[summary.error] ??
-          `Provisioning failed: ${summary.error}`);
-    await safeSend(message.channel, {
-      embeds: [buildStatusEmbed("❌ Provisioning Failed", reason, "#E74C3C")],
-    });
-    return;
-  }
-
-  const colour =
-    summary.failed.length === 0
-      ? "#2ECC71"
-      : summary.created.length > 0 || summary.reused.length > 0
-        ? "#E67E22"
-        : "#E74C3C";
-
-  const lines = [
-    `**Created:** ${summary.created.length}`,
-    `**Reused:** ${summary.reused.length}`,
-    `**Skipped:** ${summary.skipped.length}`,
-    `**Failed:** ${summary.failed.length}`,
-    `**Capacity:** ${summary.capacity.used}/${summary.capacity.limit} server emoji used`,
-  ];
-
-  const failedLines = summary.failed
-    .slice(0, 10)
-    .map((f) => `\`${f.name}\`: ${f.reason}`);
-  if (failedLines.length > 0) {
-    lines.push("", "**Failures:**", ...failedLines);
-    if (summary.failed.length > 10) {
-      lines.push(`_…and ${summary.failed.length - 10} more_`);
-    }
-  }
-
-  lines.push(
-    "",
-    `Switch rendering over with \`${CONFIG.prefix}EmojiMode custom\`.`
-  );
-
-  await safeSend(message.channel, {
-    embeds: [
-      buildStatusEmbed(
-        summary.failed.length === 0
-          ? "✅ Emoji Setup Complete"
-          : "⚠️ Emoji Setup Finished With Errors",
-        lines.join("\n"),
-        colour
       ),
     ],
   });
@@ -1189,14 +982,6 @@ function scopeIncludesGame(scope, gameKey) {
   if (scope === "wuwa") return gameKey === WUWA_GAME_KEY;
   if (scope === "nte_wuwa") return GAME8_GAME_KEYS.includes(gameKey);
   return true;
-}
-
-function getScopeLabel(scope) {
-  if (scope === "hoyo") return "HoYoverse codes";
-  if (scope === "nte") return "NTE codes";
-  if (scope === "wuwa") return "WuWa codes";
-  if (scope === "nte_wuwa") return "NTE and WuWa codes";
-  return "HoYoverse, NTE, and WuWa codes";
 }
 
 function shouldUseSupervisorRestart() {

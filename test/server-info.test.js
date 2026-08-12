@@ -145,7 +145,7 @@ test("renders scoped archive, feature, runtime, and safe host diagnostics", () =
   );
   assert.match(
     embed.description,
-    /Automod:\*\* enforce in <#automodA> · quorum 2/
+    /Post Gate Protection:\*\* enforce in <#automodA> · quorum 2/
   );
   // The tenure threshold only means anything at level 3, so it is shown there.
   assert.match(embed.description, /Moderation level:\*\* 3 — lockdown/);

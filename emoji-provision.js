@@ -15,7 +15,7 @@
 // shows up in the returned summary, everything else still provisions.
 //
 // Two entry points:
-//   • provisionEmoji({ client, ... }) — called from bot.js's /EmojiSetup
+//   • provisionEmoji({ client, ... }) — called by /Emoji provision
 //     handler, reusing the already-connected client.
 //   • `node emoji-provision.js` / `npm run emoji:provision` — a headless
 //     CLI that logs in on its own, mirroring emergency-lockdown.js.

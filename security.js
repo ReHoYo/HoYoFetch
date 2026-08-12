@@ -43,6 +43,7 @@ const AUDIT_SALT = randomBytes(16);
 
 export function getCommandAccess(body, commandGameMap = {}) {
   if (Object.hasOwn(commandGameMap, body)) return COMMAND_ACCESS.MEMBER;
+  if (body === "emoji provision") return COMMAND_ACCESS.SERVER_MODERATOR;
   if (body === "ban" || body.startsWith("ban ")) return COMMAND_ACCESS.BAN;
   if (body === "kick" || body.startsWith("kick ")) return COMMAND_ACCESS.KICK;
   if (body === "mute" || body.startsWith("mute ")) {
@@ -51,14 +52,17 @@ export function getCommandAccess(body, commandGameMap = {}) {
   if (body === "purge-user" || body.startsWith("purge-user ")) {
     return COMMAND_ACCESS.MANAGE_MESSAGES;
   }
-  if (body === "automod approve" || body.startsWith("automod approve ")) {
+  if (
+    body === "post-gate protection approve" ||
+    body.startsWith("post-gate protection approve ")
+  ) {
     return COMMAND_ACCESS.BAN_APPROVER;
   }
-  if (body === "automod release" || body.startsWith("automod release ")) {
+  if (
+    body === "post-gate protection release" ||
+    body.startsWith("post-gate protection release ")
+  ) {
     return COMMAND_ACCESS.TIMEOUT;
-  }
-  if (body === "automod" || body.startsWith("automod ")) {
-    return COMMAND_ACCESS.FETCH_MANAGER;
   }
   if (
     body === "post-gate approve" ||

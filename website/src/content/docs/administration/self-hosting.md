@@ -114,4 +114,4 @@ Updating production generally has three separate steps:
 
 ## Backups
 
-Back up the configured data directory if you need continuity for subscriptions, protected records, audit baselines, automod cases, spam-report correlation, message content, and attachment metadata. Protect backups with the same access controls as the live data.
+Back up the configured data directory if you need continuity for subscriptions, protected records, audit baselines, protection cases, spam-report correlation, message content, and attachment metadata. Protect backups with the same access controls as the live data.

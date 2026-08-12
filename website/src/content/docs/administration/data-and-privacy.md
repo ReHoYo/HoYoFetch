@@ -25,7 +25,7 @@ When audit logging is active, server messages are journaled so later edit and de
 
 The archive is operational evidence. Restrict host access, include it in your community's retention policy, and avoid copying it into public bug reports.
 
-An approved `/Exclude-Channel` request purges that channel's existing archive entries and prevents new message content from entering the archive. Removing an exclusion affects only future messages; purged content is not restored.
+An approved `/AuditLog privacy exclude` request purges that channel's existing archive entries and prevents new message content from entering the archive. Including it again affects only future messages; purged content is not restored.
 
 ## Post Gate queue
 

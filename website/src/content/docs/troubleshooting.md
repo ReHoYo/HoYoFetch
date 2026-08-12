@@ -34,7 +34,7 @@ Irminsul checks effective permissions, not role names. Confirm the permission th
 
 - Ban Members for `/Ban`;
 - Kick Members for `/Kick`;
-- Timeout Members for `/Mute` and `/Automod release`;
+- Timeout Members for `/Mute` and `/Post-Gate protection release`;
 - Manage Messages for `/Purge-User` and ban cleanup.
 
 Also confirm the bot itself has the needed permission and sits high enough in the hierarchy. If fresh state cannot be verified, the command fails closed.
@@ -44,7 +44,7 @@ Also confirm the bot itself has the needed permission and sits high enough in th
 Configure and test it before trying again:
 
 ```text
-/AuditLog here
+/AuditLog set here
 /AuditLog test
 ```
 
@@ -80,7 +80,7 @@ Irminsul does not retain failed media on disk for retry. If an archive card itse
 
 Invites, webhooks, and changes made while the bot was offline are detected by periodic reconciliation. These records can show what changed but may not know the exact time or actor.
 
-## Automod did not contain a member
+## Post Gate Protection did not contain a member
 
 Check that the server is in enforcement mode, the score reached two with a message-behavior signal, and the bot has Timeout Members. Fresh permission verification failures intentionally downgrade the case to monitor-only.
 

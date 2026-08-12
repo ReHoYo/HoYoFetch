@@ -7,17 +7,17 @@ Irminsul checks its sources on a fixed interval and posts only codes that are ne
 
 ## Choose a feed
 
-Run `/EnableFetch` with the desired scope in the destination channel:
+Run `/Auto-Fetch enable` with the desired scope in the destination channel:
 
-| Command                 | Feed                              |
-| ----------------------- | --------------------------------- |
-| `/EnableFetch` or `all` | HoYoverse games, NTE, and WuWa    |
-| `/EnableFetch hoyo`     | Genshin Impact, HSR, ZZZ, and HI3 |
-| `/EnableFetch nte`      | NTE only                          |
-| `/EnableFetch wuwa`     | WuWa only                         |
-| `/EnableFetch nte-wuwa` | NTE and WuWa                      |
+| Command                              | Feed                              |
+| ------------------------------------ | --------------------------------- |
+| `/Auto-Fetch enable` or `enable all` | HoYoverse games, NTE, and WuWa    |
+| `/Auto-Fetch enable hoyo`            | Genshin Impact, HSR, ZZZ, and HI3 |
+| `/Auto-Fetch enable nte`             | NTE only                          |
+| `/Auto-Fetch enable wuwa`            | WuWa only                         |
+| `/Auto-Fetch enable nte-wuwa`        | NTE and WuWa                      |
 
-Running the command with a different scope updates the channel's existing subscription. Invalid or extra arguments are rejected. Run `/DisableFetch` in that channel to remove it.
+Running the command with a different scope updates the channel's existing subscription. `/Auto-Fetch status` reports the current channel, and `/Auto-Fetch off` removes its subscription. Invalid or extra arguments are rejected.
 
 ## What gets posted
 

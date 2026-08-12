@@ -192,6 +192,7 @@ function directMessage(authorId, content) {
 test("in-server confirmation persists an exclusion and purges its archive", async () => {
   const harness = makeHarness();
   const requested = await harness.coordinator.handleCommand(serverMessage(), [
+    "exclude",
     TARGET_ID,
   ]);
   assert.equal(requested.outcome, "requested");
@@ -216,7 +217,10 @@ test("in-server confirmation persists an exclusion and purges its archive", asyn
 
 test("three wrong codes destroy the pending challenge", async () => {
   const harness = makeHarness();
-  await harness.coordinator.handleCommand(serverMessage(), [TARGET_ID]);
+  await harness.coordinator.handleCommand(serverMessage(), [
+    "exclude",
+    TARGET_ID,
+  ]);
   for (const code of ["000000", "000001"]) {
     const result = await harness.coordinator.handleCommand(serverMessage(), [
       "confirm",
@@ -235,7 +239,10 @@ test("three wrong codes destroy the pending challenge", async () => {
 
 test("expired codes are rejected without changing state", async () => {
   const harness = makeHarness();
-  await harness.coordinator.handleCommand(serverMessage(), [TARGET_ID]);
+  await harness.coordinator.handleCommand(serverMessage(), [
+    "exclude",
+    TARGET_ID,
+  ]);
   harness.advance(EXCLUSION_CHALLENGE_TTL_MS + 1);
   const result = await harness.coordinator.handleCommand(serverMessage(), [
     "confirm",
@@ -247,7 +254,10 @@ test("expired codes are rejected without changing state", async () => {
 
 test("Enka can approve by DM with a bare code", async () => {
   const harness = makeHarness();
-  await harness.coordinator.handleCommand(serverMessage(), [TARGET_ID]);
+  await harness.coordinator.handleCommand(serverMessage(), [
+    "exclude",
+    TARGET_ID,
+  ]);
   assert.equal(
     await harness.coordinator.handleDirectMessage(
       directMessage(APPROVER_ID, "123456")
@@ -269,7 +279,10 @@ test("Enka can approve by DM with a bare code", async () => {
 
 test("non-Enka DMs are ignored even with a valid code", async () => {
   const harness = makeHarness();
-  await harness.coordinator.handleCommand(serverMessage(), [TARGET_ID]);
+  await harness.coordinator.handleCommand(serverMessage(), [
+    "exclude",
+    TARGET_ID,
+  ]);
   assert.equal(
     await harness.coordinator.handleDirectMessage(
       directMessage(OTHER_ID, "123456")
@@ -282,7 +295,10 @@ test("non-Enka DMs are ignored even with a valid code", async () => {
 
 test("Enka can deny a pending request by DM", async () => {
   const harness = makeHarness();
-  await harness.coordinator.handleCommand(serverMessage(), [TARGET_ID]);
+  await harness.coordinator.handleCommand(serverMessage(), [
+    "exclude",
+    TARGET_ID,
+  ]);
   assert.equal(
     await harness.coordinator.handleDirectMessage(
       directMessage(APPROVER_ID, "deny 123456")
@@ -302,12 +318,17 @@ test("Enka can deny a pending request by DM", async () => {
 test("audit channel cannot be excluded and a second request is refused", async () => {
   const harness = makeHarness();
   const auditResult = await harness.coordinator.handleCommand(serverMessage(), [
+    "exclude",
     AUDIT_ID,
   ]);
   assert.equal(auditResult.outcome, "audit_channel");
 
-  await harness.coordinator.handleCommand(serverMessage(), [TARGET_ID]);
+  await harness.coordinator.handleCommand(serverMessage(), [
+    "exclude",
+    TARGET_ID,
+  ]);
   const second = await harness.coordinator.handleCommand(serverMessage(), [
+    "exclude",
     SOURCE_ID,
   ]);
   assert.equal(second.outcome, "pending_exists");
@@ -316,6 +337,7 @@ test("audit channel cannot be excluded and a second request is refused", async (
 test("failed Enka DM leaves no pending request or exclusion", async () => {
   const harness = makeHarness({ dmFails: true });
   const result = await harness.coordinator.handleCommand(serverMessage(), [
+    "exclude",
     TARGET_ID,
   ]);
   assert.equal(result.outcome, "dm_failed");
@@ -326,6 +348,7 @@ test("failed Enka DM leaves no pending request or exclusion", async () => {
 test("an exception while opening Enka's DM fails closed", async () => {
   const harness = makeHarness({ dmOpenThrows: true });
   const result = await harness.coordinator.handleCommand(serverMessage(), [
+    "exclude",
     TARGET_ID,
   ]);
   assert.equal(result.outcome, "dm_failed");
@@ -336,6 +359,7 @@ test("an exception while opening Enka's DM fails closed", async () => {
 test("an invalid injected approver id fails closed", async () => {
   const harness = makeHarness({ approverUserId: "not-a-safe-id" });
   const result = await harness.coordinator.handleCommand(serverMessage(), [
+    "exclude",
     TARGET_ID,
   ]);
   assert.equal(result.outcome, "approver_unavailable");
@@ -349,7 +373,10 @@ test("an invalid injected approver id fails closed", async () => {
 
 test("only the requester or Enka can cancel a pending request", async () => {
   const harness = makeHarness();
-  await harness.coordinator.handleCommand(serverMessage(), [TARGET_ID]);
+  await harness.coordinator.handleCommand(serverMessage(), [
+    "exclude",
+    TARGET_ID,
+  ]);
 
   const refused = await harness.coordinator.handleCommand(
     serverMessage(OTHER_ID),
@@ -369,7 +396,10 @@ test("only the requester or Enka can cancel a pending request", async () => {
 
 test("removing an exclusion requires a fresh challenge", async () => {
   const harness = makeHarness();
-  await harness.coordinator.handleCommand(serverMessage(), [TARGET_ID]);
+  await harness.coordinator.handleCommand(serverMessage(), [
+    "exclude",
+    TARGET_ID,
+  ]);
   await harness.coordinator.handleCommand(serverMessage(), [
     "confirm",
     "123456",
@@ -377,7 +407,7 @@ test("removing an exclusion requires a fresh challenge", async () => {
   assert.equal(harness.store.isChannelExcluded(TARGET_ID), true);
 
   const requested = await harness.coordinator.handleCommand(serverMessage(), [
-    "remove",
+    "include",
     TARGET_ID,
   ]);
   assert.equal(requested.outcome, "requested");

@@ -35,21 +35,21 @@ For an in-chat summary, run `/HelpHoyoFetch`. For this full site, run `/Docs`.
 An authorized moderator can enable hourly announcements in the channel where the command is sent:
 
 ```text
-/EnableFetch
+/Auto-Fetch enable
 ```
 
 Choose a narrower feed when needed:
 
 ```text
-/EnableFetch hoyo
-/EnableFetch nte
-/EnableFetch wuwa
-/EnableFetch nte-wuwa
+/Auto-Fetch enable hoyo
+/Auto-Fetch enable nte
+/Auto-Fetch enable wuwa
+/Auto-Fetch enable nte-wuwa
 ```
 
-Run `/DisableFetch` in the channel to stop its announcements. Irminsul remembers subscribed channels across restarts.
+Run `/Auto-Fetch off` in the channel to stop its announcements. Irminsul remembers subscribed channels across restarts.
 
-`/EnableFetch` and `/EnableFetch all` cover every supported game. The scope argument selects HoYoverse-only, NTE-only, WuWa-only, or the combined NTE + WuWa feed.
+`/Auto-Fetch enable` and `/Auto-Fetch enable all` cover every supported game. The scope argument selects HoYoverse-only, NTE-only, WuWa-only, or the combined NTE + WuWa feed.
 
 :::tip[No old-code flood]
 On a fresh installation, Irminsul seeds the codes it can already see. Existing codes are not announced as newly discovered codes.
@@ -57,10 +57,10 @@ On a fresh installation, Irminsul seeds the codes it can already see. Existing c
 
 ## Prepare moderation features
 
-Before using `/Ban`, `/Kick`, `/Mute`, `/Purge-User`, or `/Automod release`, configure a protected audit destination:
+Before using `/Ban`, `/Kick`, `/Mute`, `/Purge-User`, or `/Post-Gate protection release`, configure a protected audit destination:
 
 ```text
-/AuditLog here
+/AuditLog set here
 ```
 
 Irminsul sends this enable request's one-time code exclusively to **Enka#4961**. Audit logging starts only after Enka approves in DM or releases the code for `/AuditLog confirm CODE`. If Enka cannot be reached, the request fails closed and logging remains off.

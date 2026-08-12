@@ -3,7 +3,7 @@ title: Post Gate
 description: Review risky first links or media, prohibited terms in messages and identities, DM and off-platform contact solicitations, and every message from a held member.
 ---
 
-Automod's behavioral detection (rapid bursts, duplicate floods, mention floods) needs several messages to accumulate before it triggers. The Post Gate holds individual messages a moderator should read first — a new member's opening link, attachment, or DM/off-platform contact solicitation; a prohibited term in a message, username, display name, or server nickname; or anything at all from a member already in Post Gate. It also supplies the protected review destination for server moderation Levels 1–2 and the transition notices for Levels 3–4.
+Post Gate Protection's behavioral detection (rapid bursts, duplicate floods, mention floods) needs several messages to accumulate before it triggers. The Post Gate queue holds individual messages a moderator should read first — a new member's opening link, attachment, or DM/off-platform contact solicitation; a prohibited term in a message, username, display name, or server nickname; or anything at all from a member already in Post Gate. It also supplies the protected review destination for server moderation Levels 1–2 and the transition notices for Levels 3–4.
 
 The post gate is **off by default for every server**.
 
@@ -12,8 +12,8 @@ The post gate is **off by default for every server**.
 At Levels 1–2, a message is deleted and queued for review only when **all** of these preconditions hold:
 
 - The server's post gate is in `hold` mode with a configured review channel.
-- The channel is not the review channel itself, and is not privacy-excluded via `/Exclude-Channel` — excluded channels retain nothing, so the gate never touches them.
-- The author is not a recognized moderator. This is checked with the same fresh permission verification `/Automod` uses, and fails closed: if the check itself is unavailable, nothing is held.
+- The channel is not the review channel itself, and is not privacy-excluded via `/AuditLog privacy exclude` — excluded channels retain nothing, so the gate never touches them.
+- The author is not a recognized moderator. This is checked with the same fresh permission verification Post Gate Protection uses, and fails closed: if the check itself is unavailable, nothing is held.
 
 Given that, **any one** of five triggers queues the message:
 
@@ -31,7 +31,7 @@ The last trigger, first link or media, additionally requires the author to be, b
 - the author joined this server less than 24 hours ago, or
 - the author has no other message Irminsul has archived in this server.
 
-Contact solicitation uses Automod's narrower existing **recent identity** condition: the account must be less than 7 days old or the server membership less than 24 hours old. The first-time-poster condition does not qualify an otherwise established account for contact screening.
+Contact solicitation uses Post Gate Protection's narrower existing **recent identity** condition: the account must be less than 7 days old or the server membership less than 24 hours old. The first-time-poster condition does not qualify an otherwise established account for contact screening.
 
 Levels 1 and 2 intentionally use the same triggers.
 
@@ -48,7 +48,7 @@ Irminsul does not notify an author when their message is held — a quiet hold i
 
 ## DM and off-platform contact solicitation
 
-At Levels 1–2 Irminsul checks a non-moderator's message and current profile bio for contact invitations only while Automod's existing recent-identity signal applies: the account is less than 7 days old or the server membership is less than 24 hours old. This identity signal defines eligibility only; no additional burst, flood, or score is required after the contact detector matches. Established accounts and established first-time posters are not checked. A match immediately creates a persistent [full-user hold](#holding-a-whole-member), deletes and queues the triggering message, and leaves every later message queued until a moderator releases the account. The automatic hold itself never applies an automod strike, timeout, or ban.
+At Levels 1–2 Irminsul checks a non-moderator's message and current profile bio for contact invitations only while Post Gate Protection's existing recent-identity signal applies: the account is less than 7 days old or the server membership is less than 24 hours old. This identity signal defines eligibility only; no additional burst, flood, or score is required after the contact detector matches. Established accounts and established first-time posters are not checked. A match immediately creates a persistent [full-user hold](#holding-a-whole-member), deletes and queues the triggering message, and leaves every later message queued until a moderator releases the account. The automatic hold itself never applies a protection strike, timeout, or ban.
 
 The built-in detector covers:
 
@@ -67,9 +67,9 @@ No finite text detector can catch arbitrary coded prose, base64, contact details
 
 ## Prohibited terms
 
-The prohibited-term filter closes the gap automod cannot: a single targeted slur produces none of the burst, duplicate-flood, or mention-flood behaviour automod scores on, so without this trigger it passes through untouched no matter who posts it.
+The prohibited-term filter closes the gap behavioral protection cannot: a single targeted slur produces none of the burst, duplicate-flood, or mention-flood behaviour that protection scores on, so without this trigger it passes through untouched no matter who posts it.
 
-**It only ever holds.** A match never bans, times out, or applies an automod strike by itself. The strike follows a moderator pressing Deny, exactly as it does for a link hold. This is deliberate: no term list is accurate enough to punish on automatically.
+**It only ever holds.** A match never bans, times out, or applies a protection strike by itself. The strike follows a moderator pressing Deny, exactly as it does for a link hold. This is deliberate: no term list is accurate enough to punish on automatically.
 
 ### How matching works
 
@@ -185,12 +185,73 @@ Approving a queued item also resolves only that item; it does not release the ac
 /Post-Gate terms
 ```
 
-Turning the gate on, moving its review channel, and turning it off each require the same two-step approval as `/AuditLog` and `/Exclude-Channel`:
+Turning the gate on, moving its review channel, and turning it off each require the same two-step approval as `/AuditLog` destination and privacy changes:
 
 1. A recognized moderator requests the change.
 2. Irminsul DMs a ten-minute, six-digit code exclusively to **Enka#4961**, who can reply with `approve CODE`, `deny CODE`, or the bare code, or relay it for `/Post-Gate confirm CODE` in the server.
 
-Only one protected request can be pending per server at a time (shared with `/AuditLog` and `/Exclude-Channel`'s own approvals), and three incorrect attempts destroy it. `/Post-Gate status` and reviewing a held post are both immediate and never require Enka's approval.
+Only one protected request can be pending per server at a time (shared with `/AuditLog` destination and privacy approvals), and three incorrect attempts destroy it. `/Post-Gate status` and reviewing a held post are both immediate and never require Enka's approval.
+
+## Post Gate Protection
+
+Post Gate Protection is **off by default for every server**. It is independent of the review queue: `/Post-Gate off` disables queued review, while `/Post-Gate protection off` disables behavioral detection. Begin in monitor mode and review real cases before allowing containment.
+
+### Modes
+
+| Mode    | Behavior                                                                                |
+| ------- | --------------------------------------------------------------------------------------- |
+| Off     | No behavioral anti-raid evaluation                                                      |
+| Monitor | Runs the detector and writes protected cases without changing messages or members       |
+| Enforce | May time out a member and clean triggering messages after fresh permission verification |
+
+```text
+/Post-Gate protection monitor here
+/Post-Gate protection enforce here
+/Post-Gate protection off
+/Post-Gate protection quorum 2
+```
+
+`/Post-Gate status` reports both queue and protection state for the server.
+
+### Detection score
+
+A case opens at two points when at least one message-behavior signal is present:
+
+- 5 messages within 5 seconds: **1 point**
+- 4 normalized duplicates within 10 seconds: **2 points**
+- 5 unique mentions within 10 seconds: **2 points**
+- Recent identity under the effective server policy: **1 point**
+
+At Level 1, recent identity means an account under 7 days or membership under 24 hours. At Level 2, it widens to an account under 14 days or membership under 3 days. The score threshold remains 2 at both levels, a behavioral signal remains mandatory, and shared Raid Mode itself adds no point. Bots and webhooks are excluded; the server owner and freshly verified moderation staff are exempt.
+
+### Containment strike stages
+
+Protection detections and rejected held posts advance the same persistent stage. Their immediate effects differ:
+
+| Stored stage after the event | Direct protection trigger                                         | Post Gate rejection                   | Next direct protection trigger |
+| ---------------------------- | ----------------------------------------------------------------- | ------------------------------------- | ------------------------------ |
+| Stage 1                      | 10-minute timeout in enforce mode; projected only in monitor mode | No timeout                            | Stage 2 (1 hour)               |
+| Stage 2                      | 1-hour timeout in enforce mode; projected only in monitor mode    | No timeout                            | Stage 3 (24 hours)             |
+| Stage 3                      | 24-hour timeout in enforce mode; projected only in monitor mode   | No timeout                            | Stage 4 (7 days)               |
+| Stage 4                      | 7-day timeout in enforce mode; projected only in monitor mode     | No timeout; remains capped at stage 4 | Stage 4 (7 days)               |
+
+The first stage-advancing event after a reset reaches stage 1 and refreshes the 14-day quiet-reset clock. Approval, expiry, and the act of holding a post do not change the stage. Activity while the same timeout is active extends containment without advancing the stage or opening another approval prompt.
+
+### Permanent bans require people
+
+Protection case bans are never automatic. A contained case opens a separate ten-minute approval window. Production defaults to two distinct authorized staff approvals, using 🔨 or:
+
+```text
+/Post-Gate protection approve CASE_ID
+```
+
+Use `/Post-Gate protection quorum 1` only for a single-moderator sandbox and restore quorum two before production. Release a false positive with `/Post-Gate protection release @member reason`; that action requires Timeout Members.
+
+This is separate from server-wide `/Level 4`, which is explicitly armed by a moderator and automatically bans non-exempt authors whose messages reach Irminsul through the lockdown permission barrier.
+
+:::note[Permission refresh failure]
+If fresh authorization cannot be verified, an enforcement trigger is downgraded to monitor-only.
+:::
 
 ## Server moderation levels
 
@@ -218,7 +279,7 @@ Use the lowest level that fits the incident, then downgrade when the risk has pa
 | Level                      | Recommended situation                                                                             | What members experience                                                                                   | Important limitation                                                                                   |
 | -------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | **1 — Routine**            | Normal day-to-day operation                                                                       | Normal conversation continues; qualifying link/media posts from new or first-time members wait for review | Text-only posts are not held                                                                           |
-| **2 — Elevated**           | A small suspected bot raid or credible warning                                                    | Ordinary text flows; targeted link/media and Automod identity windows widen to 14d/3d                     | Automod still requires behavior and score 2; contact/profile screening stays at 7d/24h                 |
+| **2 — Elevated**           | A small suspected bot raid or credible warning                                                    | Ordinary text flows; targeted link/media and protection identity windows widen to 14d/3d                  | Protection still requires behavior and score 2; contact/profile screening stays at 7d/24h              |
 | **3 — Raid lockdown**      | A large or active raid where stopping message volume matters more than uninterrupted conversation | The default role cannot send; non-exempt messages that bypass the lock are silently deleted               | Authors are not automatically banned                                                                   |
 | **4 — Emergency lockdown** | The most severe raid, when bypass attempts should be removed from the server                      | Level 3's lockdown remains active; non-exempt authors who post through an override are also banned        | Irminsul cannot ban an ordinary blocked sender because Stoat creates no message event identifying them |
 
@@ -226,11 +287,11 @@ Levels 1–2 are preventative review modes. They catch common link and media bot
 
 ### Shared Raid Mode
 
-Five unique non-bot joins in a rolling 60-second window activate a persisted 30-minute Level 2 floor when either Post Gate or Automod is enabled. Continuing qualifying bursts refresh the expiry at most once per minute without posting repeat warnings. The join window itself is in memory and restarts empty, while an already-active floor survives a restart.
+Five unique non-bot joins in a rolling 60-second window activate a persisted 30-minute Level 2 floor when either the Post Gate queue or Post Gate Protection is enabled. Continuing qualifying bursts refresh the expiry at most once per minute without posting repeat warnings. The join window itself is in memory and restarts empty, while an already-active floor survives a restart.
 
-The effective policy is the higher of the configured `/Level` and the automatic floor. Raid Mode therefore never lowers a manual level and never enters Level 3 or 4 automatically. `/Level 1` during the window changes the configured baseline but remains effectively Level 2 until expiry; `/Level 2` makes the heightened posture remain afterwards. Turning Post Gate off still disables its queue and does not let Raid Mode turn it back on, although enabled Automod continues to consume the shared Level 2 policy. When both layers are off, joins are not tracked.
+The effective policy is the higher of the configured `/Level` and the automatic floor. Raid Mode therefore never lowers a manual level and never enters Level 3 or 4 automatically. `/Level 1` during the window changes the configured baseline but remains effectively Level 2 until expiry; `/Level 2` makes the heightened posture remain afterwards. Turning the Post Gate queue off still disables its queue and does not let Raid Mode turn it back on, although enabled Post Gate Protection continues to consume the shared Level 2 policy. When both layers are off, joins are not tracked.
 
-`/Level status`, `/Post-Gate status`, `/Automod status`, and `/Server-Info` distinguish the configured and effective levels and show the automatic expiry. Activation and expiry produce one protected notice in each unique configured Post Gate review or Automod log channel. A join surge alone never opens an Automod case, locks the server, or changes a member.
+`/Level status`, `/Post-Gate status`, and `/Server-Info` distinguish the configured and effective levels and show the automatic expiry. Activation and expiry produce one protected notice in each unique configured Post Gate review or protection log channel. A join surge alone never opens a protection case, locks the server, or changes a member.
 
 ### Levels 3–4 lockdown
 
@@ -258,9 +319,9 @@ Stoat has no interactive buttons, so every control is a reaction Irminsul seeds 
 /Post-Gate deny-hold QUEUE_ID
 ```
 
-The hold itself does **not** count as an automod strike. Its effect depends on how the review ends:
+The hold itself does **not** count as a protection strike. Its effect depends on how the review ends:
 
-| Review outcome         | Original channel                                                           | Automod strike stage                                                 | Queue and review card                                             |
+| Review outcome         | Original channel                                                           | Protection strike stage                                              | Queue and review card                                             |
 | ---------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | ✅ Approve             | Content stays discarded; the cleared author may submit it again themselves | Existing strike is reset                                             | Marked approved; review card is deleted                           |
 | ❌ Deny                | Content stays discarded                                                    | Advances one stage, up to stage 4; no timeout is applied immediately | Marked rejected; review card is deleted                           |
@@ -271,14 +332,14 @@ Only one of those outcomes can ever be recorded. Decisions are serialised per qu
 
 ### Approve
 
-Approval clears the author, resets any existing automod strike, and resolves the queue entry. It
+Approval clears the author, resets any existing protection strike, and resolves the queue entry. It
 does not repost the held content. The author may submit the post again themselves, which avoids
 republishing hostile content during a raid and preserves the real author on the new message. The
 review card and its Stoat-hosted evidence are intentionally deleted after approval.
 
-### Reject and the automod strike ladder
+### Reject and the protection strike ladder
 
-Rejection deletes the review card and its Stoat media, discards the held content, and advances the author's [automod strike stage](/HoYoFetch/moderation/automod/#containment-strike-stages). It never applies a timeout or opens a permanent-ban vote by itself. A later automod detection must independently reach the normal score threshold; it then advances the stage again and applies or projects the new duration.
+Rejection deletes the review card and its Stoat media, discards the held content, and advances the author's [protection strike stage](#containment-strike-stages). It never applies a timeout or opens a permanent-ban vote by itself. A later protection detection must independently reach the normal score threshold; it then advances the stage again and applies or projects the new duration.
 
 ### Deny and hold the user
 
