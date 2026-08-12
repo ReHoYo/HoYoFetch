@@ -43,6 +43,7 @@ function makeStore() {
   const queue = new Map();
   const strikes = new Map();
   const holds = new Map();
+  const approvedUsers = new Map();
   const excludedChannels = new Set([EXCLUDED_CHANNEL_ID]);
   // Mutable so a test can hand the gate an operator list mid-run.
   const termList = {
@@ -230,6 +231,25 @@ function makeStore() {
     },
     prunePostGateUserHolds() {
       return false;
+    },
+
+    // ── Post gate — approved (release-exempt) users ─────────────
+    approvedUsers,
+    isPostGateApproved(serverId, userId) {
+      return approvedUsers.has(`${serverId}:${userId}`);
+    },
+    setPostGateApproved(serverId, userId, { approvedAt, approvedBy } = {}) {
+      const record = {
+        serverId,
+        userId,
+        approvedAt: approvedAt ?? null,
+        approvedBy: approvedBy ?? null,
+      };
+      approvedUsers.set(`${serverId}:${userId}`, record);
+      return structuredClone(record);
+    },
+    clearPostGateApproved(serverId, userId) {
+      return approvedUsers.delete(`${serverId}:${userId}`);
     },
 
     // ── Operator prohibited-term list ──────────────────────────
@@ -872,6 +892,24 @@ test("exempts a recognized moderator even on a brand-new account", async () => {
       id: "MSGMOD1",
       authorId: MOD_USER_ID,
       content: "https://example.com",
+    })
+  );
+
+  assert.equal(harness.deletedMessageIds.length, 0);
+  assert.equal(harness.store.queue.size, 0);
+});
+
+test("an approved new account's first link is not queued for review", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  harness.store.setPostGateApproved(SERVER_ID, NEW_USER_ID, {
+    approvedBy: MOD_USER_ID,
+  });
+
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGAPPROVEDLINK1",
+      content: "check out https://evil.example/free-nitro",
     })
   );
 
@@ -1802,6 +1840,27 @@ test("a contact solicitation automatically holds a recent-identity account witho
   assert.match(JSON.stringify(harness.protectedLogs), /automatic screening/);
 });
 
+test("an approved account is not screened for contact solicitation, including its profile bio", async () => {
+  const harness = makeHarness({
+    profileResponses: new Map([[ESTABLISHED_USER_ID, "DMs open"]]),
+  });
+  await enableHold(harness);
+  harness.store.setPostGateApproved(SERVER_ID, ESTABLISHED_USER_ID, {
+    approvedBy: MOD_USER_ID,
+  });
+
+  await harness.postGate.handleMessage(
+    recentIdentityMessage({ id: "MSGAPPROVEDCONTACT1", content: "my DMs are open" })
+  );
+
+  assert.equal(harness.deletedMessageIds.length, 0);
+  assert.equal(harness.store.holds.size, 0);
+  assert.equal(harness.store.queue.size, 0);
+  // The bio fallback check is skipped entirely for an approved author, not
+  // just its result ignored.
+  assert.equal(harness.profileRequests.length, 0);
+});
+
 test("contact screening accepts either recent-account or recent-membership identity risk", async () => {
   const cases = [
     {
@@ -2054,7 +2113,7 @@ test("profile cache eviction is bounded and 404 no-profile results are cacheable
   ]);
 });
 
-test("releasing an automatic hold re-holds the account if its cached bio still matches", async () => {
+test("releasing an automatic hold exempts the account from future automatic re-holding", async () => {
   const harness = makeHarness({
     profileResponses: new Map([[ESTABLISHED_USER_ID, "inbox available"]]),
   });
@@ -2068,17 +2127,28 @@ test("releasing an automatic hold re-holds the account if its cached bio still m
     MOD_USER_ID
   );
   assert.equal(released.outcome, "released");
+  assert.equal(
+    harness.store.isPostGateApproved(SERVER_ID, ESTABLISHED_USER_ID),
+    true
+  );
+  const approval = harness.store.approvedUsers.get(
+    `${SERVER_ID}:${ESTABLISHED_USER_ID}`
+  );
+  assert.equal(approval.approvedBy, MOD_USER_ID);
+  assert.equal(Number.isFinite(approval.approvedAt), true);
 
   await harness.postGate.handleMessage(
     recentIdentityMessage({ id: "MSGCONTACTRELEASE2", content: "two" })
   );
   const hold = harness.store.getUserHold(SERVER_ID, ESTABLISHED_USER_ID);
-  assert.equal(hold.active, true);
-  assert.equal(hold.holdSource, "automatic");
+  assert.equal(hold.active, false);
+  // The bio fallback check itself is skipped for an approved author, not
+  // just its result discarded — only the first (pre-release) message
+  // triggered a profile lookup.
   assert.equal(harness.profileRequests.length, 1);
   assert.deepEqual(
     harness.deletedMessageIds.filter((id) => id.startsWith("MSGCONTACT")),
-    ["MSGCONTACTRELEASE1", "MSGCONTACTRELEASE2"]
+    ["MSGCONTACTRELEASE1"]
   );
 });
 
@@ -2090,12 +2160,20 @@ test("an automatic hold does not return from cached bio after the account ages o
   await harness.postGate.handleMessage(
     recentIdentityMessage({ id: "MSGCONTACTAGEOUT1", content: "one" })
   );
-  const released = await harness.postGate.releaseUser(
+  // Release directly through the store, bypassing postGate.releaseUser (and
+  // therefore the release exemption), so this isolates the age-out boundary
+  // from that exemption — mirrors how a member departure releases a hold
+  // without granting one.
+  const { released } = harness.store.releaseUserHold(
     SERVER_ID,
     ESTABLISHED_USER_ID,
-    MOD_USER_ID
+    { releasedBy: MOD_USER_ID }
   );
-  assert.equal(released.outcome, "released");
+  assert.equal(released, true);
+  assert.equal(
+    harness.store.isPostGateApproved(SERVER_ID, ESTABLISHED_USER_ID),
+    false
+  );
 
   harness.advance(AUTOMOD_LIMITS.recentAccountMs + 1);
   const agedMessage = recentIdentityMessage({
@@ -2175,6 +2253,27 @@ test("holds a message containing a prohibited term even from an established memb
   assert.equal(record.trigger, "prohibited_term");
   assert.equal(record.status, "pending");
   // The trigger is entirely independent of links, media, and tenure.
+  assert.equal(record.userId, ESTABLISHED_USER_ID);
+});
+
+test("a message-content prohibited term still holds an approved (release-exempt) author", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+  harness.store.setPostGateApproved(SERVER_ID, ESTABLISHED_USER_ID, {
+    approvedBy: MOD_USER_ID,
+  });
+
+  await harness.postGate.handleMessage(
+    establishedMessage({
+      id: "MSGTERMAPPROVED1",
+      content: `you absolute ${OPERATOR_TERM}`,
+    })
+  );
+
+  assert.deepEqual(harness.deletedMessageIds, ["MSGTERMAPPROVED1"]);
+  const [record] = [...harness.store.queue.values()];
+  assert.equal(record.trigger, "prohibited_term");
   assert.equal(record.userId, ESTABLISHED_USER_ID);
 });
 
@@ -2367,6 +2466,39 @@ test("an allowlisted identity is not held", async () => {
   assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), false);
 });
 
+test("an approved account's matching username is not held on message", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+  harness.store.setPostGateApproved(SERVER_ID, NEW_USER_ID, {
+    approvedBy: MOD_USER_ID,
+  });
+
+  await harness.postGate.handleMessage(
+    withIdentity(newAccountMessage({ id: "MSGAPPROVEDIDENTITY1" }), {
+      username: `raid_${OPERATOR_TERM}`,
+    })
+  );
+
+  assert.equal(harness.store.queue.size, 0);
+  assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), false);
+});
+
+test("an approved account's matching username does not place a hold on join", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+  harness.store.setPostGateApproved(SERVER_ID, NEW_USER_ID, {
+    approvedBy: MOD_USER_ID,
+  });
+
+  await harness.postGate.handleMemberJoin(
+    memberObject({ userId: NEW_USER_ID, username: `raid_${OPERATOR_TERM}` })
+  );
+
+  assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), false);
+});
+
 test("joining with a prohibited-term username places a full Post Gate hold without any message", async () => {
   const harness = makeHarness();
   await enableHold(harness);
@@ -2551,6 +2683,30 @@ test("deny and hold posts one control card, advances the strike, and records who
 
   const auditLine = harness.logLines.find((line) => line.includes("deny-hold"));
   assert.match(auditLine, /hold=held/);
+});
+
+test("deny and hold also revokes a standing release exemption", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  useOperatorTerms(harness, { terms: [OPERATOR_TERM] });
+  harness.store.setPostGateApproved(SERVER_ID, NEW_USER_ID, {
+    approvedBy: MOD_USER_ID,
+  });
+
+  // The exemption only suppresses the "unknown/new account" triggers — a
+  // content-based prohibited-term match still queues an approved author, so
+  // there is still a queue entry here to deny and hold.
+  await harness.postGate.handleMessage(
+    newAccountMessage({
+      id: "MSGDENYHOLDAPPROVED1",
+      content: `you absolute ${OPERATOR_TERM}`,
+    })
+  );
+  const record = [...harness.store.queue.values()].at(-1);
+  await harness.postGate.denyHold(record.queueId, MOD_USER_ID);
+
+  assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), true);
+  assert.equal(harness.store.isPostGateApproved(SERVER_ID, NEW_USER_ID), false);
 });
 
 test("reacting 🔒 twice does not duplicate the user hold or repost the control card", async () => {
@@ -2808,6 +2964,71 @@ test("/Post-Gate release @member releases by command and reports not_held for a 
   assert.equal(noTarget.outcome, "invalid_target");
 });
 
+test("/Post-Gate hold @member <reason> places an approved user back in full hold and revokes the exemption", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  harness.store.setPostGateApproved(SERVER_ID, ESTABLISHED_USER_ID, {
+    approvedBy: MOD_USER_ID,
+  });
+
+  const result = await harness.postGate.handleCommand(reviewCommandMessage(), [
+    "hold",
+    `<@${ESTABLISHED_USER_ID}>`,
+    "repeated",
+    "boundary-pushing",
+  ]);
+
+  assert.equal(result.outcome, "held");
+  const hold = harness.store.getUserHold(SERVER_ID, ESTABLISHED_USER_ID);
+  assert.equal(hold.active, true);
+  assert.equal(hold.holdSource, "manual");
+  assert.equal(hold.heldBy, MOD_USER_ID);
+  assert.equal(hold.holdReason, "repeated boundary-pushing");
+  assert.equal(
+    harness.store.isPostGateApproved(SERVER_ID, ESTABLISHED_USER_ID),
+    false
+  );
+
+  const again = await harness.postGate.handleCommand(reviewCommandMessage(), [
+    "hold",
+    `<@${ESTABLISHED_USER_ID}>`,
+    "reason",
+  ]);
+  assert.equal(again.outcome, "already_held");
+});
+
+test("/Post-Gate hold requires a target and a reason", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+
+  const noTarget = await harness.postGate.handleCommand(
+    reviewCommandMessage(),
+    ["hold"]
+  );
+  assert.equal(noTarget.outcome, "invalid_target");
+
+  const noReason = await harness.postGate.handleCommand(
+    reviewCommandMessage(),
+    ["hold", `<@${ESTABLISHED_USER_ID}>`]
+  );
+  assert.equal(noReason.outcome, "invalid_reason");
+  assert.equal(harness.store.isUserHeld(SERVER_ID, ESTABLISHED_USER_ID), false);
+});
+
+test("/Post-Gate hold requires fresh Manage Messages verification in the review channel", async () => {
+  const harness = makeHarness({ reviewChannelGrantsManageMessages: false });
+  await enableHold(harness);
+
+  const result = await harness.postGate.handleCommand(reviewCommandMessage(), [
+    "hold",
+    `<@${ESTABLISHED_USER_ID}>`,
+    "reason",
+  ]);
+
+  assert.equal(result.outcome, "unauthorized");
+  assert.equal(harness.store.isUserHeld(SERVER_ID, ESTABLISHED_USER_ID), false);
+});
+
 test("release requires fresh Manage Messages verification in the review channel", async () => {
   const harness = makeHarness({ reviewChannelGrantsManageMessages: false });
   await enableHold(harness);
@@ -2975,6 +3196,9 @@ test("a member departure removes the account hold and its reminder cards", async
   const released = harness.store.getUserHold(SERVER_ID, NEW_USER_ID);
   assert.equal(released.active, false);
   assert.equal(released.releaseReason, "member_departure");
+  // A departure releases the hold directly through the store, bypassing
+  // releaseUser, so it must not grant the release exemption.
+  assert.equal(harness.store.isPostGateApproved(SERVER_ID, NEW_USER_ID), false);
   assert.ok(harness.deletedMessageIds.includes(hold.cardMessageId));
   assert.ok(harness.deletedMessageIds.includes(hold.lastReminderMessageId));
   const notice = harness.protectedLogs.find((entry) =>
@@ -3215,6 +3439,33 @@ test("a rejoining user does not inherit the account hold removed on departure", 
   assert.equal(harness.store.isUserHeld(SERVER_ID, NEW_USER_ID), false);
 });
 
+test("a released member keeps its exemption across a departure and rejoin", async () => {
+  const harness = makeHarness();
+  await enableHold(harness);
+  await holdUserViaDenyHold(harness);
+  const released = await harness.postGate.releaseUser(
+    SERVER_ID,
+    NEW_USER_ID,
+    MOD_USER_ID
+  );
+  assert.equal(released.outcome, "released");
+  assert.equal(harness.store.isPostGateApproved(SERVER_ID, NEW_USER_ID), true);
+
+  await harness.postGate.handleMemberLeave({
+    id: { server: SERVER_ID, user: NEW_USER_ID },
+    reason: "Leave",
+  });
+  // Exemption is keyed to the account, not membership — it is untouched by
+  // the departure, which only ever deactivates an *active* hold.
+  assert.equal(harness.store.isPostGateApproved(SERVER_ID, NEW_USER_ID), true);
+
+  harness.advance(60_000);
+  await harness.postGate.handleMemberJoin(
+    memberObject({ userId: NEW_USER_ID, username: "ordinary_name" })
+  );
+  assert.equal(harness.store.isPostGateApproved(SERVER_ID, NEW_USER_ID), true);
+});
+
 test("turning the post gate off leaves hold records inert and honours them again when it is re-enabled", async () => {
   const harness = makeHarness();
   await enableHold(harness);
@@ -3315,6 +3566,7 @@ test("the in-memory test store implements the same surface the real store export
     "queue",
     "strikes",
     "holds",
+    "approvedUsers",
     "termList",
   ]);
 
@@ -3342,6 +3594,9 @@ test("the in-memory test store implements the same surface the real store export
     "getActiveUserHolds",
     "getDueUserHoldReminders",
     "prunePostGateUserHolds",
+    "isPostGateApproved",
+    "setPostGateApproved",
+    "clearPostGateApproved",
     "getProhibitedTermList",
     "reloadProhibitedTermList",
   ]) {

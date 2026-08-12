@@ -39,6 +39,10 @@ const CHANNEL_EXCLUSIONS_PATH = join(DATA_DIR, "channel_exclusions.json");
 const POST_GATE_PATH = join(DATA_DIR, "post_gate.json");
 const POST_GATE_QUEUE_PATH = join(DATA_DIR, "post_gate_queue.json");
 const POST_GATE_USER_HOLDS_PATH = join(DATA_DIR, "post_gate_user_holds.json");
+const POST_GATE_APPROVED_PATH = join(
+  DATA_DIR,
+  "post_gate_approved_users.json"
+);
 // Operator-maintained, never written by the bot. See website docs for the shape.
 const PROHIBITED_TERMS_PATH = join(DATA_DIR, "prohibited_terms.json");
 const PRIVACY_DIGEST_PATH = join(DATA_DIR, "privacy_digest.json");
@@ -1265,6 +1269,10 @@ function normalisePostGateUserHold(value = {}) {
     releasedBy: safeStoreId(value.releasedBy),
     releaseReason:
       typeof value.releaseReason === "string" ? value.releaseReason : null,
+    holdReason:
+      typeof value.holdReason === "string"
+        ? value.holdReason.slice(0, 300)
+        : null,
   };
 }
 
@@ -1413,6 +1421,72 @@ export function prunePostGateUserHolds(now = Date.now()) {
   }
   if (changed) persistUserHolds();
   return changed;
+}
+
+// ═══════════════════════════════════════════════════
+//  Post gate — approved (release-exempt) users (post-gate.js)
+// ═══════════════════════════════════════════════════
+// Releasing a member (/Post-Gate release, or the 🔓 reaction) marks them
+// exempt from every automatic Post Gate screening trigger going forward —
+// contact solicitation, the prohibited-term identity match, and the
+// first-link/media auto-queue. Deliberately kept in its own file, never
+// touched by prunePostGateUserHolds: the exemption must outlive the 7-day
+// hold-record retention window and never expire on its own. A moderator-
+// initiated hold (🔒 deny + hold user, or /Post-Gate hold) clears it again.
+
+let postGateApprovedUsers = readJSON(POST_GATE_APPROVED_PATH, {});
+
+function approvedUserKey(serverId, userId) {
+  return `${serverId}:${userId}`;
+}
+
+function normalisePostGateApproval(value = {}) {
+  return {
+    serverId: safeStoreId(value.serverId),
+    userId: safeStoreId(value.userId),
+    approvedAt: finiteOrNull(value.approvedAt),
+    approvedBy: safeStoreId(value.approvedBy),
+  };
+}
+
+function persistPostGateApprovedUsers() {
+  writeJSON(POST_GATE_APPROVED_PATH, postGateApprovedUsers);
+}
+
+/** Synchronous hot path: post-gate.js consults this on every message/join. */
+export function isPostGateApproved(serverId, userId) {
+  return Boolean(postGateApprovedUsers[approvedUserKey(serverId, userId)]);
+}
+
+export function getPostGateApproval(serverId, userId) {
+  const record = postGateApprovedUsers[approvedUserKey(serverId, userId)];
+  return record ? normalisePostGateApproval(record) : null;
+}
+
+export function setPostGateApproved(
+  serverId,
+  userId,
+  { approvedAt = Date.now(), approvedBy = null } = {}
+) {
+  const key = approvedUserKey(serverId, userId);
+  const record = normalisePostGateApproval({
+    serverId,
+    userId,
+    approvedAt,
+    approvedBy,
+  });
+  if (!record.serverId || !record.userId) return null;
+  postGateApprovedUsers[key] = record;
+  persistPostGateApprovedUsers();
+  return structuredClone(record);
+}
+
+export function clearPostGateApproved(serverId, userId) {
+  const key = approvedUserKey(serverId, userId);
+  if (!postGateApprovedUsers[key]) return false;
+  delete postGateApprovedUsers[key];
+  persistPostGateApprovedUsers();
+  return true;
 }
 
 // ═══════════════════════════════════════════════════
