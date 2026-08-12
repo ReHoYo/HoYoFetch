@@ -119,14 +119,14 @@ export const CONFIG = {
 // HOW TO SET UP CUSTOM EMOJI:
 //   1. Create (or reuse) a Revolt server and invite this bot with
 //      Manage Customisation, then set EMOJI_HUB_SERVER_ID to its id
-//   2. Run `/EmojiSetup` in that server (or `npm run emoji:provision`)
+//   2. Run `/Emoji provision` in that server (or `npm run emoji:provision`)
 //      to download icons from emoji-icons.js and upload them as emoji
 //   3. Set EMOJI_MODE=custom in your .env file
 //
 // Provisioning persists provisioned ids to data/emoji_registry.json and
 // calls setCustomEmojiRegistry() below so it applies without a restart.
 
-// Runtime-mutable emoji mode (seeded from .env, toggleable via /EmojiMode).
+// Runtime-mutable emoji mode (seeded from .env, toggleable via /Emoji mode).
 let emojiMode = process.env.EMOJI_MODE === "custom" ? "custom" : "unicode";
 
 export function getEmojiMode() {
@@ -200,7 +200,7 @@ const UNICODE_EMOJI = {
 };
 
 // Pre-provisioning fallback: emoji already uploaded to the historical hub
-// before /EmojiSetup existed. setCustomEmojiRegistry() merges the live
+// before /Emoji provision existed. setCustomEmojiRegistry() merges the live
 // provisioned registry over this seed, so these ids keep working even with
 // an empty data/ directory, and provisioning only ever adds or replaces.
 // Format: bare ULID — getCustomEmojiRegistry() wraps it as ":ULID:".
@@ -234,7 +234,7 @@ function seedRegistry() {
 }
 
 // Runtime-mutable custom emoji registry. Seeded from the hardcoded fallback
-// above; /EmojiSetup (via provisionEmoji) merges its results on top with
+// above; /Emoji provision (via provisionEmoji) merges its results on top with
 // setCustomEmojiRegistry(), and bot.js re-applies the persisted registry on
 // every start.
 let customEmojiRegistry = seedRegistry();
@@ -467,4 +467,4 @@ export const GAME8_SOURCES = {
 
 // Item icon sourcing, sizing spec, and upload/provisioning now live in
 // emoji-icons.js (the manifest) and emoji-provision.js (the uploader) —
-// see /EmojiSetup or `npm run emoji:provision`.
+// see /Emoji provision or `npm run emoji:provision`.

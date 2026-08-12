@@ -19,7 +19,7 @@
 // pages (e.g. the HI3 codes scrape in api.js) are unaffected, only the
 // image-redirect endpoint is blocked. So Game8 pages are the source of
 // truth here; per-item URLs can still rot if Game8 renames a file, in
-// which case /EmojiSetup reports that keyword's exact HTTP status and the
+// which case /Emoji provision reports that keyword's exact HTTP status and the
 // rest of the run is unaffected — fix the entry below and re-run.
 //
 // `tier` decides provisioning order if the 100-emoji server cap would

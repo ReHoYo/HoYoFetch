@@ -243,8 +243,8 @@ test("evaluateBotSignals surfaces moderation history and platform flags", () => 
   });
   const signals = evaluateBotSignals(record, NOW);
   assert.ok(signals.includes("Stoat has flagged this account as Suspended"));
-  assert.ok(signals.includes("Existing automod strike (stage 2/4)"));
-  assert.ok(signals.includes("Has an open automod case"));
+  assert.ok(signals.includes("Existing protection strike (stage 2/4)"));
+  assert.ok(signals.includes("Has an open protection case"));
   assert.ok(signals.includes("1 spam report filed against this account"));
 });
 
@@ -426,8 +426,8 @@ test("buildUserInfoLines(verbose: true) lists every field, using explicit fallba
   assert.match(joined, /\*\*Bot owner:\*\* n\/a/);
   assert.match(joined, /\*\*Timed out until:\*\* none/);
   assert.match(joined, /\*\*Roles:\*\* none/);
-  assert.match(joined, /\*\*Automod strike stage:\*\* 0\/4/);
-  assert.match(joined, /\*\*Open automod case:\*\* no/);
+  assert.match(joined, /\*\*Protection strike stage:\*\* 0\/4/);
+  assert.match(joined, /\*\*Open protection case:\*\* no/);
   assert.match(joined, /\*\*Prior spam reports:\*\* 0/);
   assert.match(joined, /\*\*Messages sent:\*\* 0 recorded/);
 });
@@ -475,7 +475,7 @@ test("buildUserInfoLines(verbose: false) — the join log's default — omits em
   assert.ok(!joined.includes("Bot owner"));
   assert.ok(!joined.includes("Timed out until"));
   assert.ok(!joined.includes("Messages sent"));
-  assert.ok(!joined.includes("Automod strike stage"));
+  assert.ok(!joined.includes("Protection strike stage"));
 });
 
 test("buildUserInfoLines(verbose: true) caps a long roles list and notes the remainder", () => {

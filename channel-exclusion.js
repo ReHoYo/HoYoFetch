@@ -109,7 +109,11 @@ export function createChannelExclusion(
   let digestStarted = false;
 
   function commandName() {
-    return `${prefix}Exclude-Channel`;
+    return `${prefix}AuditLog privacy`;
+  }
+
+  function auditCommandName() {
+    return `${prefix}AuditLog`;
   }
 
   function actorLabel(userId) {
@@ -460,7 +464,7 @@ export function createChannelExclusion(
       await respond(
         responseChannelId,
         "⚠️ Invalid Privacy Channel",
-        `Choose a text channel in this server using \`${commandName()} here\`, a channel mention, or a channel ID.`,
+        `Choose a text channel in this server using \`${commandName()} exclude here\`, a channel mention, or a channel ID.`,
         "#E74C3C"
       );
       return { outcome: "invalid_channel" };
@@ -512,7 +516,7 @@ export function createChannelExclusion(
               `**Action:** ${action}`,
               `**One-time code:** \`${code}\``,
               "",
-              `Reply \`approve ${code}\`, \`deny ${code}\`, or just \`${code}\` to approve. A recognized moderator may also use \`${commandName()} confirm ${code}\` in the server.`,
+              `Reply \`approve ${code}\`, \`deny ${code}\`, or just \`${code}\` to approve. A recognized moderator may also use \`${auditCommandName()} confirm ${code}\` in the server.`,
               "This code expires in 10 minutes after 3 incorrect attempts.",
             ].join("\n"),
             "#9B59B6"
@@ -663,7 +667,7 @@ export function createChannelExclusion(
         await respond(
           channelIdFrom(message),
           "⚠️ Invalid Confirmation",
-          `Use \`${commandName()} confirm 123456\`.`,
+          `Use \`${auditCommandName()} confirm 123456\`.`,
           "#E74C3C"
         );
         return { outcome: "invalid_confirmation" };
@@ -679,28 +683,40 @@ export function createChannelExclusion(
       }
       return confirmInServer(message, second);
     }
-    if (action === "remove") {
+    if (action === "include") {
       if (!second || extra.length) {
         await respond(
           channelIdFrom(message),
           "⚠️ Missing Privacy Channel",
-          `Use \`${commandName()} remove here\` or mention one text channel.`,
+          `Use \`${commandName()} include here\` or mention one text channel.`,
           "#E74C3C"
         );
         return { outcome: "missing_channel" };
       }
       return requestChange(message, "remove", second);
     }
-    if (second || extra.length) {
+    if (action === "exclude") {
+      if (!second || extra.length) {
+        await respond(
+          channelIdFrom(message),
+          "⚠️ Missing Privacy Channel",
+          `Use \`${commandName()} exclude here\` or mention one text channel.`,
+          "#E74C3C"
+        );
+        return { outcome: "missing_channel" };
+      }
+      return requestChange(message, "exclude", second);
+    }
+    if (second || extra.length || action !== "status") {
       await respond(
         channelIdFrom(message),
         "⚠️ Invalid Privacy Command",
-        `Use \`${commandName()} status\`, \`${commandName()} here\`, \`${commandName()} #channel\`, \`${commandName()} remove #channel\`, \`${commandName()} confirm CODE\`, or \`${commandName()} cancel\`.`,
+        `Use \`${commandName()} status\`, \`${commandName()} exclude <here|#channel>\`, \`${commandName()} include <here|#channel>\`, \`${auditCommandName()} confirm CODE\`, or \`${auditCommandName()} cancel\`.`,
         "#E74C3C"
       );
       return { outcome: "invalid_command" };
     }
-    return requestChange(message, "exclude", first);
+    return status(message);
   }
 
   async function postDigestForServer(serverId, records) {

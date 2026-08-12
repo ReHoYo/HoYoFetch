@@ -458,7 +458,7 @@ export function createSpamReporter(
                   priority
                     ? `**Priority:** threshold reached (${SPAM_REPORT_PRIORITY_THRESHOLD} unique reporters).`
                     : "**Priority:** standard review.",
-                  "**Action:** No automatic timeout, deletion, kick, ban, or automod strike was applied. Staff must verify the allegation independently.",
+                  "**Action:** No automatic timeout, deletion, kick, ban, or protection strike was applied. Staff must verify the allegation independently.",
                 ].join("\n"),
                 colour: priority ? "#E74C3C" : "#F39C12",
               },

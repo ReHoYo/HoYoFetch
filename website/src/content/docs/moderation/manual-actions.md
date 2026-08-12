@@ -123,10 +123,10 @@ quotations, reactions, and external copies are not erased.
 ## Release and reset automod history
 
 ```text
-/Automod release @member false positive
+/Post-Gate protection release @member false positive
 ```
 
-This removes a native timeout, resets the member's automod strike history, and closes pending ban
+This removes a native timeout, resets the member's protection strike history, and closes pending ban
 reviews for the containment. It can also release a manually applied timeout. It is the one manual
 action with no confirmation step, because it only restores access.
 

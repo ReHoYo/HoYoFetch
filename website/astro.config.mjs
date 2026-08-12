@@ -6,11 +6,14 @@ const projectBase = "/HoYoFetch";
 export default defineConfig({
   site: "https://rehoyo.github.io",
   base: projectBase,
+  redirects: {
+    "/moderation/automod": `${projectBase}/moderation/post-gate/#post-gate-protection`,
+  },
   integrations: [
     starlight({
       title: "Irminsul Docs",
       description:
-        "The complete command, setup, moderation, audit-log, automod, and self-hosting guide for Irminsul.",
+        "The complete command, setup, moderation, audit-log, Post Gate Protection, and self-hosting guide for Irminsul.",
       logo: {
         src: "./src/assets/irminsul-logo.png",
         alt: "Irminsul logo",
@@ -70,7 +73,6 @@ export default defineConfig({
             { slug: "moderation/manual-actions" },
             { slug: "moderation/audit-log" },
             { slug: "moderation/account-checks" },
-            { slug: "moderation/automod" },
             { slug: "moderation/post-gate" },
           ],
         },

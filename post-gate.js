@@ -10,7 +10,7 @@
 //
 // Turning the gate on, moving its review channel, or turning it off all
 // require a ten-minute one-time code sent exclusively to Enka#4961 — the
-// same approval gate used by /AuditLog and /Exclude-Channel — since a
+// same approval gate used by AuditLog destination and privacy changes — since a
 // misconfigured review channel would either hide every new member's first
 // post or silently stop holding anything. Day-to-day review (approve/
 // reject) does not require Enka: a held post is reversible and needs a
@@ -57,6 +57,7 @@ import {
   findHeldPostByReviewMessage,
   findUserHoldByCardMessage,
   getActiveUserHolds,
+  getAutomodConfig,
   getAutomodStrike,
   getDueUserHoldReminders,
   getExpiredPendingPosts,
@@ -199,6 +200,7 @@ const DEFAULT_STORE = Object.freeze({
   findHeldPostByReviewMessage,
   findUserHoldByCardMessage,
   getActiveUserHolds,
+  getAutomodConfig,
   getAutomodStrike,
   getDueUserHoldReminders,
   getExpiredPendingPosts,
@@ -489,6 +491,11 @@ export function createPostGate(
   async function status(message) {
     const serverId = serverIdFrom(message);
     const config = store.getPostGateConfig(serverId);
+    const protection = store.getAutomodConfig?.(serverId) ?? {
+      mode: "off",
+      logChannelId: null,
+      quorum: 2,
+    };
     const policy = policyForServer(serverId);
     const pending = gate.getPending(serverId);
     const gatePending = pending?.kind === CHALLENGE_KIND ? pending : null;
@@ -505,6 +512,7 @@ export function createPostGate(
           ? channelLabel(config.reviewChannelId)
           : "not configured"
       }`,
+      `**Protection:** ${protection.mode}${protection.logChannelId ? ` in ${channelLabel(protection.logChannelId)}` : ""} · ban quorum ${protection.quorum}`,
       `**Currently held for review:** ${heldCount}`,
       `**Users in Post Gate:** ${store.getActiveUserHolds(serverId).length}`,
       `**Prohibited terms:** ${describeProhibitedTermList(terms, terms.list ?? {})} — also screened against usernames, display names, and server nicknames on join, nickname change, and every message.`,
@@ -523,7 +531,13 @@ export function createPostGate(
       lines.join("\n"),
       config.mode === "hold" ? "#E67E22" : "#3498DB"
     );
-    return { outcome: "status", config, policy, pending: gatePending };
+    return {
+      outcome: "status",
+      config,
+      protection,
+      policy,
+      pending: gatePending,
+    };
   }
 
   function configSignature(config) {
@@ -1653,7 +1667,7 @@ export function createPostGate(
     }
     lines.push(
       "",
-      `React ${APPROVE_EMOJI} to clear the author and reset their automod strike, ${REJECT_EMOJI} to discard and strike, or ${DENY_HOLD_EMOJI} to discard, strike, and hold every later message from this author for review.`,
+      `React ${APPROVE_EMOJI} to clear the author and reset their protection strike, ${REJECT_EMOJI} to discard and strike, or ${DENY_HOLD_EMOJI} to discard, strike, and hold every later message from this author for review.`,
       `Or use \`${commandName()} approve ${record.queueId}\`, \`${commandName()} reject ${record.queueId}\`, or \`${commandName()} deny-hold ${record.queueId}\`.`,
       "Approving does not repost the content — the author may post it again themselves.",
       `This request expires in 7 days if left unreviewed.`
@@ -2207,9 +2221,9 @@ export function createPostGate(
     const description =
       outcome === "approved"
         ? authorStillHeld
-          ? `This queue item from ${queueActorLabel(record)} was approved${strikeCleared ? " and their automod strike was reset" : ""}, but the account remains in Post Gate until a moderator releases it. The content was **not** reposted to ${channelLabel(record.channelId)}.`
-          : `${queueActorLabel(record)} was cleared${strikeCleared ? " and their automod strike was reset" : ""}. The content was **not** reposted to ${channelLabel(record.channelId)} — they can post it again themselves.`
-        : `The held content from ${queueActorLabel(record)} was discarded${strikeSkipped ? " (no automod strike was recorded — the original author's id was not captured)" : " and their automod strike stage was increased"}.`;
+          ? `This queue item from ${queueActorLabel(record)} was approved${strikeCleared ? " and their protection strike was reset" : ""}, but the account remains in Post Gate until a moderator releases it. The content was **not** reposted to ${channelLabel(record.channelId)}.`
+          : `${queueActorLabel(record)} was cleared${strikeCleared ? " and their protection strike was reset" : ""}. The content was **not** reposted to ${channelLabel(record.channelId)} — they can post it again themselves.`
+        : `The held content from ${queueActorLabel(record)} was discarded${strikeSkipped ? " (no protection strike was recorded — the original author's id was not captured)" : " and their protection strike stage was increased"}.`;
     await sendAccountability(
       record.serverId,
       title,
@@ -2690,8 +2704,8 @@ export function createPostGate(
       `**Denied by:** ${actorLabel(moderatorId)}`,
       `The held content from ${queueActorLabel(record)} was discarded${
         rejection.strikeSkipped
-          ? " (no automod strike was recorded — the original author's id was not captured)"
-          : " and their automod strike stage was increased"
+          ? " (no protection strike was recorded — the original author's id was not captured)"
+          : " and their protection strike stage was increased"
       }.`,
     ];
     if (hold.outcome === "held") {
@@ -3038,16 +3052,16 @@ export function createPostGate(
       const descriptions = {
         approved:
           action === "approve"
-            ? "The author was cleared and their automod strike reset. The content was not reposted — they can post it again themselves."
+            ? "The author was cleared and their protection strike reset. The content was not reposted — they can post it again themselves."
             : alreadyResolved("approved"),
         rejected: denyHoldRequested
           ? result.userHold === "held"
-            ? "The held post was discarded, the author's automod strike stage was increased, and every later message from them will now be held for review."
+            ? "The held post was discarded, the author's protection strike stage was increased, and every later message from them will now be held for review."
             : result.userHold === "already_held"
               ? "The held post was discarded and the strike stage increased. The author was already in Post Gate, so their existing hold is unchanged."
               : "The held post was discarded. No Post Gate hold was placed: this entry predates author-id capture."
           : action === "reject"
-            ? "The held post was discarded and the author's automod strike stage was increased."
+            ? "The held post was discarded and the author's protection strike stage was increased."
             : alreadyResolved("rejected"),
         missing:
           "That queue entry does not exist or has already been cleaned up.",
@@ -3118,7 +3132,7 @@ export function createPostGate(
             ? [`- …and ${omitted} more expired queue entries`]
             : []),
           "",
-          "The 7-day review window elapsed with no moderator decision. The content was discarded with no automod strike.",
+          "The 7-day review window elapsed with no moderator decision. The content was discarded with no protection strike.",
         ],
         "#E67E22"
       );

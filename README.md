@@ -2,7 +2,7 @@
 
 Automatically fetches and posts redemption codes for **Genshin Impact**, **Honkai: Star Rail**, **Zenless Zone Zero**, **Honkai Impact 3rd**, **Neverness to Everness**, and **Wuthering Waves** in your Revolt server channels.
 
-📚 **Documentation:** [Irminsul Docs](https://rehoyo.github.io/HoYoFetch/) — searchable commands, setup, moderation, audit-log, automod, troubleshooting, and self-hosting guides.
+📚 **Documentation:** [Irminsul Docs](https://rehoyo.github.io/HoYoFetch/) — searchable commands, setup, moderation, audit-log, Post Gate Protection, troubleshooting, and self-hosting guides.
 
 ## ✨ Features
 
@@ -54,41 +54,35 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 
 ## 📋 Commands
 
-| Command                                                               | Description                                                                                                                       |
-| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `/FetchGI`                                                            | Fetch active Genshin Impact codes                                                                                                 |
-| `/FetchHSR`                                                           | Fetch active Honkai: Star Rail codes                                                                                              |
-| `/FetchZZZ`                                                           | Fetch active Zenless Zone Zero codes                                                                                              |
-| `/FetchHI3`                                                           | Fetch active Honkai Impact 3rd codes                                                                                              |
-| `/FetchNTE`                                                           | Fetch active Neverness to Everness codes                                                                                          |
-| `/FetchWuWa`                                                          | Fetch active Wuthering Waves codes                                                                                                |
-| `/Report-Spam @member <what happened>`                                | Privately submit suspected friend-request or DM spam for review                                                                   |
-| `/EnableFetch [all\|hoyo\|nte\|wuwa\|nte-wuwa]`                       | Enable the selected auto-fetch scope; no argument means all games (admins/mods only)                                              |
-| `/DisableFetch`                                                       | Disable auto-fetch in the current channel (admins/mods only)                                                                      |
-| `/EmojiMode [unicode\|custom]`                                        | Show or switch reward-emoji rendering at runtime (admins/mods only)                                                               |
-| `/EmojiSetup [status]`                                                | Auto-provision reward icons as custom emoji on the configured hub server, or check coverage (admins/mods only)                    |
-| `/Restart`                                                            | Restart the bot after deploying updates (admins/mods only)                                                                        |
-| `/Server-Info`                                                        | Show cached server, archive, feature-health, and safe VPS diagnostics (admins/mods only)                                          |
-| `/AuditLog [status\|test\|here\|#channel\|off\|confirm CODE\|cancel]` | View, test, or request an Enka-approved audit-log configuration change (admins/mods only)                                         |
-| `/Exclude-Channel [status\|here\|#channel\|remove #channel]`          | Request Enka-approved message-content privacy exclusions (admins/mods only)                                                       |
-| `/Post-Gate [status\|here\|#channel\|off\|holds\|terms]`              | Configure the Enka-approved review channel, list held members, or inspect the prohibited-term list (admins/mods only)             |
-| `/Post-Gate [approve\|reject\|deny-hold] QUEUE_ID`                    | Resolve a held post: clear the author, discard with a strike, or discard and place the author in Post Gate (Manage Messages)      |
-| `/Post-Gate release @member`                                          | Release a member from Post Gate so their messages post normally again (Manage Messages)                                           |
-| `/Level [status\|1\|2\|3\|4 confirm]`                                 | Set the server-wide link/media review or lockdown policy (admins/mods only)                                                       |
-| `/Automod status`                                                     | Show this server's automod mode, logger, and ban quorum (admins/mods only)                                                        |
-| `/Automod monitor [here\|#channel]`                                   | Detect and log cases without changing messages or members (admins/mods only)                                                      |
-| `/Automod enforce [here\|#channel]`                                   | Enable temporary containment and staff-approved ban cases (admins/mods only)                                                      |
-| `/Automod off`                                                        | Disable anti-raid evaluation for this server (admins/mods only)                                                                   |
-| `/Automod quorum 1\|2`                                                | Set the approval quorum for new cases; production defaults to two (admins/mods only)                                              |
-| `/Automod approve CASE_ID`                                            | Approve a pending ban case (owner, Manage Server, or Ban Members only)                                                            |
-| `/Automod release @member <reason>`                                   | Remove a timeout and reset that member's automod escalation history (Timeout Members only)                                        |
-| `/Ban <@member\|account ID> <reason>`                                 | Natively ban a current or never-joined account after ✅ confirmation (Ban Members; cleanup also needs Manage Messages)            |
-| `/Kick @member <reason>`                                              | Confirm with ✅, then pick a cleanup window by reaction; the kick cannot be undone (Kick Members)                                 |
-| `/Mute @member [10m\|30m\|1h\|4h\|24h\|3d\|7d] <reason>`              | Type a duration and confirm with ✅, or omit it for a reaction picker (Timeout Members only)                                      |
-| `/Purge-User @member <reason>`                                        | Pick a window by reaction, then confirm deletion of the member's observed messages (Manage Messages only)                         |
-| `/Get-Info <@member\|account ID>`                                     | Vet current, departed, banned, or never-joined accounts with tiered account, ban, archive, and bot-risk detail (admins/mods only) |
-| `/HelpHoyoFetch`                                                      | Show the three-page command reference; the opener navigates with ◀️/▶️                                                            |
-| `/Docs`                                                               | Open the permanent searchable documentation site                                                                                  |
+| Command                                                   | Description                                                                                                                       |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `/FetchGI`                                                | Fetch active Genshin Impact codes                                                                                                 |
+| `/FetchHSR`                                               | Fetch active Honkai: Star Rail codes                                                                                              |
+| `/FetchZZZ`                                               | Fetch active Zenless Zone Zero codes                                                                                              |
+| `/FetchHI3`                                               | Fetch active Honkai Impact 3rd codes                                                                                              |
+| `/FetchNTE`                                               | Fetch active Neverness to Everness codes                                                                                          |
+| `/FetchWuWa`                                              | Fetch active Wuthering Waves codes                                                                                                |
+| `/Report-Spam @member <what happened>`                    | Privately submit suspected friend-request or DM spam for review                                                                   |
+| `/Auto-Fetch [status\|enable SCOPE\|off]`                 | Inspect or configure hourly code announcements in this channel (admins/mods only)                                                 |
+| `/Emoji [status\|mode MODE\|provision]`                   | Inspect, configure, or provision reward emoji (admins/mods only)                                                                  |
+| `/Restart`                                                | Restart the bot after deploying updates (admins/mods only)                                                                        |
+| `/Server-Info`                                            | Show cached server, archive, feature-health, and safe VPS diagnostics (admins/mods only)                                          |
+| `/AuditLog [status\|test\|set CHANNEL\|off\|privacy ...]` | View, test, or request Enka-approved audit destination and privacy changes (admins/mods only)                                     |
+| `/Post-Gate [status\|here\|#channel\|off\|holds\|terms]`  | Configure the Enka-approved review channel, list held members, or inspect the prohibited-term list (admins/mods only)             |
+| `/Post-Gate [approve\|reject\|deny-hold] QUEUE_ID`        | Resolve a held post: clear the author, discard with a strike, or discard and place the author in Post Gate (Manage Messages)      |
+| `/Post-Gate release @member`                              | Release a member from Post Gate so their messages post normally again (Manage Messages)                                           |
+| `/Level [status\|1\|2\|3\|4 confirm]`                     | Set the server-wide link/media review or lockdown policy (admins/mods only)                                                       |
+| `/Post-Gate protection monitor\|enforce [CHANNEL]`        | Configure behavioral detection and containment while preserving its independent opt-in mode (admins/mods only)                    |
+| `/Post-Gate protection off\|quorum 1\|2`                  | Disable behavioral protection or set the approval quorum for new cases (admins/mods only)                                         |
+| `/Post-Gate protection approve CASE_ID`                   | Approve a pending protection ban case (owner, Manage Server, or Ban Members only)                                                 |
+| `/Post-Gate protection release @member <reason>`          | Remove a timeout and reset that member's protection escalation history (Timeout Members only)                                     |
+| `/Ban <@member\|account ID> <reason>`                     | Natively ban a current or never-joined account after ✅ confirmation (Ban Members; cleanup also needs Manage Messages)            |
+| `/Kick @member <reason>`                                  | Confirm with ✅, then pick a cleanup window by reaction; the kick cannot be undone (Kick Members)                                 |
+| `/Mute @member [10m\|30m\|1h\|4h\|24h\|3d\|7d] <reason>`  | Type a duration and confirm with ✅, or omit it for a reaction picker (Timeout Members only)                                      |
+| `/Purge-User @member <reason>`                            | Pick a window by reaction, then confirm deletion of the member's observed messages (Manage Messages only)                         |
+| `/Get-Info <@member\|account ID>`                         | Vet current, departed, banned, or never-joined accounts with tiered account, ban, archive, and bot-risk detail (admins/mods only) |
+| `/HelpHoyoFetch`                                          | Show the three-page command reference; the opener navigates with ◀️/▶️                                                            |
+| `/Docs`                                                   | Open the permanent searchable documentation site                                                                                  |
 
 > **Note:** Revolt does not support Discord-style slash commands. These are message-based prefix commands using `/` as the prefix. Command names are case-insensitive; channel IDs are preserved exactly.
 
@@ -99,10 +93,10 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 - Commands are accepted only from human members in server channels. Direct messages, webhooks, and messages from other bots are ignored.
 - `/Report-Spam` is available to human members, but only in a channel where Irminsul can freshly verify its Manage Messages permission and remove the invocation before reading the target and description.
 - Server owners and members with **Manage Server** permission are treated as administrators.
-- `/AuditLog` configuration and `/Exclude-Channel` use the same recognized-moderator permissions, but no enable, move, disable, exclusion, or exclusion removal takes effect until **Enka#4961** approves a fresh one-time code. Read-only audit status and testing remain immediate.
+- `/AuditLog` destination and privacy actions use the same recognized-moderator permissions, but no enable, move, disable, exclusion, or inclusion takes effect until **Enka#4961** approves a fresh one-time code. Read-only status and testing remain immediate.
 - Fetch, emoji, restart, and audit-log management commands are available to administrators and capability-based moderators with **Kick Members**, **Ban Members**, **Timeout Members**, or **Manage Messages** in the current channel.
-- Automod configuration uses the same capability-based moderator policy as other management commands: owner, **Manage Server**, **Kick Members**, **Ban Members**, **Timeout Members**, or **Manage Messages** in the current channel. Ban approvals remain stricter and require the owner, **Manage Server**, or **Ban Members**; **Manage Messages** alone cannot approve a ban.
-- Manual moderation commands use exact effective permissions and refresh both the moderator and bot before acting: **Ban Members** for `/Ban`, **Kick Members** for `/Kick`, **Timeout Members** for `/Mute` and `/Automod release`, and **Manage Messages** for `/Purge-User`. An active `/AuditLog` channel is required so actor, target, reason, and outcome are durably protected.
+- Post Gate Protection configuration uses the same capability-based moderator policy as other management commands: owner, **Manage Server**, **Kick Members**, **Ban Members**, **Timeout Members**, or **Manage Messages** in the current channel. Ban approvals remain stricter and require the owner, **Manage Server**, or **Ban Members**; **Manage Messages** alone cannot approve a ban.
+- Manual moderation commands use exact effective permissions and refresh both the moderator and bot before acting: **Ban Members** for `/Ban`, **Kick Members** for `/Kick`, **Timeout Members** for `/Mute` and `/Post-Gate protection release`, and **Manage Messages** for `/Purge-User`. An active `/AuditLog` channel is required so actor, target, reason, and outcome are durably protected.
 - Role names are never trusted; access is based on Stoat's effective permissions. This shared policy covers auto-fetch management, emoji mode, restart, and audit-log configuration/testing.
 - Each member can trigger up to five recognised commands in 30 seconds. Concurrent requests for the same game's codes share one upstream fetch.
 
@@ -110,7 +104,7 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on Node 18 and 20 for every pu
 
 `/Report-Spam @member sent me a scam DM` privately submits suspected friend-request, DM, commission, or scam spam for review. Describe what happened in plain words the way the moderation commands read; the reported account may be mentioned anywhere in the sentence. The description must be 10–300 characters. Irminsul removes the command message before parsing it, verifies that the reporter and target are current members, strips active links and formatting from the reason, and posts only a generic report ID acknowledgement publicly.
 
-The command has its own abuse controls: one attempt per reporter per minute, at most three accepted reports per reporter per server within 24 hours, and one accepted report against the same target per reporter within 24 hours. Three unique reporters against one target within 24 hours raise the review priority. Reports are allegations, not proof, and never create an automatic timeout, deletion, kick, ban, or automod strike.
+The command has its own abuse controls: one attempt per reporter per minute, at most three accepted reports per reporter per server within 24 hours, and one accepted report against the same target per reporter within 24 hours. Three unique reporters against one target within 24 hours raise the review priority. Reports are allegations, not proof, and never create an automatic timeout, deletion, kick, ban, or protection strike.
 
 Irminsul cannot observe private friend requests or DMs between ordinary members. Members must submit reports themselves, and staff must independently verify the available evidence.
 
@@ -118,13 +112,13 @@ Irminsul cannot observe private friend requests or DMs between ordinary members.
 
 Reasons are mandatory but are written in plain words — `/Ban @member for spamming and stuff` — and may contain up to 300 characters. The target, the reason, and a bare duration or cleanup window may appear in any order. Removed delimiter forms such as `reason:` and `delete:` are rejected with a canonical example. Commands accept one member mention or one raw account ID, and a bare ID is recognized anywhere in the command as long as it's the full 26-character Stoat ID (a shorter alphanumeric token is also accepted, but only in the leading position). A plain-text `@Username#1234` typed by hand (not a real mention) resolves only against an account Irminsul already has cached from a shared server — Stoat's only username-lookup API is "send friend request," which is never called as a side effect of a moderation command. Stoat has no interaction buttons, so Irminsul uses reactions for duration selection, cleanup windows, destructive confirmation, and undo. Every picker and confirmation is answerable only by the moderator who ran the command and expires after two minutes.
 
-Because the reason is free text, a mistyped or auto-completed mention would otherwise be indistinguishable from the intended member. `/Ban`, `/Kick`, and `/Mute` therefore post a ✅/❌ confirmation naming the action, target, reason, and any typed cleanup window; nothing reaches Stoat until the invoking moderator reacts ✅. Permissions and the target are verified at that point rather than when the command was typed. `/Automod release` has no confirmation because it only restores access.
+Because the reason is free text, a mistyped or auto-completed mention would otherwise be indistinguishable from the intended member. `/Ban`, `/Kick`, and `/Mute` therefore post a ✅/❌ confirmation naming the action, target, reason, and any typed cleanup window; nothing reaches Stoat until the invoking moderator reacts ✅. Permissions and the target are verified at that point rather than when the command was typed. `/Post-Gate protection release` has no confirmation because it only restores access.
 
 - `/Ban @member for repeated spam` or `/Ban ACCOUNT_ID for coordinating a raid` uses Stoat's native ban endpoint once confirmed. A current membership is not required, so moderators can ban current, departed, or never-joined accounts by raw ID — this is the command to use when `/Kick` or `/Mute` reports the account isn't a current member. Irminsul then offers a cleanup picker: 1️⃣ 1h, 2️⃣ 6h, 3️⃣ 1d, 4️⃣ 3d, 5️⃣ 7d, 6️⃣ 1mo, 7️⃣ 3mo, 8️⃣ 6mo, 9️⃣ 1y, or ❌ to keep any messages Irminsul previously observed. Cleanup needs Manage Messages in every affected channel. The ↩️ reaction on the protected record is available for 10 minutes to any freshly authorized ban moderator; it unbans but cannot restore membership or deleted messages.
 - `/Kick @member for raiding` kicks once confirmed and offers the same cleanup picker. Stoat cannot put a kicked member back, so no undo reaction is offered and the reason is retained in Irminsul's protected log. The target must be a current server member.
 - `/Mute @member 1h cooldown` confirms first, then applies that duration; omitting the duration opens the 10m–7d picker instead, and choosing from it is itself the confirmation. Either way the cleanup picker follows. The protected record has a 10-minute ↩️ undo reaction for authorized timeout moderators.
 - `/Purge-User @member because of spam` asks for a window with the same 1h–1y picker, then shows a ✅/❌ confirmation with the number of matching messages. Only one purge or cleanup runs per server at a time.
-- `/Automod release @member false positive` removes the native timeout, resets the member's automod strike history, and closes pending ban reviews for that containment. It can also remove a manually applied timeout.
+- `/Post-Gate protection release @member false positive` removes the native timeout, resets the member's protection strike history, and closes pending ban reviews for that containment. It can also remove a manually applied timeout.
 
 **History cleanup limitations:** cleanup reaches back up to 1 year, matching the message archive's own retention exactly — `1y` selects everything the archive still holds. Stoat's ban API has no message-history option and its bulk-delete endpoint accepts only recent messages, so Irminsul bulk-deletes IDs recorded in the last seven days and removes anything older one message at a time; a `1mo`–`1y` cleanup will typically route almost entirely through the paced individual-delete path and take noticeably longer than a short one. Irminsul estimates the time up front when a run is large enough to be slow. A single cleanup deletes at most 2,000 messages, oldest first — never read the result as guaranteed-complete, and a long window on an active member will often exhaust the cap well before reaching the full year. Protected audit entries, Stoat-hosted attachment archive cards, quotations, reactions, and external copies are never erased by a purge.
 
@@ -132,7 +126,7 @@ Every message a cleanup could not delete is reported by cause rather than as one
 
 ### Audit log
 
-Stoat/Revolt has no built-in audit log, so `/AuditLog here` requests the current channel as the destination and `/AuditLog #channel` requests another text channel. `/AuditLog off` requests disabling it. Every enable, move, or disable requires a fresh ten-minute code sent exclusively to **Enka#4961**. Enka may approve or deny in DM or release the code for `/AuditLog confirm CODE`; the requester or Enka can use `/AuditLog cancel`. `/AuditLog status` and `/AuditLog test` are read-only and do not require approval, and a request that would make no change does not generate a code.
+Stoat/Revolt has no built-in audit log, so `/AuditLog set here` requests the current channel as the destination and `/AuditLog set #channel` requests another text channel. `/AuditLog off` requests disabling it. Every enable, move, or disable requires a fresh ten-minute code sent exclusively to **Enka#4961**. Enka may approve or deny in DM or release the code for `/AuditLog confirm CODE`; the requester or Enka can use `/AuditLog cancel`. `/AuditLog status` and `/AuditLog test` are read-only and do not require approval, and a request that would make no change does not generate a code.
 
 Only one protected audit/privacy request can wait per server. If Enka cannot be reached, the request fails closed and the existing audit destination remains unchanged. Approved moves and disables leave lifecycle notices in the previous protected destination; an approved enable or move records completion in the new destination. The bot relays message edits/deletes (with original content), bulk deletes, channel/role/server changes, member joins/leaves, bans, unbans, timeouts, username changes, nickname/role changes, and emoji changes. Username coverage is live-only while Irminsul is online.
 
@@ -142,7 +136,7 @@ Audit configuration and testing commands use the same capability-based moderator
 
 To always show what was deleted or edited — Stoat only reports the _id_ of a deleted message — the bot records every message in audit-enabled servers to a local archive (`data/message_archive.jsonl`, kept **1 year**, capped at 1,000,000 messages by default, configurable via `HOYOFETCH_ARCHIVE_MAX_MESSAGES`). This survives restarts.
 
-Use `/Exclude-Channel #private-channel` when a text channel's message content must never be archived or relayed. Irminsul sends a six-digit approval code exclusively to **Enka#4961** by DM. Enka may approve there or relay it to the requesting moderator for `/Exclude-Channel confirm CODE`. Removing an exclusion requires a new code. Approval retroactively removes that channel's archive entries and its Stoat-hosted attachment archive cards; new message creates, edits, deletes, and bulk deletes are ignored. Channel, role, permission, moderation, membership, and other server events still log, and a protected daily digest lists active exclusions. Automod detection remains active, but evidence excerpts from excluded channels are withheld. Because no messages are recorded there, `/Purge-User` cannot clean messages in an excluded channel.
+Use `/AuditLog privacy exclude #private-channel` when a text channel's message content must never be archived or relayed. Irminsul sends a six-digit approval code exclusively to **Enka#4961** by DM. Enka may approve there or relay it to the requesting moderator for `/AuditLog confirm CODE`. Including the channel again with `/AuditLog privacy include #private-channel` requires a new code. Approval retroactively removes that channel's archive entries and its Stoat-hosted attachment archive cards; new message creates, edits, deletes, and bulk deletes are ignored. Channel, role, permission, moderation, membership, and other server events still log, and a protected daily digest lists active exclusions. Post Gate Protection remains active, but evidence excerpts from excluded channels are withheld. Because no messages are recorded there, `/Purge-User` cannot clean messages in an excluded channel.
 
 The approval protects against a moderator silently changing message privacy. It does not prevent a server owner from removing the bot or someone with host filesystem access from editing `data/channel_exclusions.json` as an operator break-glass action.
 
@@ -168,7 +162,7 @@ Stoat's own UI hides basic account facts like join date, which makes a bot or ra
 
 Join records now carry full account and membership detail — creation date, avatar status, platform badges/flags, roles, and any prior automod or spam-report history — instead of just a username, plus a computed **⚠️ Signals** line naming the specific conditions worth a second look (a brand-new account, an account created moments before it joined, a default avatar, and so on). A join titled **📥 Member Joined — review** has at least one signal; a plain **📥 Member Joined** does not. The join log reads only locally cached data, so a join surge never triggers extra Stoat requests.
 
-`/Get-Info @member` or `/Get-Info <account ID>` now degrades gracefully across current, departed, banned, and never-joined accounts. It labels the lookup scope, derives the creation date directly from any valid Stoat ULID, reads ban-list identity and reasons when permitted, checks platform flags when full identity is unavailable, and includes local archive/moderation evidence. When another cached mutual server makes the account visible, the report names up to three such servers. Unlike the join log, it may fetch the account's profile because it targets one account at a time. Access remains restricted to recognized moderators — the same policy as `/Automod` and `/AuditLog`.
+`/Get-Info @member` or `/Get-Info <account ID>` now degrades gracefully across current, departed, banned, and never-joined accounts. It labels the lookup scope, derives the creation date directly from any valid Stoat ULID, reads ban-list identity and reasons when permitted, checks platform flags when full identity is unavailable, and includes local archive/moderation evidence. When another cached mutual server makes the account visible, the report names up to three such servers. Unlike the join log, it may fetch the account's profile because it targets one account at a time. Access remains restricted to recognized moderators — the same policy as `/Post-Gate protection` and `/AuditLog`.
 
 Stoat has no username-to-ID search, so a non-member must be looked up by their 26-character account ID (or by a mention when one is available).
 
@@ -190,13 +184,13 @@ Choose the lowest level that matches the current situation:
 | Level | Recommended use                                                                                                                                               |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1     | **Day-to-day protection.** Reviews link or media posts from new and first-time members while normal chat continues.                                           |
-| 2     | **Elevated watch or a small suspected bot raid.** Widens targeted link/media and Automod identity checks without holding unrelated ordinary text.             |
+| 2     | **Elevated watch or a small suspected bot raid.** Widens targeted link/media and protection identity checks without holding unrelated ordinary text.          |
 | 3     | **A large or active raid.** Stops regular members from sending server-wide and deletes anything that slips through, without automatically banning the author. |
 | 4     | **Emergency lockdown for the most severe raids.** Uses Level 3's message lockdown and also bans non-exempt authors whose messages bypass the permission lock. |
 
-Levels 1–2 reduce common link/media bot spam and review specific text signals; they do not hold unrelated ordinary messages. Level 1 treats accounts under 7 days and memberships under 24 hours as recent. Level 2 widens only targeted link/media eligibility and Automod's identity risk window to accounts under 14 days and memberships under 3 days; Automod still requires message behavior and the same score of 2. Levels 3–4 are disruptive lockdown settings, not everyday filters.
+Levels 1–2 reduce common link/media bot spam and review specific text signals; they do not hold unrelated ordinary messages. Level 1 treats accounts under 7 days and memberships under 24 hours as recent. Level 2 widens only targeted link/media eligibility and Post Gate Protection's identity risk window to accounts under 14 days and memberships under 3 days; protection still requires message behavior and the same score of 2. Levels 3–4 are disruptive lockdown settings, not everyday filters.
 
-Five unique non-bot joins within 60 seconds activate **Shared Raid Mode** whenever either Post Gate or Automod is enabled. It persists a 30-minute automatic Level 2 floor, survives a restart, and refreshes during a continuing surge. The effective level is always the higher of this floor and the configured `/Level`, so it never lowers Levels 2–4 and never automatically enters lockdown. `/Level 1` during the window changes the configured baseline but remains effectively Level 2 until expiry; `/Level 2` makes the posture remain after expiry. If Post Gate is off, the window does not enable it, but an enabled Automod still consumes the shared Level 2 policy. If both layers are off, joins are not tracked.
+Five unique non-bot joins within 60 seconds activate **Shared Raid Mode** whenever either the Post Gate review queue or Post Gate Protection is enabled. It persists a 30-minute automatic Level 2 floor, survives a restart, and refreshes during a continuing surge. The effective level is always the higher of this floor and the configured `/Level`, so it never lowers Levels 2–4 and never automatically enters lockdown. `/Level 1` during the window changes the configured baseline but remains effectively Level 2 until expiry; `/Level 2` makes the posture remain after expiry. If the review queue is off, the window does not enable it, but enabled protection still consumes the shared Level 2 policy. If both layers are off, joins are not tracked.
 
 Levels 1–2 normalize common link obfuscations before deciding whether to hold a post. This includes inserted spaces or invisible characters, spaced and `hxxp` protocols, Unicode URL punctuation, bracketed dots, bare domains, and IPv4 addresses; the original message is preserved unchanged for moderator review.
 
@@ -204,23 +198,23 @@ At Levels 1–2 a message is also held when it matches the **prohibited-term fil
 
 The same filter screens **usernames, display names, and server nicknames** — on join, on nickname change, and on every message, so a slur used as an identity never needs a message to surface it. A match automatically places the account in full Post Gate exactly as a contact-solicitation match does. The offending name itself is never shown on a card; only the rule id and which field matched (`username`, `display name`, or `nickname`).
 
-Levels 1–2 also screen a non-moderator's post and current profile bio for **DM availability and off-platform contact solicitation** only while Automod's existing recent-identity signal applies: the account is under 7 days old or the server membership is under 24 hours old. Established accounts and established first-time posters are not contact-screened. Covered signals include open/available DMs, direct invitations such as `message me`, labeled handles for common social and gaming platforms, their profile/invite URLs, and explicit email invitations. Matching tolerates common Unicode, invisible-character, homoglyph, leetspeak, spacing, punctuation, and stretched-letter bypasses while allowing clear opt-outs such as `DMs closed` and ordinary unlabeled Stoat `@mentions`.
+Levels 1–2 also screen a non-moderator's post and current profile bio for **DM availability and off-platform contact solicitation** only while Post Gate Protection's recent-identity signal applies: the account is under 7 days old or the server membership is under 24 hours old. Established accounts and established first-time posters are not contact-screened. Covered signals include open/available DMs, direct invitations such as `message me`, labeled handles for common social and gaming platforms, their profile/invite URLs, and explicit email invitations. Matching tolerates common Unicode, invisible-character, homoglyph, leetspeak, spacing, punctuation, and stretched-letter bypasses while allowing clear opt-outs such as `DMs closed` and ordinary unlabeled Stoat `@mentions`.
 
 A contact match automatically places the account in full Post Gate and queues the triggering message without applying a strike. The protected cards record only a stable rule id and whether the signal came from the message or bio; bio text and external contact details are not copied. Successful profile/no-profile checks are cached for ten minutes and concurrent messages share one lookup. If Stoat cannot return a profile and no fresh result is cached, message-only detection continues, the post is allowed, diagnostics stay redacted, and profile checks retry after one minute.
 
 ### Holding a whole member
 
-Denying a held post with 🔒 (or `/Post-Gate deny-hold QUEUE_ID`) discards the post, advances the automod strike stage, and places the author in **full Post Gate**: every later message they send is held for review, whatever it contains. A contact-solicitation match, or a prohibited term in the account's username, display name, or nickname, creates the same full-user hold automatically but does not advance the strike stage. Irminsul posts one persistent control card naming either the moderator or the automatic screening source, with a 🔓 reaction to release. The hold is idempotent — repeated triggers never stack records or repost the card — and it is stored on disk, so it survives a restart. If the member leaves, is kicked, or is banned, Irminsul automatically removes the account-level hold and its reminder cards; already queued messages remain independently reviewable. Recognized moderators (checked server-wide, independent of the review channel's own permissions), the review channel itself, privacy-excluded channels, and Levels 3–4 lockdown all continue to take precedence.
+Denying a held post with 🔒 (or `/Post-Gate deny-hold QUEUE_ID`) discards the post, advances the protection strike stage, and places the author in **full Post Gate**: every later message they send is held for review, whatever it contains. A contact-solicitation match, or a prohibited term in the account's username, display name, or nickname, creates the same full-user hold automatically but does not advance the strike stage. Irminsul posts one persistent control card naming either the moderator or the automatic screening source, with a 🔓 reaction to release. The hold is idempotent — repeated triggers never stack records or repost the card — and it is stored on disk, so it survives a restart. If the member leaves, is kicked, or is banned, Irminsul automatically removes the account-level hold and its reminder cards; already queued messages remain independently reviewable. Recognized moderators (checked server-wide, independent of the review channel's own permissions), the review channel itself, privacy-excluded channels, and Levels 3–4 lockdown all continue to take precedence.
 
 A hold never expires on a timer while the account remains a member. After 24 hours (`POST_GATE_HOLD_REMINDER_HOURS`, 1–168) Irminsul reminds moderators that the hold is still standing and offers 🔓 Release or ⏳ Continue Holding; ignoring the reminder simply repeats it one window later. Releasing (🔓 or `/Post-Gate release @member`) restores normal posting immediately, but messages already sitting in the review queue stay queued and are reviewed individually — a release is a judgement about the author, not about content nobody has looked at yet. If the account still has a recent identity and its next message or still-cached/refreshed bio continues to advertise contact, it is automatically held again. Once both recent-identity windows expire, contact screening and automatic re-holding stop. Both transitions are recorded to the protected review channel.
 
 Levels 3–4 clear **Send Messages** from the server default role, then keep reactive deletion as a fallback for messages allowed by explicit channel or role overrides. Irminsul must have **Manage Permissions** plus explicit **View Channel** and **Send Messages** access in the protected review channel so it cannot lock itself out. Staff roles and bots that rely only on the default role are also silenced; give trusted roles explicit sending permission if they must remain active. Unlocking restores only the Send Messages bit Irminsul removed, preserving unrelated permission changes, and startup/event/periodic reconciliation repairs drift.
 
-Level 4 can only be requested with `/Level 4 confirm`, followed by the requester's ✅ reaction within two minutes. Stoat rejects ordinary default-role sends before a message exists, so Level 4 bans authors only when a message reaches Irminsul through an explicit override. Bots, webhooks, the owner, and verified moderation staff are exempt from reactive enforcement. Level 3 and 4 messages do not enter the review queue, automod detector, command router, or message archive; the review channel receives one protected activation notice instead of one card per denied post. `/Post-Gate off` remains Enka-approved and disables the policy completely.
+Level 4 can only be requested with `/Level 4 confirm`, followed by the requester's ✅ reaction within two minutes. Stoat rejects ordinary default-role sends before a message exists, so Level 4 bans authors only when a message reaches Irminsul through an explicit override. Bots, webhooks, the owner, and verified moderation staff are exempt from reactive enforcement. Level 3 and 4 messages do not enter the review queue, protection detector, command router, or message archive; the review channel receives one protected activation notice instead of one card per denied post. `/Post-Gate off` remains Enka-approved and disables the review policy completely; `/Post-Gate protection off` independently disables behavioral detection.
 
-### Anti-raid automod
+### Post Gate Protection
 
-Automod is **off by default for every server**. Start with `/Automod monitor here` in a sandbox or logger channel. Monitor mode runs the complete detector and writes protected case records, but never deletes messages, times out members, or creates ban votes. `/Automod enforce here` must be selected explicitly before containment is allowed.
+Post Gate Protection is **off by default for every server**. Start with `/Post-Gate protection monitor here` in a sandbox or logger channel. Monitor mode runs the complete detector and writes protected case records, but never deletes messages, times out members, or creates ban votes. `/Post-Gate protection enforce here` must be selected explicitly before containment is allowed.
 
 The detector keeps bounded, in-memory message and join windows. It opens a case at two points when at least one message-behavior signal is present:
 
@@ -228,9 +222,9 @@ The detector keeps bounded, in-memory message and join windows. It opens a case 
 - 4 normalized duplicates within 10 seconds: 2 points
 - 5 unique mentions within 10 seconds: 2 points
 - Account younger than 7 days or server membership younger than 24 hours: 1 point
-  Shared Raid Mode replaces the old Automod-only `joined during raid` point. During its automatic Level 2 window, the recent-identity point uses the shared 14-day account and 3-day membership windows; the global raid state itself adds no score. A join surge by itself never opens a case or changes a member. Bots and webhooks are excluded from message evaluation, verified moderation staff are exempt from cases, and a failed fresh permission check downgrades enforcement to monitor-only.
+  Shared Raid Mode replaces the old detector-only `joined during raid` point. During its automatic Level 2 window, the recent-identity point uses the shared 14-day account and 3-day membership windows; the global raid state itself adds no score. A join surge by itself never opens a case or changes a member. Bots and webhooks are excluded from message evaluation, verified moderation staff are exempt from cases, and a failed fresh permission check downgrades enforcement to monitor-only.
 
-In enforcement mode, successful containment advances a persistent, bounded strike-stage ladder: **10 minutes → 1 hour → 24 hours → 7 days**. Further triggers remain capped at seven days, and the ladder resets after 14 quiet days. Monitor mode displays the projected strike stage without changing it. The bot then best-effort deletes the triggering messages and writes a protected evidence record. A successfully contained automod case gets a separate 10-minute ban prompt. Automod case bans are **never automatic**: two distinct authorized staff approvals are required by default, using the 🔨 reaction or `/Automod approve CASE_ID`. `/Level 4` is a separate, explicitly confirmed server-wide policy. `/Automod quorum 1` exists for a one-moderator sandbox; restore it to `2` before production use.
+In enforcement mode, successful containment advances a persistent, bounded strike-stage ladder: **10 minutes → 1 hour → 24 hours → 7 days**. Further triggers remain capped at seven days, and the ladder resets after 14 quiet days. Monitor mode displays the projected strike stage without changing it. The bot then best-effort deletes the triggering messages and writes a protected evidence record. A successfully contained protection case gets a separate 10-minute ban prompt. Protection case bans are **never automatic**: two distinct authorized staff approvals are required by default, using the 🔨 reaction or `/Post-Gate protection approve CASE_ID`. `/Level 4` is a separate, explicitly confirmed server-wide policy. `/Post-Gate protection quorum 1` exists for a one-moderator sandbox; restore it to `2` before production use.
 
 Queued triggers while the same timeout is still active extend that containment without creating vote spam or another strike. Once the timeout expires, another trigger advances the ladder and opens a fresh approval window even if the older case is less than 15 minutes old. Pending case IDs, approval state, strike history, reversible manual actions, and per-server configuration survive restarts in `data/automod_cases.json`, `data/automod_strikes.json`, `data/moderation_actions.json`, and `data/automod.json`; message-rate windows and uncommitted reaction pickers intentionally reset on restart.
 
@@ -261,22 +255,22 @@ The hoyo-codes API returns an array of `{code, rewards, date, source}`. The enne
 
 You can use custom Revolt server emoji instead of Unicode emoji for reward icons (💎→ actual Primogem icon, etc.). Irminsul provisions these itself — there's no manual download/upload/copy-the-ID chore.
 
-Irminsul's own in-house emoji hub is already pinned as the default `EMOJI_HUB_SERVER_ID` in `config.js`, so a stock deployment needs nothing further here — just invite the bot to that server with **Manage Customisation** and run `/EmojiSetup`. `EMOJI_HUB_SERVER_ID` in `.env` only needs setting to point a different install at its own hub.
+Irminsul's own in-house emoji hub is already pinned as the default `EMOJI_HUB_SERVER_ID` in `config.js`, so a stock deployment needs nothing further here — just invite the bot to that server with **Manage Customisation** and run `/Emoji provision`. `EMOJI_HUB_SERVER_ID` in `.env` only needs setting to point a different install at its own hub.
 
 ### How it works
 
 1. **Create a server** on Revolt (e.g. "Irminsul Emoji Hub") and invite the bot with **Manage Customisation**
 2. **Set `EMOJI_HUB_SERVER_ID`** in `.env` to that server's ID — skip this step to use the pinned default hub above
-3. **Run `/EmojiSetup`** in that server (or `npm run emoji:provision` from the host) — it downloads each icon named in `emoji-icons.js` and uploads it as a server emoji, reporting exactly what succeeded, was skipped, or failed
-4. **Switch rendering** with `/EmojiMode custom`
+3. **Run `/Emoji provision`** in that server (or `npm run emoji:provision` from the host) — it downloads each icon named in `emoji-icons.js` and uploads it as a server emoji, reporting exactly what succeeded, was skipped, or failed
+4. **Switch rendering** with `/Emoji mode custom`
 
-`/EmojiSetup` is safe to run repeatedly: an already-provisioned keyword is reused rather than re-uploaded, so re-running it after adding new manifest entries only fetches what's missing. `/EmojiSetup status` reports current coverage without uploading anything, and outside the hub server the command is always read-only.
+`/Emoji provision` is safe to run repeatedly: an already-provisioned keyword is reused rather than re-uploaded, so re-running it after adding new manifest entries only fetches what's missing. `/Emoji status` reports current coverage without uploading anything, and outside the hub server `/Emoji provision` is always read-only.
 
 ### Why a hub server?
 
 In Revolt, custom emoji are globally referenced by their unique ID. A bot can use emoji from **any server it has joined** in messages sent to **any other server**. This means you only need one hub server with all your emoji — the bot renders them everywhere. (Revolt has no equivalent of Discord's application-owned emoji, so a hub server can't be eliminated — only the manual work of populating it can.)
 
-Provisioned emoji IDs persist to `data/emoji_registry.json`. If that file is ever lost (a fresh deploy, for example), re-running `/EmojiSetup` costs nothing extra — it reads the hub server's existing emoji list first and reuses what's already there.
+Provisioned emoji IDs persist to `data/emoji_registry.json`. If that file is ever lost (a fresh deploy, for example), re-running `/Emoji provision` costs nothing extra — it reads the hub server's existing emoji list first and reuses what's already there.
 
 ## 🏗️ Architecture
 
@@ -284,13 +278,13 @@ Provisioned emoji IDs persist to `data/emoji_registry.json`. If that file is eve
 hoyofetch/
 ├── bot.js              Main entry, command router, auto-fetch scheduler
 ├── command-catalog.js  Shared command metadata for the bot help and docs site
-├── automod.js          Anti-raid detection, containment, and ban approvals
+├── automod.js          Internal Post Gate Protection detection engine and persisted compatibility layer
 ├── config.js           Game definitions, API config, custom emoji loader
 ├── api.js              Code source integration (hoyo-codes + ennead + Game8)
 ├── embeds.js           Revolt SendableEmbed builder
 ├── store.js            JSON persistence (channels, codes, audit, automod)
 ├── auditlog.js         Message/member audit event pipeline
-├── moderation-policy.js Shared Post Gate/Automod effective policy
+├── moderation-policy.js Shared Post Gate review/protection effective policy
 ├── raid-mode.js        Persisted shared join-surge coordinator
 ├── settings-monitor.js Persistent server-setting diff and reconciliation
 ├── tamper-protection.js Always-on protected audit-message restoration
@@ -342,18 +336,18 @@ API poll (hourly)
 
 All settings are in `.env`:
 
-| Variable              | Default                              | Description                                                                        |
-| --------------------- | ------------------------------------ | ---------------------------------------------------------------------------------- |
-| `BOT_TOKEN`           | _(required)_                         | Revolt bot token                                                                   |
-| `EMERGENCY_SERVER_ID` | _(required for VPS emergency lock)_  | Server whose default Send Messages permission the host command controls            |
-| `STOAT_API_BASE`      | `https://api.stoat.chat`             | Stoat REST endpoint used by the VPS emergency command                              |
-| `PREFIX`              | `/`                                  | Command prefix                                                                     |
-| `FETCH_INTERVAL`      | `60`                                 | Auto-fetch interval in minutes                                                     |
-| `FETCH_COOLDOWN`      | `10`                                 | Min seconds between manual `/Fetch*` commands per channel (`0` disables)           |
-| `EMOJI_MODE`          | `unicode`                            | Initial emoji mode (`unicode` or `custom`); switchable at runtime via `/EmojiMode` |
-| `EMOJI_HUB_SERVER_ID` | Irminsul's in-house hub              | Server Irminsul auto-provisions reward icons onto (needs Manage Customisation)     |
-| `HOYO_API_BASE`       | `https://hoyo-codes.seria.moe/codes` | GI/HSR/ZZZ API                                                                     |
-| `HOYOFETCH_DATA_DIR`  | `./data`                             | Where `channels.json` / `known_codes.json` / `source_cache.json` are stored        |
+| Variable              | Default                              | Description                                                                         |
+| --------------------- | ------------------------------------ | ----------------------------------------------------------------------------------- |
+| `BOT_TOKEN`           | _(required)_                         | Revolt bot token                                                                    |
+| `EMERGENCY_SERVER_ID` | _(required for VPS emergency lock)_  | Server whose default Send Messages permission the host command controls             |
+| `STOAT_API_BASE`      | `https://api.stoat.chat`             | Stoat REST endpoint used by the VPS emergency command                               |
+| `PREFIX`              | `/`                                  | Command prefix                                                                      |
+| `FETCH_INTERVAL`      | `60`                                 | Auto-fetch interval in minutes                                                      |
+| `FETCH_COOLDOWN`      | `10`                                 | Min seconds between manual `/Fetch*` commands per channel (`0` disables)            |
+| `EMOJI_MODE`          | `unicode`                            | Initial emoji mode (`unicode` or `custom`); switchable at runtime via `/Emoji mode` |
+| `EMOJI_HUB_SERVER_ID` | Irminsul's in-house hub              | Server Irminsul auto-provisions reward icons onto (needs Manage Customisation)      |
+| `HOYO_API_BASE`       | `https://hoyo-codes.seria.moe/codes` | GI/HSR/ZZZ API                                                                      |
+| `HOYOFETCH_DATA_DIR`  | `./data`                             | Where `channels.json` / `known_codes.json` / `source_cache.json` are stored         |
 
 ### VPS-only emergency Send Messages lock
 
@@ -410,6 +404,23 @@ docker run -d --name hoyofetch --restart unless-stopped \
 ```
 
 ## 📝 Changelog
+
+### Unreleased — breaking administrative command cleanup
+
+Administrative commands now use resource-oriented names and subcommands that map directly to the future v4.5 dashboard control panels. Superseded routes are removed immediately; there are no warning aliases, and the repository has no per-command telemetry from which to infer their real-world usage.
+
+| Removed command or syntax              | Replacement                                                                 |
+| -------------------------------------- | --------------------------------------------------------------------------- |
+| `/EnableFetch [scope]`                 | `/Auto-Fetch enable [scope]`                                                |
+| `/DisableFetch`                        | `/Auto-Fetch off`                                                           |
+| `/EmojiMode [unicode\|custom]`         | `/Emoji mode <unicode\|custom>`                                             |
+| `/EmojiSetup [status]`                 | `/Emoji provision` or `/Emoji status`                                       |
+| `/AuditLog here`, `/AuditLog #channel` | `/AuditLog set <here\|#channel>`                                            |
+| `/Exclude-Channel ...`                 | `/AuditLog privacy status\|exclude\|include ...`                            |
+| `/Automod ...`                         | `/Post-Gate protection monitor\|enforce\|off\|quorum\|approve\|release ...` |
+| `/Automod status`                      | `/Post-Gate status`                                                         |
+
+`/Level`, the Post Gate review queue and its review actions, manual moderation, member fetches, reporting, help, diagnostics, and restart commands are unchanged. Existing `data/automod*.json` files and internal identifiers remain compatible; only the public name and command surface change.
 
 ### v3.3.1
 

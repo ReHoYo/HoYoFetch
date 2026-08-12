@@ -55,9 +55,7 @@ test("help tuples are generated from the shared catalog with a custom prefix", (
 
   const setupHelp = getHelpCommandTuples(COMMAND_SECTIONS.SETUP, "!");
   assert.ok(
-    setupHelp.some(
-      ([syntax]) => syntax === "!EnableFetch [all|hoyo|nte|wuwa|nte-wuwa]"
-    )
+    setupHelp.some(([syntax]) => syntax === "!Auto-Fetch [status|enable|off]")
   );
 });
 
@@ -91,7 +89,7 @@ test("removed command routes have neither handlers nor authorization", () => {
   }
 });
 
-test("EnableFetch accepts each canonical scope and rejects invalid or extra arguments", () => {
+test("Auto-Fetch accepts each canonical scope and rejects invalid or extra arguments", () => {
   assert.deepEqual(parseAutoFetchScope([]), { ok: true, scope: "all" });
   for (const [input, scope] of [
     ["all", "all"],

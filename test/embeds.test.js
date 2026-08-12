@@ -24,15 +24,13 @@ test("WuWa code embeds include reward emoji, in-game steps, and the correct sour
   );
 });
 
-test("in-chat help attributes both Game8 code sources", () => {
+test("in-chat help attributes both Game8 sources and uses canonical admin commands", () => {
   const [memberPage, setupPage] = buildHelpEmbeds("/");
 
   assert.match(memberPage.description, /Game8: NTE \+ WuWa/);
   assert.match(memberPage.description, /\/FetchWuWa/);
-  assert.match(
-    setupPage.description,
-    /\/EnableFetch \[all\|hoyo\|nte\|wuwa\|nte-wuwa\]/
-  );
+  assert.match(setupPage.description, /\/Auto-Fetch \[status\|enable\|off\]/);
+  assert.doesNotMatch(setupPage.description, /Automod|EnableFetch/);
 });
 
 test("a batch of rewardless codes links the source article exactly once", () => {

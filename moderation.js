@@ -196,7 +196,7 @@ export function rateLimitWaitMs(response, attempt = 0) {
 }
 
 // Commands that pause for a ✅/❌ confirmation before touching a member.
-// `/Purge-User` keeps its own count-aware confirmation, and `/Automod release`
+// `/Purge-User` keeps its own count-aware confirmation, and Post Gate Protection release
 // stays instant because it only restores access.
 const CONFIRM_PROMPTS = Object.freeze({
   ban: {
@@ -214,7 +214,8 @@ const CONFIRM_PROMPTS = Object.freeze({
   mute: {
     title: "🔇 Confirm Mute",
     action: (parsed) => `mute for ${parsed.duration}`,
-    caution: "The timeout can be lifted with ↩️ or `/Automod release`.",
+    caution:
+      "The timeout can be lifted with ↩️ or `/Post-Gate protection release`.",
   },
 });
 
@@ -1447,7 +1448,7 @@ export function createModeration(
       targetId: parsed.targetId,
       reason: parsed.reason,
       details: [
-        `**Automod escalation reset:** ${reset ? "yes" : "no strike record existed"}`,
+        `**Protection escalation reset:** ${reset ? "yes" : "no strike record existed"}`,
         `**Pending ban reviews closed:** ${cancelledCases}`,
       ],
       reversible: false,
@@ -1455,7 +1456,7 @@ export function createModeration(
     await respond(
       message.channelId,
       "🔊 Member Released",
-      `<@${parsed.targetId}> can message again. ${reset ? "Their automod escalation history was reset." : "No automod strike record existed."} ${cancelledCases} pending ban review(s) were closed.`,
+      `<@${parsed.targetId}> can message again. ${reset ? "Their protection escalation history was reset." : "No protection strike record existed."} ${cancelledCases} pending ban review(s) were closed.`,
       "#2ECC71"
     );
   }

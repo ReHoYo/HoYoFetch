@@ -716,3 +716,28 @@ test("configuration commands are opt-in and keep case quorum snapshots", async (
   assert.match(off.title, /Disabled/);
   assert.equal(harness.store.getAutomodConfig(SERVER_ID).mode, "off");
 });
+
+test("the public protection namespace rejects status and extra arguments", async () => {
+  const harness = makeHarness({ mode: "off" });
+  const commandMessage = {
+    server: { id: SERVER_ID },
+    channelId: CHANNEL_ID,
+    authorId: OWNER_ID,
+  };
+  const options = { allowStatus: false };
+  const status = await harness.automod.handleCommand(
+    commandMessage,
+    ["status"],
+    "/Post-Gate protection",
+    options
+  );
+  const extra = await harness.automod.handleCommand(
+    commandMessage,
+    ["off", "extra"],
+    "/Post-Gate protection",
+    options
+  );
+  assert.match(status.title, /Invalid Protection Command/);
+  assert.match(extra.title, /Invalid Protection Command/);
+  assert.equal(harness.store.getAutomodConfig(SERVER_ID).mode, "off");
+});

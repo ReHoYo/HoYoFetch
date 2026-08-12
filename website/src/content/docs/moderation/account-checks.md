@@ -22,7 +22,7 @@ The account may be current, departed, banned, visible to Irminsul through anothe
 | -------------- | -------------------------------------------------------------------------------------------------------------------- |
 | Current member | The account and membership are present in this server.                                                               |
 | Banned         | The account is absent from membership and appears in this server's ban list. Identity may come from that list.       |
-| Former         | Local archive, automod, or spam-report evidence proves the account was previously seen here.                         |
+| Former         | Local archive, protection, or spam-report evidence proves the account was previously seen here.                      |
 | Outside        | The account is visible through another community Irminsul is in. The report names up to three cached mutual servers. |
 | Platform only  | Stoat confirms the account exists, but full identity is hidden because it shares no visible community with Irminsul. |
 | Unknown        | Stoat did not confirm whether the account exists, usually because a probe was denied, rate-limited, or unavailable.  |
@@ -40,7 +40,7 @@ When Irminsul has cached the target as a member of another server, `/Get-Info` n
 - **Identity:** username, display name, nickname, user ID, avatar status, and platform badges when visible.
 - **Timestamps:** account creation date and, for current members, when they joined this server.
 - **Platform flags:** any Suspended, Banned, or Deleted flag Stoat exposes, plus online status, bot owner, and timeout when full identity is visible.
-- **Moderation history:** ban status and reason, automod strikes and open cases, and prior spam reports naming this account in this server.
+- **Moderation history:** ban status and reason, protection strikes and open cases, and prior spam reports naming this account in this server.
 - **Messages sent:** how many messages remain in Irminsul's local archive and when coverage begins. This is not a lifetime total; deleted and purged messages are excluded.
 - **⚠️ Signals:** the specific conditions worth a closer look, listed at the top.
 
@@ -50,4 +50,4 @@ When Irminsul has cached the target as a member of another server, `/Get-Info` n
 
 A signal — a new account, a default avatar, a server ban, or an account created minutes before it joined — is a prompt to look closer, not grounds to act on its own. Treat `/Get-Info` as a faster way to collect evidence for a manual moderation decision, not as an automatic classifier.
 
-For live protection while you are away, see [Automod](/HoYoFetch/moderation/automod/), which acts on message and join patterns in real time.
+For live behavioral protection while you are away, see [Post Gate Protection](/HoYoFetch/moderation/post-gate/#post-gate-protection), which acts on message and join patterns in real time.

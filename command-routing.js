@@ -12,12 +12,9 @@ export const COMMAND_DISPATCH_BY_ROUTE = Object.freeze({
   helphoyofetch: "help",
   docs: "docs",
   "report-spam": "report_spam",
-  enablefetch: "enable_fetch",
-  disablefetch: "disable_fetch",
-  emojimode: "emoji_mode",
-  emojisetup: "emoji_setup",
+  "auto-fetch": "auto_fetch",
+  emoji: "emoji",
   auditlog: "audit_log",
-  "exclude-channel": "exclude_channel",
   "post-gate": "post_gate",
   level: "level",
   restart: "restart",
@@ -27,7 +24,6 @@ export const COMMAND_DISPATCH_BY_ROUTE = Object.freeze({
   mute: "manual_moderation",
   "purge-user": "manual_moderation",
   "get-info": "get_info",
-  automod: "automod",
 });
 
 export const REMOVED_COMMAND_ROUTES = Object.freeze([
@@ -44,6 +40,12 @@ export const REMOVED_COMMAND_ROUTES = Object.freeze([
   "enablefetchnte",
   "enablefetchwuwa",
   "enablefetchntewuwa",
+  "enablefetch",
+  "disablefetch",
+  "emojimode",
+  "emojisetup",
+  "exclude-channel",
+  "automod",
 ]);
 
 const AUTO_FETCH_SCOPES = Object.freeze({

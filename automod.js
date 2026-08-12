@@ -310,7 +310,9 @@ function formatCaseEmbed({
       : "permission refresh unavailable; enforcement suppressed";
 
   return {
-    title: repeat ? "🛡️ Automod Case Re-triggered" : "🛡️ Automod Case Opened",
+    title: repeat
+      ? "🛡️ Post Gate Protection Case Re-triggered"
+      : "🛡️ Post Gate Protection Case Opened",
     description: [
       `**Case:** \`${caseId}\``,
       `**Target:** <@${userId}>`,
@@ -333,12 +335,12 @@ function formatCaseEmbed({
 
 function approvalEmbed(caseRecord) {
   return buildStatusEmbed(
-    "🔨 Automod Ban Review",
+    "🔨 Post Gate Protection Ban Review",
     [
       `**Case:** \`${caseRecord.caseId}\``,
       `**Target:** <@${caseRecord.userId}>`,
       `The account is temporarily contained. A permanent ban requires **${caseRecord.quorum} distinct authorized staff approval${caseRecord.quorum === 1 ? "" : "s"}** within 10 minutes.`,
-      `React with ${AUTOMOD_BAN_EMOJI} or use \`/Automod approve ${caseRecord.caseId}\`.`,
+      `React with ${AUTOMOD_BAN_EMOJI} or use \`/Post-Gate protection approve ${caseRecord.caseId}\`.`,
       "Only the server owner, Manage Server members, or Ban Members moderators are eligible.",
     ].join("\n"),
     "#E74C3C"
@@ -363,13 +365,13 @@ export function createAutomod(
   } = {}
 ) {
   if (typeof send !== "function") {
-    throw new TypeError("Automod requires a sender.");
+    throw new TypeError("Post Gate Protection requires a sender.");
   }
   if (typeof sendProtected !== "function") {
-    throw new TypeError("Automod requires a protected sender.");
+    throw new TypeError("Post Gate Protection requires a protected sender.");
   }
   if (typeof request !== "function") {
-    throw new TypeError("Automod requires an HTTP requester.");
+    throw new TypeError("Post Gate Protection requires an HTTP requester.");
   }
 
   const actorLocks = new Set();
@@ -690,7 +692,7 @@ export function createAutomod(
         await postProtected(
           current.logChannelId,
           buildStatusEmbed(
-            "🛑 Automod Ban Aborted",
+            "🛑 Post Gate Protection Ban Aborted",
             `Case \`${current.caseId}\` was not banned because the target is now exempt or could not be safely revalidated.`,
             "#E74C3C"
           )
@@ -712,7 +714,7 @@ export function createAutomod(
         await postProtected(
           current.logChannelId,
           buildStatusEmbed(
-            "⚠️ Automod Ban Failed",
+            "⚠️ Post Gate Protection Ban Failed",
             `Case \`${current.caseId}\` reached quorum, but the bot does not currently have verified **Ban Members** permission. No fallback action was taken.`,
             "#E74C3C"
           )
@@ -724,14 +726,14 @@ export function createAutomod(
         "PUT",
         `/servers/${current.serverId}/bans/${current.userId}`,
         {
-          reason: `Irminsul automod case ${current.caseId}: approved by ${current.approvals.length} staff`,
+          reason: `Irminsul Post Gate Protection case ${current.caseId}: approved by ${current.approvals.length} staff`,
         }
       );
       if (!response.ok) {
         await postProtected(
           current.logChannelId,
           buildStatusEmbed(
-            "⚠️ Automod Ban Failed",
+            "⚠️ Post Gate Protection Ban Failed",
             `Case \`${current.caseId}\` reached quorum, but Stoat rejected the ban request (HTTP ${response.status || "unknown"}). No fallback action was taken.`,
             "#E74C3C"
           )
@@ -746,7 +748,7 @@ export function createAutomod(
       await postProtected(
         current.logChannelId,
         buildStatusEmbed(
-          "🔨 Automod Ban Approved",
+          "🔨 Post Gate Protection Ban Approved",
           `Case \`${current.caseId}\` reached ${current.approvals.length}/${current.quorum} authorized approvals. <@${current.userId}> was banned with the case ID recorded as the reason.`,
           "#E74C3C"
         )
@@ -809,20 +811,24 @@ export function createAutomod(
     );
   }
 
-  async function handleCommand(message, args = [], prefix = "/") {
+  async function handleCommand(
+    message,
+    args = [],
+    command = "/Post-Gate protection",
+    { allowStatus = true } = {}
+  ) {
     const serverId = message.server?.id;
     if (!isSafeId(serverId)) {
       return buildStatusEmbed(
         "🔒 Server Only",
-        "Automod can only be configured inside a server.",
+        "Post Gate Protection can only be configured inside a server.",
         "#E74C3C"
       );
     }
-    const command = `${prefix}Automod`;
     const action = String(args[0] ?? "status").toLowerCase();
     const config = store.getAutomodConfig(serverId);
 
-    if (action === "status") {
+    if (action === "status" && allowStatus && args.length <= 1) {
       const channel = config.logChannelId
         ? `<#${config.logChannelId}>`
         : "not configured";
@@ -831,47 +837,47 @@ export function createAutomod(
         ? `active until ${new Date(policy.raidModeExpiresAt).toISOString()}`
         : "inactive";
       return buildStatusEmbed(
-        "🛡️ Automod Status",
-        `**Mode:** ${config.mode}\n**Logger:** ${channel}\n**Ban quorum:** ${config.quorum}\n**Effective server policy:** Level ${policy.effectiveLevel}\n**Shared Raid Mode:** ${raidStatus}\nAutomod is opt-in, still requires message behavior and a score of ${policy.scoreThreshold}, and permanent bans always require staff approval.`,
+        "🛡️ Post Gate Protection Status",
+        `**Mode:** ${config.mode}\n**Logger:** ${channel}\n**Ban quorum:** ${config.quorum}\n**Effective server policy:** Level ${policy.effectiveLevel}\n**Shared Raid Mode:** ${raidStatus}\nProtection is opt-in, still requires message behavior and a score of ${policy.scoreThreshold}, and permanent bans always require staff approval.`,
         config.mode === "off" ? "#808080" : "#3498DB"
       );
     }
 
-    if (action === "off") {
+    if (action === "off" && args.length === 1) {
       store.setAutomodConfig(serverId, { mode: "off" });
       for (const key of recentCases.keys()) {
         if (key.startsWith(`${serverId}:`)) recentCases.delete(key);
       }
       detector.clearServer(serverId);
       return buildStatusEmbed(
-        "🔕 Automod Disabled",
+        "🔕 Post Gate Protection Disabled",
         "Message and join activity will no longer be evaluated for this server.",
         "#E67E22"
       );
     }
 
-    if (action === "quorum") {
+    if (action === "quorum" && args.length === 2) {
       const quorum = Number(args[1]);
       if (quorum !== 1 && quorum !== 2) {
         return buildStatusEmbed(
-          "⚠️ Invalid Automod Quorum",
+          "⚠️ Invalid Protection Quorum",
           `Use \`${command} quorum 1\` for a single-moderator sandbox or \`${command} quorum 2\` for production. Existing cases keep the quorum they opened with.`,
           "#E74C3C"
         );
       }
       store.setAutomodConfig(serverId, { quorum });
       return buildStatusEmbed(
-        "🔨 Automod Quorum Updated",
+        "🔨 Protection Quorum Updated",
         `New cases will require ${quorum} distinct authorized staff approval${quorum === 1 ? "" : "s"} before banning.`,
         quorum === 1 ? "#E67E22" : "#2ECC71"
       );
     }
 
-    if (action === "approve") {
+    if (action === "approve" && args.length === 2) {
       const caseId = String(args[1] ?? "").trim();
       if (!isSafeId(caseId)) {
         return buildStatusEmbed(
-          "⚠️ Invalid Automod Case",
+          "⚠️ Invalid Protection Case",
           `Use \`${command} approve CASE_ID\`.`,
           "#E74C3C"
         );
@@ -895,8 +901,8 @@ export function createAutomod(
       };
       return buildStatusEmbed(
         result.outcome === "banned"
-          ? "🔨 Automod Ban Completed"
-          : "🛡️ Automod Approval Result",
+          ? "🔨 Protection Ban Completed"
+          : "🛡️ Protection Approval Result",
         descriptions[result.outcome] ?? `Case status: ${result.outcome}.`,
         result.outcome === "banned" || result.outcome === "approved"
           ? "#2ECC71"
@@ -904,7 +910,7 @@ export function createAutomod(
       );
     }
 
-    if (action === "monitor" || action === "enforce") {
+    if ((action === "monitor" || action === "enforce") && args.length <= 2) {
       const rawTarget = args.slice(1).join(" ").trim() || "here";
       const channelId =
         rawTarget.toLowerCase() === "here"
@@ -912,7 +918,7 @@ export function createAutomod(
           : parseChannelArg(rawTarget);
       if (!isSafeId(channelId)) {
         return buildStatusEmbed(
-          "⚠️ Invalid Automod Logger",
+          "⚠️ Invalid Protection Logger",
           `Use \`${command} ${action} here\` or choose a text channel in this server.`,
           "#E74C3C"
         );
@@ -931,7 +937,7 @@ export function createAutomod(
         !canSend
       ) {
         return buildStatusEmbed(
-          "⚠️ Unavailable Automod Logger",
+          "⚠️ Unavailable Protection Logger",
           "Choose a text channel in this server where I have Send Messages permission.",
           "#E74C3C"
         );
@@ -946,8 +952,8 @@ export function createAutomod(
       detector.clearServer(serverId);
       return buildStatusEmbed(
         action === "monitor"
-          ? "👀 Automod Monitor Mode Enabled"
-          : "🛡️ Automod Enforcement Enabled",
+          ? "👀 Post Gate Protection Monitor Mode Enabled"
+          : "🛡️ Post Gate Protection Enforcement Enabled",
         action === "monitor"
           ? `Cases will be reported in <#${channelId}>, but no messages or members will be modified.`
           : `High-confidence cases will be timed out and cleaned up, then reported in <#${channelId}>. Permanent bans still require staff approval.`,
@@ -956,9 +962,9 @@ export function createAutomod(
     }
 
     return buildStatusEmbed(
-      "🛡️ Automod Commands",
-      `Use \`${command} status\`, \`${command} monitor [here|#channel]\`, \`${command} enforce [here|#channel]\`, \`${command} off\`, \`${command} quorum 1|2\`, \`${command} approve CASE_ID\`, or \`${command} release @member <reason>\`.`,
-      "#3498DB"
+      "⚠️ Invalid Protection Command",
+      `Use \`/Post-Gate status\`, \`${command} monitor [here|#channel]\`, \`${command} enforce [here|#channel]\`, \`${command} off\`, \`${command} quorum 1|2\`, \`${command} approve CASE_ID\`, or \`${command} release @member <reason>\`.`,
+      "#E74C3C"
     );
   }
 

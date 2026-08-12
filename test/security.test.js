@@ -120,12 +120,21 @@ function makeMessage({
 }
 
 test("every privileged command uses manager access", () => {
-  for (const command of ["enablefetch", "disablefetch"]) {
+  for (const command of [
+    "auto-fetch",
+    "auto-fetch status",
+    "auto-fetch enable hoyo",
+    "auto-fetch off",
+  ]) {
     assert.equal(
       getCommandAccess(command, GAME_COMMANDS),
       COMMAND_ACCESS.FETCH_MANAGER
     );
   }
+  assert.equal(
+    getCommandAccess("emoji provision", GAME_COMMANDS),
+    COMMAND_ACCESS.SERVER_MODERATOR
+  );
 
   for (const command of [
     ...Object.keys(GAME_COMMANDS),
@@ -145,9 +154,11 @@ test("every privileged command uses manager access", () => {
 
   for (const command of [
     "restart",
-    "emojimode",
-    "emojimode custom",
+    "emoji",
+    "emoji status",
+    "emoji mode custom",
     "auditlog",
+    "auditlog privacy status",
   ]) {
     assert.equal(
       getCommandAccess(command, GAME_COMMANDS),
@@ -155,13 +166,12 @@ test("every privileged command uses manager access", () => {
     );
   }
   for (const command of [
-    "automod",
-    "automod status",
-    "automod monitor",
-    "automod monitor here",
-    "automod enforce <#CHANNEL123>",
-    "automod off",
-    "automod quorum 2",
+    "post-gate protection",
+    "post-gate protection monitor",
+    "post-gate protection monitor here",
+    "post-gate protection enforce <#CHANNEL123>",
+    "post-gate protection off",
+    "post-gate protection quorum 2",
   ]) {
     assert.equal(
       getCommandAccess(command, GAME_COMMANDS),
@@ -182,11 +192,14 @@ test("every privileged command uses manager access", () => {
     );
   }
   assert.equal(
-    getCommandAccess("automod approve AM123", GAME_COMMANDS),
+    getCommandAccess("post-gate protection approve AM123", GAME_COMMANDS),
     COMMAND_ACCESS.BAN_APPROVER
   );
   assert.equal(
-    getCommandAccess("automod release <@USER123> reason: x", GAME_COMMANDS),
+    getCommandAccess(
+      "post-gate protection release <@USER123> reason: x",
+      GAME_COMMANDS
+    ),
     COMMAND_ACCESS.TIMEOUT
   );
   assert.equal(
@@ -262,7 +275,7 @@ test("Manage Messages is evaluated against the current channel", () => {
 });
 
 test("audit and privacy commands remain executable by capability-based moderators", () => {
-  const auditCommands = ["auditlog", "exclude-channel"];
+  const auditCommands = ["auditlog", "auditlog privacy status"];
   const moderators = [
     makeMessage({ owner: true }),
     makeMessage({ serverPermissions: ["ManageServer"] }),
@@ -415,7 +428,7 @@ test("fresh snapshots authorize every moderator capability for manager commands"
     COMMAND_ACCESS.FETCH_MANAGER
   );
   assert.equal(
-    getCommandAccess("emojimode custom", GAME_COMMANDS),
+    getCommandAccess("emoji mode custom", GAME_COMMANDS),
     COMMAND_ACCESS.FETCH_MANAGER
   );
 

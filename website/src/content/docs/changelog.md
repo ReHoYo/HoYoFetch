@@ -3,6 +3,26 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Unreleased — breaking administrative command cleanup
+
+Administrative setup is now grouped by resource so the same controllers can later back v4.5 dashboard panels. Superseded top-level commands are removed immediately, without aliases or warning handlers. Member commands, reporting, account lookup, manual moderation, `/Level`, `/Restart`, and `/Server-Info` are unchanged.
+
+| Removed command or syntax                | Replacement                                                                 |
+| ---------------------------------------- | --------------------------------------------------------------------------- |
+| `/EnableFetch [scope]`                   | `/Auto-Fetch enable [all\|hoyo\|nte\|wuwa\|nte-wuwa]`                       |
+| `/DisableFetch`                          | `/Auto-Fetch off`                                                           |
+| `/EmojiMode unicode\|custom`             | `/Emoji mode unicode\|custom`                                               |
+| `/EmojiSetup status`                     | `/Emoji status`                                                             |
+| `/EmojiSetup`                            | `/Emoji provision`                                                          |
+| `/AuditLog here` or `/AuditLog #channel` | `/AuditLog set here\|#channel`                                              |
+| `/Exclude-Channel status`                | `/AuditLog privacy status`                                                  |
+| `/Exclude-Channel <channel>`             | `/AuditLog privacy exclude here\|#channel`                                  |
+| `/Exclude-Channel remove <channel>`      | `/AuditLog privacy include here\|#channel`                                  |
+| `/Automod status`                        | `/Post-Gate status`                                                         |
+| Other `/Automod` actions                 | `/Post-Gate protection monitor\|enforce\|off\|quorum\|approve\|release ...` |
+
+`/Post-Gate off` still disables the review queue. `/Post-Gate protection off` independently disables behavioral detection. Existing protection configuration and cases continue using the established `data/automod*.json` storage formats; no data migration is required.
+
 ## Version 3.3.1
 
 ### Post Gate departure cleanup and quieter expiry reporting

@@ -8,8 +8,8 @@ Stoat does not provide a native server audit log. Irminsul can relay activity in
 ## Configure the destination
 
 ```text
-/AuditLog here
-/AuditLog #moderation-log
+/AuditLog set here
+/AuditLog set #moderation-log
 /AuditLog status
 /AuditLog test
 /AuditLog off
@@ -28,20 +28,20 @@ The requester or Enka can use `/AuditLog cancel`. Three incorrect attempts destr
 
 Only one protected audit/privacy request can be pending per server. Moves and disables are recorded in the previous protected destination before it is replaced or disabled; successful enables and moves record completion in the new destination. The destination and Irminsul's Send Messages permission are checked again when approval arrives, and stale requests make no change.
 
-## Exclude private channels
+## Privacy exclusions
 
 ```text
-/Exclude-Channel status
-/Exclude-Channel #private-channel
-/Exclude-Channel remove #private-channel
-/Exclude-Channel confirm 123456
-/Exclude-Channel cancel
+/AuditLog privacy status
+/AuditLog privacy exclude #private-channel
+/AuditLog privacy include #private-channel
+/AuditLog confirm 123456
+/AuditLog cancel
 ```
 
 Adding or removing an exclusion requires **two steps**:
 
 1. A recognized moderator requests the change. This includes the server owner, Manage Server, Kick Members, Ban Members, Timeout Members, or effective Manage Messages in the current channel.
-2. Irminsul DMs a ten-minute, six-digit code exclusively to **Enka#4961**, the fixed approver for this in-house deployment. Enka can reply with `approve CODE`, `deny CODE`, or the bare code, or relay it for `/Exclude-Channel confirm CODE` in the server.
+2. Irminsul DMs a ten-minute, six-digit code exclusively to **Enka#4961**, the fixed approver for this in-house deployment. Enka can reply with `approve CODE`, `deny CODE`, or the bare code, or relay it for `/AuditLog confirm CODE` in the server.
 
 Only one protected request can be pending per server, and three incorrect attempts destroy it. If Enka cannot be reached by DM, the request fails closed and logging continues unchanged. Both exclusion and removal require a fresh code.
 
@@ -50,7 +50,7 @@ An approved exclusion withholds only message content:
 - new messages and attachments are not archived;
 - edits, deletes, and bulk deletes are not relayed;
 - existing archive entries and their Stoat-hosted attachment archive cards are permanently purged; and
-- automod continues detecting raids, but its protected case log replaces excerpts from the channel with a privacy-withheld notice.
+- Post Gate Protection continues detecting raids, but its protected case log replaces excerpts from the channel with a privacy-withheld notice.
 
 Channel, role, permission, moderation, membership, and other server events continue logging. The audit-log destination itself cannot be excluded. A protected daily digest lists every active exclusion so a privacy change cannot remain quiet.
 
@@ -114,7 +114,7 @@ When an attachment was not archived, the record states the reason:
 
 Delete and edit records reply to the existing Logger card and perform no new media transfer. Bulk deletes reply to at most five archive cards—the Stoat reply limit—and list the stable record IDs for all remaining attachments in the embed.
 
-If someone deletes an attachment archive card, Stoat deletes the associated media. Tamper protection restores the metadata without stale file IDs, marks the media as lost, and does not retry forever. `/Exclude-Channel` intentionally deletes related archive cards when purging a channel.
+If someone deletes an attachment archive card, Stoat deletes the associated media. Tamper protection restores the metadata without stale file IDs, marks the media as lost, and does not retry forever. `/AuditLog privacy exclude` intentionally deletes related archive cards when purging a channel.
 
 ## Protected messages
 
