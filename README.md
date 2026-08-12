@@ -405,6 +405,16 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ## 📝 Changelog
 
+### v3.4.2 — approving a held post also grants the Post Gate exemption
+
+- Most held posts (a first link, a first attachment, a term match) never place a full account-level hold, so `/Post-Gate release` had nothing to undo for them and the v3.4.1 exemption effectively never applied in everyday moderation. Approving a held post (✅ or `/Post-Gate approve QUEUE_ID`) now grants the same standing exemption releasing does, since approving is the review outcome that actually happens for most members.
+- `/Post-Gate hold` and 🔒 Deny + Hold User continue to revoke a standing exemption from either source. Rejecting, and letting an entry expire unreviewed after 7 days, never grant it.
+
+### v3.4.1 — Post Gate release exemption and manual hold
+
+- Releasing a member (🔓 or `/Post-Gate release @member`) now marks them permanently exempt from Post Gate's automatic screening — contact solicitation, the prohibited-term identity match, and the first-link/media check — until a moderator holds them again. The exemption never expires on its own and survives the member leaving and rejoining. It does not affect the message-content prohibited-term filter or Levels 3–4 lockdown, both of which still apply to every member.
+- Added `/Post-Gate hold @member <reason>` to manually place a member in full Post Gate without waiting for an automatic trigger. Like the existing 🔒 Deny + Hold User, it revokes any standing release exemption.
+
 ### v3.4.0 — breaking administrative command cleanup
 
 Administrative commands now use resource-oriented names and subcommands that map directly to the future v4.5 dashboard control panels. Superseded routes are removed immediately; there are no warning aliases, and the repository has no per-command telemetry from which to infer their real-world usage.
@@ -421,16 +431,6 @@ Administrative commands now use resource-oriented names and subcommands that map
 | `/Automod status`                      | `/Post-Gate status`                                                         |
 
 `/Level`, the Post Gate review queue and its review actions, manual moderation, member fetches, reporting, help, diagnostics, and restart commands are unchanged. Existing `data/automod*.json` files and internal identifiers remain compatible; only the public name and command surface change.
-
-### v3.4.2 — approving a held post also grants the Post Gate exemption
-
-- Most held posts (a first link, a first attachment, a term match) never place a full account-level hold, so `/Post-Gate release` had nothing to undo for them and the v3.4.1 exemption effectively never applied in everyday moderation. Approving a held post (✅ or `/Post-Gate approve QUEUE_ID`) now grants the same standing exemption releasing does, since approving is the review outcome that actually happens for most members.
-- `/Post-Gate hold` and 🔒 Deny + Hold User continue to revoke a standing exemption from either source. Rejecting, and letting an entry expire unreviewed after 7 days, never grant it.
-
-### v3.4.1 — Post Gate release exemption and manual hold
-
-- Releasing a member (🔓 or `/Post-Gate release @member`) now marks them permanently exempt from Post Gate's automatic screening — contact solicitation, the prohibited-term identity match, and the first-link/media check — until a moderator holds them again. The exemption never expires on its own and survives the member leaving and rejoining. It does not affect the message-content prohibited-term filter or Levels 3–4 lockdown, both of which still apply to every member.
-- Added `/Post-Gate hold @member <reason>` to manually place a member in full Post Gate without waiting for an automatic trigger. Like the existing 🔒 Deny + Hold User, it revokes any standing release exemption.
 
 ### v3.3.1
 
