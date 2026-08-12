@@ -3179,11 +3179,14 @@ export function createPostGate(
           : await reject(queueId, message.authorId);
       const alreadyResolved = (outcome) =>
         `That queue entry was already resolved as ${outcome} by another moderator; nothing was changed.`;
+      const approvedDescription = `The author was cleared and their protection strike reset. The content was not reposted — they can post it again themselves.${
+        result.exempted
+          ? ` They are now exempt from future contact-solicitation, prohibited-identity, and first-post link/media screening, until a moderator holds them again with \`${commandName()} hold @member reason\` or 🔒 Deny + Hold User.`
+          : ""
+      }`;
       const descriptions = {
         approved:
-          action === "approve"
-            ? `The author was cleared and their protection strike reset. The content was not reposted — they can post it again themselves.${result.exempted ? " They are now exempt from future contact-solicitation, prohibited-identity, and first-post link/media screening, until a moderator holds them again with \`" + commandName() + " hold @member reason\` or 🔒 Deny + Hold User." : ""}`
-            : alreadyResolved("approved"),
+          action === "approve" ? approvedDescription : alreadyResolved("approved"),
         rejected: denyHoldRequested
           ? result.userHold === "held"
             ? "The held post was discarded, the author's protection strike stage was increased, and every later message from them will now be held for review."
