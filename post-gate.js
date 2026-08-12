@@ -31,7 +31,7 @@ import {
 } from "./attachment-evidence.js";
 import { hasRecentIdentitySignal, nextStrikeLevel } from "./automod.js";
 import { parseChannelArg } from "./auditlog.js";
-import { findTargetToken, tokenizeArgs } from "./command-args.js";
+import { buildReason, findTargetToken, tokenizeArgs } from "./command-args.js";
 import { buildAuditEmbed, buildStatusEmbed } from "./embeds.js";
 import { matchContactSolicitation } from "./contact-solicitation.js";
 import { countArchivedMessages } from "./message-archive.js";
@@ -52,6 +52,7 @@ import {
 import { deriveAccountCreatedAt } from "./user-info.js";
 import {
   clearAutomodStrike,
+  clearPostGateApproved,
   createHeldPost,
   createUserHold,
   findHeldPostByReviewMessage,
@@ -68,12 +69,14 @@ import {
   getProhibitedTermList,
   getUserHold,
   isChannelExcluded,
+  isPostGateApproved,
   isUserHeld,
   prunePostGateQueue,
   prunePostGateUserHolds,
   releaseUserHold,
   reloadProhibitedTermList,
   setAutomodStrike,
+  setPostGateApproved,
   setPostGateConfig,
   updateHeldPost,
   updateUserHold,
@@ -104,6 +107,7 @@ const MAX_LOCKDOWN_ACTORS = 5_000;
 export const USER_HOLD_REMINDER_MS = 24 * 60 * 60 * 1_000;
 const MIN_HOLD_REMINDER_MS = 60 * 60 * 1_000;
 const MAX_HOLD_REMINDER_MS = 168 * 60 * 60 * 1_000;
+const MAX_HOLD_REASON_LENGTH = 300;
 // Stoat has no interactive components, so every moderator control in this file
 // is a reaction the bot seeds on a card it posted, plus an equivalent command.
 const APPROVE_EMOJI = "✅";
@@ -195,6 +199,7 @@ function hasLinkOrAttachment(message) {
 
 const DEFAULT_STORE = Object.freeze({
   clearAutomodStrike,
+  clearPostGateApproved,
   createHeldPost,
   createUserHold,
   findHeldPostByReviewMessage,
@@ -211,12 +216,14 @@ const DEFAULT_STORE = Object.freeze({
   getProhibitedTermList,
   getUserHold,
   isChannelExcluded,
+  isPostGateApproved,
   isUserHeld,
   prunePostGateQueue,
   prunePostGateUserHolds,
   releaseUserHold,
   reloadProhibitedTermList,
   setAutomodStrike,
+  setPostGateApproved,
   setPostGateConfig,
   updateHeldPost,
   updateUserHold,
@@ -1551,17 +1558,23 @@ export function createPostGate(
    *    below normally catch it first and place a full hold before any
    *    message is ever sent;
    *  - links and attachments stay last, unchanged.
+   *
+   * `approved` marks an author who was previously released from a full hold
+   * (/Post-Gate release, or 🔓). It skips the three "unknown/new account"
+   * triggers — contact solicitation, the prohibited-term identity match, and
+   * first-post link/media — but never the content-based prohibited-term
+   * match or lockdown: approval isn't a blanket moderation bypass.
    */
   function classifyTrigger(
     message,
     config,
-    { serverId, channelId, authorId, contactEligible, policy }
+    { serverId, channelId, authorId, contactEligible, policy, approved }
   ) {
     if (policy.effectiveLevel >= 3) return { trigger: "lockdown" };
     if (channelId === config.reviewChannelId) return null;
     if (store.isChannelExcluded(channelId)) return null;
     if (store.isUserHeld(serverId, authorId)) return { trigger: "user_hold" };
-    if (contactEligible) {
+    if (contactEligible && !approved) {
       const contact = matchContactSolicitation(message?.content);
       if (contact) {
         return {
@@ -1573,19 +1586,23 @@ export function createPostGate(
     }
     const match = matchProhibitedTerm(message?.content, ensureCompiledTerms());
     if (match) return { trigger: "prohibited_term", match };
-    const identityMatch = matchIdentityTerm({
-      username: message?.author?.username,
-      displayName: message?.author?.displayName,
-      nickname: message?.member?.nickname,
-    });
-    if (identityMatch) {
-      return {
-        trigger: "prohibited_identity",
-        match: identityMatch,
-        triggerSurface: identityMatch.surface,
-      };
+    if (!approved) {
+      const identityMatch = matchIdentityTerm({
+        username: message?.author?.username,
+        displayName: message?.author?.displayName,
+        nickname: message?.member?.nickname,
+      });
+      if (identityMatch) {
+        return {
+          trigger: "prohibited_identity",
+          match: identityMatch,
+          triggerSurface: identityMatch.surface,
+        };
+      }
     }
-    if (hasLinkOrAttachment(message)) return { trigger: "first_post" };
+    if (!approved && hasLinkOrAttachment(message)) {
+      return { trigger: "first_post" };
+    }
     return null;
   }
 
@@ -1917,12 +1934,17 @@ export function createPostGate(
     if (config.mode !== "hold" || !isSafeId(config.reviewChannelId)) return;
     const policy = policyForServer(serverId);
     const contactEligible = isRecentIdentityCandidate(authorId, message);
+    // A previously released author is exempt from the "unknown/new account"
+    // triggers going forward — see classifyTrigger's docblock for exactly
+    // what that does and does not cover.
+    const approved = store.isPostGateApproved(serverId, authorId);
     let classified = classifyTrigger(message, config, {
       serverId,
       channelId,
       authorId,
       contactEligible,
       policy,
+      approved,
     });
     // The first-post signal is only meaningful for a message actually eligible
     // for a hold on that trigger, so this stays inside the gate rather than
@@ -1937,7 +1959,7 @@ export function createPostGate(
 
     if (
       !classified &&
-      !(contactEligible && canInspectProfile(config, { channelId }))
+      !(contactEligible && !approved && canInspectProfile(config, { channelId }))
     ) {
       return;
     }
@@ -1972,6 +1994,7 @@ export function createPostGate(
     try {
       if (
         contactEligible &&
+        !approved &&
         canInspectProfile(config, { channelId }) &&
         classified?.trigger !== "contact_solicitation" &&
         classified?.trigger !== "user_hold"
@@ -2072,6 +2095,7 @@ export function createPostGate(
       return;
     }
     if (store.isUserHeld(serverId, userId)) return;
+    if (store.isPostGateApproved(serverId, userId)) return;
 
     const match = matchIdentityTerm(fields);
     if (!match) return;
@@ -2447,6 +2471,9 @@ export function createPostGate(
     if (record.originQueueId) {
       lines.push(`**Origin:** denied queue entry \`${record.originQueueId}\``);
     }
+    if (record.holdReason) {
+      lines.push(`**Reason:** ${record.holdReason}`);
+    }
     lines.push(
       "",
       `React ${RELEASE_EMOJI} to release them, or use \`${commandName()} release <@${record.userId}>\`.`,
@@ -2503,6 +2530,15 @@ export function createPostGate(
    */
   async function holdUser(serverId, userId, moderatorId, origin = {}) {
     return withLock(userHoldLocks, `${serverId}:${userId}`, async () => {
+      // Any moderator-initiated hold — the new `/Post-Gate hold` command or
+      // the existing 🔒 deny + hold user reaction — means "back to being
+      // screened normally": it revokes a standing release exemption. The two
+      // automatic call sites always pass holdSource: "automatic" and never
+      // reach here for an exempt author anyway, since classifyTrigger and
+      // screenIdentity already skip them upstream.
+      if (origin.holdSource !== "automatic") {
+        store.clearPostGateApproved(serverId, userId);
+      }
       const existing = store.getUserHold(serverId, userId);
       if (existing?.active) {
         if (!existing.cardMessageId) {
@@ -2527,6 +2563,7 @@ export function createPostGate(
         triggerRuleId: origin.triggerRuleId ?? null,
         originQueueId: origin.originQueueId ?? null,
         originMessageId: origin.originMessageId ?? null,
+        holdReason: origin.holdReason ?? null,
         cardChannelId: config.reviewChannelId,
         reminderAt: heldAt + reminderMs,
       });
@@ -2566,6 +2603,15 @@ export function createPostGate(
         reason,
       });
       if (!released) return { outcome: "not_held" };
+
+      // Release is the one action that grants a standing exemption from
+      // every automatic Post Gate screening trigger going forward. It never
+      // expires on its own — only a later moderator-initiated hold (the
+      // /Post-Gate hold command, or 🔒 deny + hold user) revokes it.
+      store.setPostGateApproved(serverId, userId, {
+        approvedAt: releasedAt,
+        approvedBy: moderatorId,
+      });
 
       await deleteCard(record.cardChannelId, record.cardMessageId);
       await deleteCard(record.cardChannelId, record.lastReminderMessageId);
@@ -2971,6 +3017,70 @@ export function createPostGate(
     return result;
   }
 
+  /**
+   * Manually place a member in full Post Gate. Mirrors releaseCommand's
+   * shape: same target-mention parsing, same Manage Messages check in the
+   * review channel. Unlike the automatic paths, holdUser performs no
+   * authorization of its own, so this command checks it before calling in —
+   * the same invariant every other holdUser caller already upholds.
+   */
+  async function holdCommand(message, serverId, args) {
+    const tokens = tokenizeArgs(args);
+    const target = findTargetToken(tokens);
+    if (!target) {
+      await respond(
+        channelIdFrom(message),
+        "⚠️ Which Member?",
+        `Use \`${commandName()} hold @member <reason>\`.`,
+        "#E74C3C"
+      );
+      return { outcome: "invalid_target" };
+    }
+    const reason = buildReason(tokens, new Set([target.index]));
+    if (!reason) {
+      await respond(
+        channelIdFrom(message),
+        "⚠️ Reason Required",
+        `Use \`${commandName()} hold @member <reason>\`, for example \`${commandName()} hold @member repeated boundary-pushing after a warning\`.`,
+        "#E74C3C"
+      );
+      return { outcome: "invalid_reason" };
+    }
+    if (reason.length > MAX_HOLD_REASON_LENGTH) {
+      await respond(
+        channelIdFrom(message),
+        "⚠️ Reason Too Long",
+        `The reason must be ${MAX_HOLD_REASON_LENGTH} characters or fewer.`,
+        "#E74C3C"
+      );
+      return { outcome: "invalid_reason" };
+    }
+    if (!(await authorizeReviewChannelActor(serverId, message.authorId))) {
+      await respond(
+        channelIdFrom(message),
+        "🛑 Hold Result",
+        "Fresh permission verification did not confirm Manage Messages in the review channel.",
+        "#E74C3C"
+      );
+      return { outcome: "unauthorized" };
+    }
+    const result = await holdUser(serverId, target.targetId, message.authorId, {
+      holdSource: "manual",
+      holdReason: reason,
+    });
+    const descriptions = {
+      held: `${result.record ? holdActorLabel(result.record) : actorLabel(target.targetId)} was placed in Post Gate. Every message they send now is held for review until a moderator releases them. Any standing release exemption for this member was revoked.`,
+      already_held: "That member is already in Post Gate.",
+    };
+    await respond(
+      channelIdFrom(message),
+      result.outcome === "held" ? "🔒 User Held" : "🛑 Hold Result",
+      descriptions[result.outcome] ?? `Hold status: ${result.outcome}.`,
+      result.outcome === "held" ? "#E67E22" : "#E74C3C"
+    );
+    return result;
+  }
+
   async function handleCommand(message, args = []) {
     await gate.expireDueChallenges();
     const serverId = serverIdFrom(message);
@@ -3025,6 +3135,8 @@ export function createPostGate(
     if (action === "terms") return describeTerms(message);
     if (action === "release")
       return releaseCommand(message, serverId, [second, ...extra]);
+    if (action === "hold")
+      return holdCommand(message, serverId, [second, ...extra]);
     if (
       action === "approve" ||
       action === "reject" ||
@@ -3092,7 +3204,7 @@ export function createPostGate(
       await respond(
         channelIdFrom(message),
         "⚠️ Invalid Post Gate Command",
-        `Use \`${commandName()} status\`, \`${commandName()} here\`, \`${commandName()} #channel\`, \`${commandName()} off\`, \`${commandName()} confirm CODE\`, \`${commandName()} cancel\`, \`${commandName()} approve QUEUE_ID\`, \`${commandName()} reject QUEUE_ID\`, \`${commandName()} deny-hold QUEUE_ID\`, \`${commandName()} release @member\`, \`${commandName()} holds\`, or \`${commandName()} terms\`.`,
+        `Use \`${commandName()} status\`, \`${commandName()} here\`, \`${commandName()} #channel\`, \`${commandName()} off\`, \`${commandName()} confirm CODE\`, \`${commandName()} cancel\`, \`${commandName()} approve QUEUE_ID\`, \`${commandName()} reject QUEUE_ID\`, \`${commandName()} deny-hold QUEUE_ID\`, \`${commandName()} release @member\`, \`${commandName()} hold @member reason\`, \`${commandName()} holds\`, or \`${commandName()} terms\`.`,
         "#E74C3C"
       );
       return { outcome: "invalid_command" };

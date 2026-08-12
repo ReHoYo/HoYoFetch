@@ -23,6 +23,11 @@ Administrative setup is now grouped by resource so the same controllers can late
 
 `/Post-Gate off` still disables the review queue. `/Post-Gate protection off` independently disables behavioral detection. Existing protection configuration and cases continue using the established `data/automod*.json` storage formats; no data migration is required.
 
+## Version 3.4.1 — Post Gate release exemption and manual hold
+
+- Releasing a member (🔓 or `/Post-Gate release @member`) now marks them permanently exempt from Post Gate's automatic screening — contact solicitation, the prohibited-term identity match, and the first-link/media check — until a moderator holds them again. The exemption never expires on its own and survives the member leaving and rejoining. It does not affect the message-content prohibited-term filter or Levels 3–4 lockdown, both of which still apply to every member regardless of release history.
+- Added `/Post-Gate hold @member <reason>` to manually place a member in full Post Gate without waiting for an automatic trigger, requiring the same freshly verified Manage Messages as release. Like the existing 🔒 Deny + Hold User, it revokes any standing release exemption.
+
 ## Version 3.3.1
 
 ### Post Gate departure cleanup and quieter expiry reporting

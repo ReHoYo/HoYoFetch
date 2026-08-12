@@ -25,6 +25,8 @@ Given that, **any one** of five triggers queues the message:
 | **Prohibited identity**  | A [username, display name, or server nickname](#usernames-display-names-and-nicknames) matching the same filter | No              |
 | **First link or media**  | A link **or** at least one attachment from a new or first-time poster                                           | Yes             |
 
+A member who was previously [released](#release-exemption) is permanently exempt from **Contact solicitation**, **Prohibited identity**, and **First link or media** — the three triggers above that exist to screen an unknown or new account. **Author in Post Gate** and **Prohibited term** (a slur or similar in the message itself) are unaffected: release is not a blanket moderation bypass.
+
 The last trigger, first link or media, additionally requires the author to be, by locally cached or archived evidence, **new**:
 
 - the account was created less than 7 days ago, or
@@ -170,7 +172,20 @@ Release with 🔓 on the control or reminder card, or with `/Post-Gate release @
 
 **Messages already in the review queue stay queued.** Release only stops _future_ messages from being held; anything already waiting keeps its own review card and is approved or denied individually, and the release notice states how many are outstanding. A release is a judgement about the author, not about content no moderator has looked at yet — and it must never become a way to publish a queue nobody read.
 
-Approving a queued item also resolves only that item; it does not release the account-level hold. If a released account still has a recent identity and its next message or still-cached/refreshed bio continues to match the contact detector, Irminsul automatically holds it again. Once both eligibility windows expire, the cached bio is ignored and automatic re-holding stops.
+Approving a queued item also resolves only that item; it does not release the account-level hold, and it does **not** grant the exemption described below — only releasing the account does that.
+
+### Release exemption
+
+Releasing a member also marks them **permanently exempt** from Post Gate's automatic "unknown/new account" screening: the contact-solicitation match, the prohibited-term identity match, and the first-link/media-from-a-new-account check. The exemption:
+
+- **Never expires on its own** — it does not depend on account age, tenure, or the 7-day retention window that eventually prunes an old hold's audit record.
+- Is keyed to the account, not to server membership, so it **survives the member leaving and rejoining**.
+- Does **not** cover the message-content prohibited-term filter or Levels 3–4 lockdown, both of which still apply to every member regardless of release history.
+- Is revoked the instant a moderator manually holds the member again, with `/Post-Gate hold @member <reason>` or 🔒 Deny + Hold User on a newly queued item. A member re-held this way needs another release to regain the exemption.
+
+### Manual hold
+
+`/Post-Gate hold @member <reason>` places a member in full Post Gate immediately, the same as an automatic or deny-hold hold, and requires a plain-word reason and the same freshly verified Manage Messages as release. Use it to put a member who no longer has your trust back under review without waiting for them to trip an automatic trigger — for example, one who was released earlier and has since caused a problem outside anything Post Gate itself detects. Because it revokes any standing release exemption, the member is once again subject to normal automatic screening after a future release.
 
 ## Configuration
 
@@ -346,6 +361,8 @@ Rejection deletes the review card and its Stoat media, discards the held content
 🔒 does everything Deny does — discard, delete the card, advance the strike stage — and then places the author in [full Post Gate](#holding-a-whole-member), so every message they send afterwards is held for review until a moderator releases them. One combined notice records who denied the post, which queue entry caused it, and when the hold began.
 
 Like Deny, it never times out or bans anyone. A hold is a decision to _read everything this person posts for a while_, which is why it is reversible in one reaction and why Irminsul reminds moderators rather than quietly leaving someone gated forever.
+
+If the author was previously released and therefore held a [release exemption](#release-exemption), this revokes it — the same as `/Post-Gate hold`.
 
 If the queue entry predates author-id capture, the post is still denied but no hold is placed — there is no account to hold, and Irminsul will not write a record under a phantom id.
 

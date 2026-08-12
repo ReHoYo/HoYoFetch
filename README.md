@@ -422,6 +422,11 @@ Administrative commands now use resource-oriented names and subcommands that map
 
 `/Level`, the Post Gate review queue and its review actions, manual moderation, member fetches, reporting, help, diagnostics, and restart commands are unchanged. Existing `data/automod*.json` files and internal identifiers remain compatible; only the public name and command surface change.
 
+### v3.4.1 — Post Gate release exemption and manual hold
+
+- Releasing a member (🔓 or `/Post-Gate release @member`) now marks them permanently exempt from Post Gate's automatic screening — contact solicitation, the prohibited-term identity match, and the first-link/media check — until a moderator holds them again. The exemption never expires on its own and survives the member leaving and rejoining. It does not affect the message-content prohibited-term filter or Levels 3–4 lockdown, both of which still apply to every member.
+- Added `/Post-Gate hold @member <reason>` to manually place a member in full Post Gate without waiting for an automatic trigger. Like the existing 🔒 Deny + Hold User, it revokes any standing release exemption.
+
 ### v3.3.1
 
 - Fixed departed, kicked, and banned members remaining in full Post Gate: member-departure events now remove the account-level hold and its control/reminder cards automatically while leaving already queued content available for individual review
