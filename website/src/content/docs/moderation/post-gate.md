@@ -25,7 +25,7 @@ Given that, **any one** of five triggers queues the message:
 | **Prohibited identity**  | A [username, display name, or server nickname](#usernames-display-names-and-nicknames) matching the same filter | No              |
 | **First link or media**  | A link **or** at least one attachment from a new or first-time poster                                           | Yes             |
 
-A member who was previously [released](#release-exemption) is permanently exempt from **Contact solicitation**, **Prohibited identity**, and **First link or media** — the three triggers above that exist to screen an unknown or new account. **Author in Post Gate** and **Prohibited term** (a slur or similar in the message itself) are unaffected: release is not a blanket moderation bypass.
+A member a moderator has [approved or released](#post-gate-exemption) is permanently exempt from **Contact solicitation**, **Prohibited identity**, and **First link or media** — the three triggers above that exist to screen an unknown or new account. **Author in Post Gate** and **Prohibited term** (a slur or similar in the message itself) are unaffected: the exemption is not a blanket moderation bypass.
 
 The last trigger, first link or media, additionally requires the author to be, by locally cached or archived evidence, **new**:
 
@@ -172,20 +172,21 @@ Release with 🔓 on the control or reminder card, or with `/Post-Gate release @
 
 **Messages already in the review queue stay queued.** Release only stops _future_ messages from being held; anything already waiting keeps its own review card and is approved or denied individually, and the release notice states how many are outstanding. A release is a judgement about the author, not about content no moderator has looked at yet — and it must never become a way to publish a queue nobody read.
 
-Approving a queued item also resolves only that item; it does not release the account-level hold, and it does **not** grant the exemption described below — only releasing the account does that.
+Releasing the account-level hold also grants the [Post Gate exemption](#post-gate-exemption) described below, exactly as approving a queued post does.
 
-### Release exemption
+### Post Gate exemption
 
-Releasing a member also marks them **permanently exempt** from Post Gate's automatic "unknown/new account" screening: the contact-solicitation match, the prohibited-term identity match, and the first-link/media-from-a-new-account check. The exemption:
+Approving a held post (✅), or releasing a full account-level hold (🔓 or `/Post-Gate release @member`), marks the author **permanently exempt** from Post Gate's automatic "unknown/new account" screening: the contact-solicitation match, the prohibited-term identity match, and the first-link/media-from-a-new-account check. This is the common path — most held posts (a first link, a first attachment, a term match) never place a full account-level hold, so approving is how the great majority of members actually earn it; releasing only matters for the smaller set of members who were fully held. The exemption:
 
 - **Never expires on its own** — it does not depend on account age, tenure, or the 7-day retention window that eventually prunes an old hold's audit record.
 - Is keyed to the account, not to server membership, so it **survives the member leaving and rejoining**.
-- Does **not** cover the message-content prohibited-term filter or Levels 3–4 lockdown, both of which still apply to every member regardless of release history.
-- Is revoked the instant a moderator manually holds the member again, with `/Post-Gate hold @member <reason>` or 🔒 Deny + Hold User on a newly queued item. A member re-held this way needs another release to regain the exemption.
+- Does **not** cover the message-content prohibited-term filter or Levels 3–4 lockdown, both of which still apply to every member regardless of approval or release history — the exemption is not a blanket moderation bypass.
+- Is revoked the instant a moderator manually holds the member again, with `/Post-Gate hold @member <reason>` or 🔒 Deny + Hold User on a newly queued item. A member re-held this way needs another approval or release to regain the exemption.
+- ❌ Deny and an unreviewed 7-day expiry never grant it — only a positive ✅/🔓 decision does.
 
 ### Manual hold
 
-`/Post-Gate hold @member <reason>` places a member in full Post Gate immediately, the same as an automatic or deny-hold hold, and requires a plain-word reason and the same freshly verified Manage Messages as release. Use it to put a member who no longer has your trust back under review without waiting for them to trip an automatic trigger — for example, one who was released earlier and has since caused a problem outside anything Post Gate itself detects. Because it revokes any standing release exemption, the member is once again subject to normal automatic screening after a future release.
+`/Post-Gate hold @member <reason>` places a member in full Post Gate immediately, the same as an automatic or deny-hold hold, and requires a plain-word reason and the same freshly verified Manage Messages as release. Use it to put a member who no longer has your trust back under review without waiting for them to trip an automatic trigger — for example, one who was approved or released earlier and has since caused a problem outside anything Post Gate itself detects. Because it revokes any standing exemption, the member is once again subject to normal automatic screening until a future approval or release.
 
 ## Configuration
 
@@ -336,12 +337,12 @@ Stoat has no interactive buttons, so every control is a reaction Irminsul seeds 
 
 The hold itself does **not** count as a protection strike. Its effect depends on how the review ends:
 
-| Review outcome         | Original channel                                                           | Protection strike stage                                              | Queue and review card                                             |
-| ---------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| ✅ Approve             | Content stays discarded; the cleared author may submit it again themselves | Existing strike is reset                                             | Marked approved; review card is deleted                           |
-| ❌ Deny                | Content stays discarded                                                    | Advances one stage, up to stage 4; no timeout is applied immediately | Marked rejected; review card is deleted                           |
-| 🔒 Deny + Hold User    | Content stays discarded                                                    | Advances one stage, exactly as Deny does                             | Marked rejected; review card deleted and a control card is posted |
-| No decision for 7 days | Content stays discarded                                                    | No change                                                            | Marked expired; review card is deleted and an expiry notice posts |
+| Review outcome         | Original channel                                                           | Protection strike stage                                              | Queue and review card                                             | Post Gate exemption                      |
+| ---------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------- |
+| ✅ Approve             | Content stays discarded; the cleared author may submit it again themselves | Existing strike is reset                                             | Marked approved; review card is deleted                           | Author is granted the standing exemption |
+| ❌ Deny                | Content stays discarded                                                    | Advances one stage, up to stage 4; no timeout is applied immediately | Marked rejected; review card is deleted                           | No change                                |
+| 🔒 Deny + Hold User    | Content stays discarded                                                    | Advances one stage, exactly as Deny does                             | Marked rejected; review card deleted and a control card is posted | Any standing exemption is revoked        |
+| No decision for 7 days | Content stays discarded                                                    | No change                                                            | Marked expired; review card is deleted and an expiry notice posts | No change                                |
 
 Only one of those outcomes can ever be recorded. Decisions are serialised per queue entry, so two moderators acting in the same instant produce a single result; the second action reports the outcome the first recorded and changes nothing.
 
@@ -351,6 +352,8 @@ Approval clears the author, resets any existing protection strike, and resolves 
 does not repost the held content. The author may submit the post again themselves, which avoids
 republishing hostile content during a raid and preserves the real author on the new message. The
 review card and its Stoat-hosted evidence are intentionally deleted after approval.
+
+Approving is also the everyday way a member earns the [Post Gate exemption](#post-gate-exemption): most held posts are a first link, first attachment, or a term match from an otherwise ordinary new member, and never place a full account-level hold — so there is nothing for `/Post-Gate release` to undo for them. Clicking ✅ (or running `/Post-Gate approve QUEUE_ID`) grants that member the same standing exemption a full release does, without requiring them to have been fully held first.
 
 ### Reject and the protection strike ladder
 
@@ -362,7 +365,7 @@ Rejection deletes the review card and its Stoat media, discards the held content
 
 Like Deny, it never times out or bans anyone. A hold is a decision to _read everything this person posts for a while_, which is why it is reversible in one reaction and why Irminsul reminds moderators rather than quietly leaving someone gated forever.
 
-If the author was previously released and therefore held a [release exemption](#release-exemption), this revokes it — the same as `/Post-Gate hold`.
+If the author was previously approved or released and therefore held a [Post Gate exemption](#post-gate-exemption), this revokes it — the same as `/Post-Gate hold`.
 
 If the queue entry predates author-id capture, the post is still denied but no hold is placed — there is no account to hold, and Irminsul will not write a record under a phantom id.
 

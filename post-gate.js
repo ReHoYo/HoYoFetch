@@ -2233,7 +2233,7 @@ export function createPostGate(
     record,
     outcome,
     moderatorId,
-    { strikeCleared = false, strikeSkipped = false } = {}
+    { strikeCleared = false, strikeSkipped = false, exempted = false } = {}
   ) {
     const title =
       outcome === "approved"
@@ -2246,7 +2246,7 @@ export function createPostGate(
       outcome === "approved"
         ? authorStillHeld
           ? `This queue item from ${queueActorLabel(record)} was approved${strikeCleared ? " and their protection strike was reset" : ""}, but the account remains in Post Gate until a moderator releases it. The content was **not** reposted to ${channelLabel(record.channelId)}.`
-          : `${queueActorLabel(record)} was cleared${strikeCleared ? " and their protection strike was reset" : ""}. The content was **not** reposted to ${channelLabel(record.channelId)} — they can post it again themselves.`
+          : `${queueActorLabel(record)} was cleared${strikeCleared ? " and their protection strike was reset" : ""}. The content was **not** reposted to ${channelLabel(record.channelId)} — they can post it again themselves.${exempted ? " They are now exempt from future contact-solicitation, prohibited-identity, and first-post link/media screening, until a moderator holds them again." : ""}`
         : `The held content from ${queueActorLabel(record)} was discarded${strikeSkipped ? " (no protection strike was recorded — the original author's id was not captured)" : " and their protection strike stage was increased"}.`;
     await sendAccountability(
       record.serverId,
@@ -2335,18 +2335,36 @@ export function createPostGate(
       const strikeCleared =
         isSafeId(record.userId) &&
         Boolean(store.clearAutomodStrike(record.serverId, record.userId));
+      // Approving a queued post is the everyday "this member is fine" signal
+      // — most held posts (a first link/media, a term match) never place a
+      // full account hold, so /Post-Gate release has nothing to undo for
+      // them. Approval grants the same standing exemption release does: the
+      // author skips contact-solicitation, prohibited-identity, and
+      // first-post link/media screening going forward, but the content-based
+      // prohibited-term (slur) filter still applies regardless. A moderator
+      // revokes it the same way — /Post-Gate hold or 🔒 Deny + Hold User.
+      const approvedAt = now();
+      const exempted =
+        isSafeId(record.userId) &&
+        Boolean(
+          store.setPostGateApproved(record.serverId, record.userId, {
+            approvedAt,
+            approvedBy: moderatorId,
+          })
+        );
       store.updateHeldPost(queueId, {
         status: "approved",
         reviewedBy: moderatorId,
-        reviewedAt: now(),
+        reviewedAt: approvedAt,
       });
       await notifyReviewOutcome(record, "approved", moderatorId, {
         strikeCleared,
+        exempted,
       });
       logger.log?.(
-        `🛑  post-gate approved queue=${auditAlias(queueId)} moderator=${auditAlias(moderatorId)} strike_cleared=${strikeCleared}`
+        `🛑  post-gate approved queue=${auditAlias(queueId)} moderator=${auditAlias(moderatorId)} strike_cleared=${strikeCleared} exempted=${exempted}`
       );
-      return { outcome: "approved", strikeCleared };
+      return { outcome: "approved", strikeCleared, exempted };
     });
   }
 
@@ -3161,11 +3179,14 @@ export function createPostGate(
           : await reject(queueId, message.authorId);
       const alreadyResolved = (outcome) =>
         `That queue entry was already resolved as ${outcome} by another moderator; nothing was changed.`;
+      const approvedDescription = `The author was cleared and their protection strike reset. The content was not reposted — they can post it again themselves.${
+        result.exempted
+          ? ` They are now exempt from future contact-solicitation, prohibited-identity, and first-post link/media screening, until a moderator holds them again with \`${commandName()} hold @member reason\` or 🔒 Deny + Hold User.`
+          : ""
+      }`;
       const descriptions = {
         approved:
-          action === "approve"
-            ? "The author was cleared and their protection strike reset. The content was not reposted — they can post it again themselves."
-            : alreadyResolved("approved"),
+          action === "approve" ? approvedDescription : alreadyResolved("approved"),
         rejected: denyHoldRequested
           ? result.userHold === "held"
             ? "The held post was discarded, the author's protection strike stage was increased, and every later message from them will now be held for review."

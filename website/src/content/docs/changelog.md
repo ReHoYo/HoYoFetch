@@ -23,6 +23,14 @@ Administrative setup is now grouped by resource so the same controllers can late
 
 `/Post-Gate off` still disables the review queue. `/Post-Gate protection off` independently disables behavioral detection. Existing protection configuration and cases continue using the established `data/automod*.json` storage formats; no data migration is required.
 
+## Version 3.4.2 — approving a held post also grants the Post Gate exemption
+
+Most held posts are a first link, a first attachment, or a term match from an otherwise ordinary member, and never place a full account-level hold — so `/Post-Gate release` had nothing to undo for them and the v3.4.1 exemption rarely applied in day-to-day moderation.
+
+- Approving a held post (✅ or `/Post-Gate approve QUEUE_ID`) now grants the same standing Post Gate exemption releasing does, since approving — not releasing — is the review outcome that actually happens for most members.
+- `/Post-Gate hold` and 🔒 Deny + Hold User continue to revoke a standing exemption regardless of whether it came from an approval or a release. Rejecting a held post, and an unreviewed 7-day expiry, never grant it.
+- The message-content prohibited-term (slur) filter and Levels 3–4 lockdown are unaffected either way — the exemption only ever covers contact-solicitation, prohibited-identity, and first-post link/media screening.
+
 ## Version 3.4.1 — Post Gate release exemption and manual hold
 
 - Releasing a member (🔓 or `/Post-Gate release @member`) now marks them permanently exempt from Post Gate's automatic screening — contact solicitation, the prohibited-term identity match, and the first-link/media check — until a moderator holds them again. The exemption never expires on its own and survives the member leaving and rejoining. It does not affect the message-content prohibited-term filter or Levels 3–4 lockdown, both of which still apply to every member regardless of release history.
