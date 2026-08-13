@@ -10,6 +10,7 @@ import {
   tokenizeArgs,
 } from "./command-args.js";
 import { buildStatusEmbed } from "./embeds.js";
+import { formatAccountLabel, usernameSnapshot } from "./identity-label.js";
 import { subtractMonths } from "./time-windows.js";
 import {
   findArchivedMessages,
@@ -649,6 +650,8 @@ export function createModeration(
     actionId: id,
     actorId,
     targetId,
+    actorUsernameSnapshot,
+    targetUsernameSnapshot,
     reason,
     details = [],
     reversible = false,
@@ -658,8 +661,8 @@ export function createModeration(
       description: [
         `**Action ID:** \`${id}\``,
         `**Action:** ${action}`,
-        `**Moderator:** <@${actorId}>`,
-        `**Target:** <@${targetId}>`,
+        `**Moderator:** ${formatAccountLabel(client, actorId, { username: actorUsernameSnapshot })}`,
+        `**Target:** ${formatAccountLabel(client, targetId, { username: targetUsernameSnapshot })}`,
         `**Reason:** ${safeReason(reason)}`,
         ...details,
         reversible
@@ -685,6 +688,8 @@ export function createModeration(
   }) {
     const id = actionIdFactory();
     const createdAt = now();
+    const actorUsernameSnapshot = usernameSnapshot(client, actorId);
+    const targetUsernameSnapshot = usernameSnapshot(client, targetId);
     let logged;
     try {
       logged = await sendProtected(auditChannelId, {
@@ -695,6 +700,8 @@ export function createModeration(
             actionId: id,
             actorId,
             targetId,
+            actorUsernameSnapshot,
+            targetUsernameSnapshot,
             reason,
             details,
             reversible,
@@ -713,6 +720,8 @@ export function createModeration(
         serverId,
         targetId,
         actorId,
+        actorUsernameSnapshot,
+        targetUsernameSnapshot,
         reason,
         logChannelId: auditChannelId,
         logMessageId: logged._id,
@@ -899,7 +908,7 @@ export function createModeration(
         ? ""
         : ` About ${seconds < 90 ? `${seconds} second(s)` : `${Math.round(seconds / 60)} minute(s)`} of that is ${oneByOne} message(s) older than a week, which Stoat only accepts one at a time.`;
     return (
-      `Deleting up to ${count} observed message(s) from <@${targetId}> within ` +
+      `Deleting up to ${count} observed message(s) from ${formatAccountLabel(client, targetId)} within ` +
       `**${window}**. Deletes are paced to stay inside Stoat's rate limit.${estimate}`
     );
   }
@@ -986,7 +995,7 @@ export function createModeration(
     await openPicker(message, {
       title: "🧹 Delete Recent Messages?",
       description: [
-        `**Target:** <@${targetId}>`,
+        `**Target:** ${formatAccountLabel(client, targetId)}`,
         `The ${actionLabel} has already been applied. Choose how much of their observed history to delete:`,
         pickerLegend(CLEANUP_PICKER),
         "React within two minutes, or ❌ to keep their messages. Only the invoking moderator can choose.",
@@ -1041,8 +1050,8 @@ export function createModeration(
               [
                 actionId ? `**Action ID:** \`${actionId}\`` : null,
                 `**Follows:** ${actionLabel}`,
-                `**Moderator:** <@${message.authorId}>`,
-                `**Target:** <@${targetId}>`,
+                `**Moderator:** ${formatAccountLabel(client, message.authorId)}`,
+                `**Target:** ${formatAccountLabel(client, targetId)}`,
                 `**Window:** ${window}`,
                 `**Result:** ${cleanupSummary(result)}`,
                 `**Archive coverage:** ${coverage.count} current record(s); earliest observed ${coverage.earliestAt ? new Date(coverage.earliestAt).toISOString() : "unavailable"}.`,
@@ -1101,7 +1110,7 @@ export function createModeration(
       title: prompt.title,
       description: [
         `**Action:** ${prompt.action(parsed)}`,
-        `**Target:** <@${parsed.targetId}>`,
+        `**Target:** ${formatAccountLabel(client, parsed.targetId)}`,
         `**Reason:** ${safeReason(parsed.reason)}`,
         parsed.deleteWindow
           ? `**History cleanup:** ${parsed.deleteWindow} of observed messages`
@@ -1162,7 +1171,7 @@ export function createModeration(
     await respond(
       message.channelId,
       "🔇 Member Muted",
-      `<@${parsed.targetId}> was timed out for **${duration}**.${cleanup ? ` ${cleanupSummary(cleanup)}` : ""}${recorded ? ` Action \`${recorded.actionId}\` was logged.` : " The action succeeded, but protected logging failed."}`,
+      `${formatAccountLabel(client, parsed.targetId)} was timed out for **${duration}**.${cleanup ? ` ${cleanupSummary(cleanup)}` : ""}${recorded ? ` Action \`${recorded.actionId}\` was logged.` : " The action succeeded, but protected logging failed."}`,
       cleanup?.failed ? "#E67E22" : "#2ECC71"
     );
     if (!cleanup) {
@@ -1185,7 +1194,7 @@ export function createModeration(
     await openPicker(message, {
       title: "⏱️ Choose Mute Duration",
       description: [
-        `**Target:** <@${parsed.targetId}>`,
+        `**Target:** ${formatAccountLabel(client, parsed.targetId)}`,
         pickerLegend(MUTE_PICKER),
         "React within two minutes. Only the invoking moderator can choose.",
       ].join("\n"),
@@ -1241,7 +1250,7 @@ export function createModeration(
     await respond(
       message.channelId,
       "👢 Member Kicked",
-      `<@${parsed.targetId}> was removed. This cannot be undone; they must rejoin.${cleanup ? ` ${cleanupSummary(cleanup)}` : ""}${recorded ? ` Action \`${recorded.actionId}\` was logged.` : " Protected logging failed after the kick."}`,
+      `${formatAccountLabel(client, parsed.targetId)} was removed. This cannot be undone; they must rejoin.${cleanup ? ` ${cleanupSummary(cleanup)}` : ""}${recorded ? ` Action \`${recorded.actionId}\` was logged.` : " Protected logging failed after the kick."}`,
       cleanup?.failed ? "#E67E22" : "#2ECC71"
     );
     if (!cleanup) {
@@ -1309,7 +1318,7 @@ export function createModeration(
     await respond(
       message.channelId,
       "🔨 Account Banned",
-      `<@${parsed.targetId}> was banned.${cleanup ? ` ${cleanupSummary(cleanup)}` : ""}${recorded ? ` Action \`${recorded.actionId}\` was logged.` : " Protected logging failed after the ban."}`,
+      `${formatAccountLabel(client, parsed.targetId)} was banned.${cleanup ? ` ${cleanupSummary(cleanup)}` : ""}${recorded ? ` Action \`${recorded.actionId}\` was logged.` : " Protected logging failed after the ban."}`,
       cleanup?.failed ? "#E67E22" : "#2ECC71"
     );
     if (!cleanup) {
@@ -1384,7 +1393,7 @@ export function createModeration(
       await openPicker(message, {
         title: "🧹 Choose Purge Window",
         description: [
-          `**Target:** <@${parsed.targetId}>`,
+          `**Target:** ${formatAccountLabel(client, parsed.targetId)}`,
           "How far back should Irminsul delete this member's observed messages?",
           pickerLegend(CLEANUP_PICKER),
           "React within two minutes and then confirm. Only the invoking moderator can choose.",
@@ -1409,7 +1418,7 @@ export function createModeration(
     await openConfirm(message, {
       title: "⚠️ Confirm User Purge",
       description: [
-        `Delete **${entries.length} known message(s)** from <@${parsed.targetId}> within **${parsed.window}**?`,
+        `Delete **${entries.length} known message(s)** from ${formatAccountLabel(client, parsed.targetId)} within **${parsed.window}**?`,
         "This cannot be undone. Protected audit records and evidence are retained.",
         "React ✅ to continue or ❌ to cancel within two minutes. Only you can confirm.",
       ].join("\n"),
@@ -1456,7 +1465,7 @@ export function createModeration(
     await respond(
       message.channelId,
       "🔊 Member Released",
-      `<@${parsed.targetId}> can message again. ${reset ? "Their protection escalation history was reset." : "No protection strike record existed."} ${cancelledCases} pending ban review(s) were closed.`,
+      `${formatAccountLabel(client, parsed.targetId)} can message again. ${reset ? "Their protection escalation history was reset." : "No protection strike record existed."} ${cancelledCases} pending ban review(s) were closed.`,
       "#2ECC71"
     );
   }
@@ -1524,8 +1533,8 @@ export function createModeration(
             [
               `**Action ID:** \`${record.actionId}\``,
               `**Original action:** ${record.type}`,
-              `**Target:** <@${record.targetId}>`,
-              `**Undone by:** <@${voterId}>`,
+              `**Target:** ${formatAccountLabel(client, record.targetId, { username: record.targetUsernameSnapshot })}`,
+              `**Undone by:** ${formatAccountLabel(client, voterId)}`,
               record.type === "ban"
                 ? "The member was unbanned, but membership and deleted messages were not restored."
                 : "The member timeout was removed.",

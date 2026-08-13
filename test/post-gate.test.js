@@ -564,6 +564,7 @@ function newAccountMessage({
   channelId = SOURCE_CHANNEL_ID,
   content = "",
   attachments = [],
+  username = null,
   createdAt = new Date(1_800_000_000_000 - 60_000),
   joinedAt = new Date(1_800_000_000_000 - 60_000),
 } = {}) {
@@ -573,7 +574,7 @@ function newAccountMessage({
     serverId: SERVER_ID,
     server: { id: SERVER_ID },
     authorId,
-    author: { createdAt },
+    author: { createdAt, username },
     member: { joinedAt },
     content,
     attachments,
@@ -592,6 +593,7 @@ function volatileAccountMessage({
   channelId = SOURCE_CHANNEL_ID,
   content = "",
   attachments = [],
+  username = null,
   createdAt = new Date(1_800_000_000_000 - 60_000),
   joinedAt = new Date(1_800_000_000_000 - 60_000),
 } = {}) {
@@ -601,7 +603,7 @@ function volatileAccountMessage({
     channelId,
     serverId: SERVER_ID,
     server: { id: SERVER_ID },
-    author: { createdAt },
+    author: { createdAt, username },
     member: { joinedAt },
     get authorId() {
       return backing.authorId;
@@ -735,7 +737,8 @@ test("captures author id and content even when the deletion clears the live mess
 
   const embed = harness.protectedLogs[0].payload.embeds[0];
   const embedText = JSON.stringify(embed);
-  assert.match(embedText, new RegExp(`<@${NEW_USER_ID}>`));
+  assert.match(embedText, new RegExp("Account `" + NEW_USER_ID + "`"));
+  assert.doesNotMatch(embedText, /<@|Unknown User/iu);
   assert.doesNotMatch(embedText, /undefined/);
 });
 
@@ -1631,7 +1634,10 @@ test("rejecting or deny-holding a queued post never grants a release exemption",
   assert.equal(harness.store.isPostGateApproved(SERVER_ID, NEW_USER_ID), false);
 
   await harness.postGate.handleMessage(
-    newAccountMessage({ id: "MSGDENYHOLDNOEXEMPT", content: "https://b.example" })
+    newAccountMessage({
+      id: "MSGDENYHOLDNOEXEMPT",
+      content: "https://b.example",
+    })
   );
   const [denied] = [...harness.store.queue.values()].filter(
     (entry) => entry.status === "pending"
@@ -1941,7 +1947,10 @@ test("an approved account is not screened for contact solicitation, including it
   });
 
   await harness.postGate.handleMessage(
-    recentIdentityMessage({ id: "MSGAPPROVEDCONTACT1", content: "my DMs are open" })
+    recentIdentityMessage({
+      id: "MSGAPPROVEDCONTACT1",
+      content: "my DMs are open",
+    })
   );
 
   assert.equal(harness.deletedMessageIds.length, 0);
@@ -2528,6 +2537,8 @@ for (const [index, [surface, field]] of [
     assert.equal(hold.holdSource, "automatic");
     assert.equal(hold.triggerSurface, surface);
     assert.equal(hold.triggerRuleId, record.ruleId);
+    assert.equal(record.usernameSnapshot, null);
+    assert.equal(hold.usernameSnapshot, null);
 
     const cardText = JSON.stringify(harness.protectedLogs);
     assert.equal(
@@ -2603,6 +2614,7 @@ test("joining with a prohibited-term username places a full Post Gate hold witho
   assert.equal(hold.active, true);
   assert.equal(hold.holdSource, "automatic");
   assert.equal(hold.triggerSurface, "username");
+  assert.equal(hold.usernameSnapshot, null);
   assert.equal(harness.store.queue.size, 0);
 });
 
@@ -2721,11 +2733,15 @@ test("an account already held is left alone by member-join and member-update scr
 //  Full-user Post Gate: deny + hold, release, reminders
 // ══════════════════════════════════════════════════════════════
 
-async function holdUserViaDenyHold(harness, { userId = NEW_USER_ID } = {}) {
+async function holdUserViaDenyHold(
+  harness,
+  { userId = NEW_USER_ID, username = null } = {}
+) {
   await harness.postGate.handleMessage(
     newAccountMessage({
       id: `MSGORIGIN${userId}`,
       authorId: userId,
+      username,
       content: "https://example.com/first",
     })
   );
@@ -3078,7 +3094,10 @@ test("/Post-Gate release grants the Post Gate exemption even for an account that
   const notice = harness.protectedLogs.find((entry) =>
     /Member Exempted/.test(entry.payload.embeds[0].title)
   );
-  assert.ok(notice, "an accountability notice is posted for an exempt-only release");
+  assert.ok(
+    notice,
+    "an accountability notice is posted for an exempt-only release"
+  );
 
   // The exemption takes effect immediately — a subsequent first-post link
   // from that account is no longer queued for review.
@@ -3365,6 +3384,50 @@ test("a member departure removes the account hold and its reminder cards", async
   );
 });
 
+test("stable username snapshots label review, hold, list, release, and departure cards", async () => {
+  const releaseHarness = makeHarness();
+  await enableHold(releaseHarness);
+  const { record } = await holdUserViaDenyHold(releaseHarness, {
+    username: "StableUser",
+  });
+  assert.equal(record.usernameSnapshot, "StableUser");
+  assert.equal(
+    releaseHarness.store.getUserHold(SERVER_ID, NEW_USER_ID).usernameSnapshot,
+    "StableUser"
+  );
+
+  await releaseHarness.postGate.handleCommand(reviewCommandMessage(), [
+    "holds",
+  ]);
+  await releaseHarness.postGate.releaseUser(
+    SERVER_ID,
+    NEW_USER_ID,
+    MOD_USER_ID
+  );
+  const releaseText = JSON.stringify([
+    ...releaseHarness.protectedLogs,
+    ...releaseHarness.sendCalls,
+  ]);
+  assert.match(releaseText, /StableUser/);
+  assert.doesNotMatch(releaseText, /Unknown User/iu);
+
+  const departureHarness = makeHarness();
+  await enableHold(departureHarness);
+  await holdUserViaDenyHold(departureHarness, { username: "DepartingUser" });
+  await departureHarness.postGate.handleMemberLeave({
+    id: { server: SERVER_ID, user: NEW_USER_ID },
+    reason: "Leave",
+  });
+  const departureNotice = departureHarness.protectedLogs.find((entry) =>
+    /Departed User Removed/.test(entry.payload.embeds[0].title)
+  );
+  assert.match(JSON.stringify(departureNotice.payload), /DepartingUser/);
+  assert.doesNotMatch(
+    JSON.stringify(departureNotice.payload),
+    /<@NEWUSER123>|Unknown User/iu
+  );
+});
+
 test("hydrated and alternate raw departure shapes share idempotent cleanup", async () => {
   const harness = makeHarness();
   await enableHold(harness);
@@ -3513,8 +3576,9 @@ test("approving after another moderator denied reports the already-resolved stat
 test("a hold survives a restart with its control card id and reminder timing intact", async () => {
   const harness = makeHarness();
   await enableHold(harness);
-  await holdUserViaDenyHold(harness);
+  await holdUserViaDenyHold(harness, { username: "SnapshotUser" });
   const before = harness.store.getUserHold(SERVER_ID, NEW_USER_ID);
+  assert.equal(before.usernameSnapshot, "SnapshotUser");
 
   // Restart: a fresh gate over the same persisted store contents.
   const restarted = makeHarness();
@@ -3533,6 +3597,7 @@ test("a hold survives a restart with its control card id and reminder timing int
   assert.equal(after.heldAt, before.heldAt);
   assert.equal(after.cardMessageId, before.cardMessageId);
   assert.equal(after.reminderAt, before.reminderAt);
+  assert.equal(after.usernameSnapshot, "SnapshotUser");
 
   // The hold still holds after the restart...
   await restarted.postGate.handleMessage(
@@ -3552,6 +3617,11 @@ test("a hold survives a restart with its control card id and reminder timing int
       /User Still Held/.test(entry.payload.embeds[0].title)
     )
   );
+  const reminder = restarted.protectedLogs.find((entry) =>
+    /User Still Held/.test(entry.payload.embeds[0].title)
+  );
+  assert.match(JSON.stringify(reminder.payload), /SnapshotUser/);
+  assert.doesNotMatch(JSON.stringify(reminder.payload), /<@|Unknown User/iu);
 
   // The control card the pre-restart gate posted still resolves a reaction.
   await restarted.postGate.handleRawEvent({

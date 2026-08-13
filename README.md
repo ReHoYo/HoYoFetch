@@ -405,6 +405,12 @@ docker run -d --name hoyofetch --restart unless-stopped \
 
 ## 📝 Changelog
 
+### v3.5.0 — stable account labels
+
+- Replaced fragile user mentions in Irminsul-generated moderation, audit, Post Gate, reporting, configuration, account-information, and diagnostics cards with non-pinging plain-text account labels. Known usernames are shown beside the stable account ID; uncached, departed, kicked, banned, and legacy accounts fall back to the ID instead of Stoat rendering "Unknown User".
+- Post Gate queue entries and full-user holds now retain a bounded username snapshot for their review, reminder, list, release, and departure cards. Prohibited-identity holds deliberately remain ID-only so the offending name is never repeated.
+- Confirmed that full-user Post Gate holds still end automatically only on a member departure (leave, kick, or ban), while current members remain held through reminder windows and already queued messages remain independently reviewable.
+
 ### v3.4.3 — `/Post-Gate release` grants the exemption unconditionally
 
 - Post Gate has two independent layers — the account-level full hold, and per-message queuing (a first link/media post, a contact-solicitation or identity match) — and most accounts a moderator wants to release only ever hit the second layer, since a queued post alone never creates a full hold. `/Post-Gate release @member` no longer reports "not currently in Post Gate" and does nothing for those accounts: once authorized, it always grants the Post Gate exemption, and additionally releases the account-level hold when one happens to be active. An account with no active hold now reports "Member Exempted" instead of an error.

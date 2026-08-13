@@ -3,6 +3,7 @@
 import { randomBytes } from "crypto";
 import { parseChannelArg } from "./auditlog.js";
 import { buildStatusEmbed } from "./embeds.js";
+import { formatAccountLabel, usernameSnapshot } from "./identity-label.js";
 import {
   DEFAULT_MODERATION_POLICY,
   RAID_MODE_POLICY,
@@ -271,6 +272,7 @@ export function formatAge(value, now) {
 function formatCaseEmbed({
   caseId,
   userId,
+  targetLabel,
   result,
   mode,
   now,
@@ -315,7 +317,7 @@ function formatCaseEmbed({
       : "🛡️ Post Gate Protection Case Opened",
     description: [
       `**Case:** \`${caseId}\``,
-      `**Target:** <@${userId}>`,
+      `**Target:** ${targetLabel ?? `Account \`${userId}\``}`,
       `**Mode:** ${mode}`,
       `**Server policy:** Level ${result.policyLevel ?? 1}`,
       `**Score:** ${result.score}`,
@@ -333,12 +335,12 @@ function formatCaseEmbed({
   };
 }
 
-function approvalEmbed(caseRecord) {
+function approvalEmbed(client, caseRecord) {
   return buildStatusEmbed(
     "🔨 Post Gate Protection Ban Review",
     [
       `**Case:** \`${caseRecord.caseId}\``,
-      `**Target:** <@${caseRecord.userId}>`,
+      `**Target:** ${formatAccountLabel(client, caseRecord.userId, { username: caseRecord.usernameSnapshot })}`,
       `The account is temporarily contained. A permanent ban requires **${caseRecord.quorum} distinct authorized staff approval${caseRecord.quorum === 1 ? "" : "s"}** within 10 minutes.`,
       `React with ${AUTOMOD_BAN_EMOJI} or use \`/Post-Gate protection approve ${caseRecord.caseId}\`.`,
       "Only the server owner, Manage Server members, or Ban Members moderators are eligible.",
@@ -556,6 +558,9 @@ export function createAutomod(
         formatCaseEmbed({
           caseId,
           userId,
+          targetLabel: formatAccountLabel(client, userId, {
+            username: message.author?.username,
+          }),
           result: resultForLog,
           mode: effectiveMode,
           now: openedAt,
@@ -587,6 +592,11 @@ export function createAutomod(
           caseId,
           serverId,
           userId,
+          usernameSnapshot: usernameSnapshot(
+            client,
+            userId,
+            message.author?.username
+          ),
           channelId,
           logChannelId: config.logChannelId,
           evidenceMessageId: evidence._id,
@@ -600,7 +610,7 @@ export function createAutomod(
           status: "pending",
         });
         const prompt = await send(config.logChannelId, {
-          embeds: [approvalEmbed(record)],
+          embeds: [approvalEmbed(client, record)],
         });
         if (isSafeId(prompt?._id)) {
           record = store.updateAutomodCase(caseId, {
@@ -749,7 +759,7 @@ export function createAutomod(
         current.logChannelId,
         buildStatusEmbed(
           "🔨 Post Gate Protection Ban Approved",
-          `Case \`${current.caseId}\` reached ${current.approvals.length}/${current.quorum} authorized approvals. <@${current.userId}> was banned with the case ID recorded as the reason.`,
+          `Case \`${current.caseId}\` reached ${current.approvals.length}/${current.quorum} authorized approvals. ${formatAccountLabel(client, current.userId, { username: current.usernameSnapshot })} was banned with the case ID recorded as the reason.`,
           "#E74C3C"
         )
       );

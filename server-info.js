@@ -16,6 +16,7 @@ import {
   getPostGateConfig,
 } from "./store.js";
 import { getAuditDiagnostics } from "./auditlog.js";
+import { formatAccountLabel } from "./identity-label.js";
 import { resolveModerationPolicy } from "./moderation-policy.js";
 
 const require = createRequire(import.meta.url);
@@ -95,7 +96,7 @@ export function buildServerInfoEmbed(client, serverId, overrides = {}) {
   const lines = [
     "**Server**",
     `**Name:** ${bounded(server?.name ?? "Unavailable", 80)}`,
-    `**ID:** \`${bounded(serverId, 40)}\` · **Owner:** ${mention(server?.ownerId)}`,
+    `**ID:** \`${bounded(serverId, 40)}\` · **Owner:** ${formatAccountLabel(client, server?.ownerId)}`,
     `**Created:** ${dateAndAge(server?.createdAt, now)}`,
     `**Bot joined:** ${dateAndAge(botMember?.joinedAt, now)}`,
     `**Cached inventory:** ${countOf(server?.channels)} channels · ${sizeOf(server?.roles)} roles · ${countOf(server?.categories)} categories · ${cachedMembers} members`,
@@ -154,10 +155,6 @@ function countCachedMembers(client, serverId) {
 function bounded(value, max) {
   const text = String(value ?? "Unavailable").replace(/[\r\n]+/g, " ");
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
-}
-
-function mention(id) {
-  return id ? `<@${bounded(id, 40)}>` : "Unavailable";
 }
 
 function countOf(value) {

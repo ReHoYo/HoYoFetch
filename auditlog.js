@@ -12,6 +12,7 @@ import {
   buildAuditMessageDeleteEmbed,
   buildAuditMessageEditEmbed,
 } from "./embeds.js";
+import { formatAccountLabel } from "./identity-label.js";
 import {
   getAuditLogChannel,
   getAuditLogServers,
@@ -335,9 +336,7 @@ export function formatSuspects(authorLabel, moderatorLabels = [], cap = 6) {
 }
 
 function formatUserLabel(client, userId) {
-  if (!userId) return null;
-  const user = client.users.get(userId);
-  return user?.username ? `@${user.username}` : null;
+  return userId ? formatAccountLabel(client, userId) : null;
 }
 
 export async function hydrateAuditMemberCache(client, serverId) {
@@ -415,9 +414,7 @@ export async function computeSuspects(client, channel, authorId) {
 }
 
 function formatUser(client, userId) {
-  if (!userId) return "Unknown user";
-  const user = client.users.get(userId);
-  return user ? `@${user.username} (${userId})` : `Unknown user (${userId})`;
+  return formatAccountLabel(client, userId);
 }
 
 function auditCodeValue(value, max = 100) {

@@ -339,8 +339,8 @@ test("computeSuspects uses effective channel permissions and excludes bot and au
   };
 
   assert.deepEqual(await computeSuspects(client, channel, "AUTHOR"), {
-    authorLabel: "@Alice",
-    moderatorLabels: ["@Moderator", "@Owner"],
+    authorLabel: "@\u200BAlice (`AUTHOR`)",
+    moderatorLabels: ["@\u200BModerator (`MOD`)", "@\u200BOwner (`OWNER`)"],
   });
 });
 
@@ -745,7 +745,11 @@ test("the raw stream logs a join revolt.js never emitted", async () => {
   await waitForSend(sent, 1, 3_000);
 
   assert.equal(sent[0].payload.embeds[0].title, "📥 Member Joined");
-  assert.match(sent[0].payload.embeds[0].description, /@RawJoiner/);
+  assert.match(sent[0].payload.embeds[0].description, /@\u200BRawJoiner/);
+  assert.doesNotMatch(
+    sent[0].payload.embeds[0].description,
+    /<@|Unknown User/iu
+  );
   assert.ok(getAuditDiagnostics(serverId).memberEvents.lastJoinPostedAt);
 
   disableAuditLog(serverId);

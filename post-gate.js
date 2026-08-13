@@ -33,6 +33,7 @@ import { hasRecentIdentitySignal, nextStrikeLevel } from "./automod.js";
 import { parseChannelArg } from "./auditlog.js";
 import { buildReason, findTargetToken, tokenizeArgs } from "./command-args.js";
 import { buildAuditEmbed, buildStatusEmbed } from "./embeds.js";
+import { formatAccountLabel, usernameSnapshot } from "./identity-label.js";
 import { matchContactSolicitation } from "./contact-solicitation.js";
 import { countArchivedMessages } from "./message-archive.js";
 import { resolveModerationPolicy } from "./moderation-policy.js";
@@ -398,9 +399,9 @@ export function createPostGate(
   }
 
   function actorLabel(userId) {
-    if (!isSafeId(userId)) return "*(unknown — author id not recorded)*";
-    const username = client.users?.get?.(userId)?.username;
-    return username ? `@${username} (<@${userId}>)` : `<@${userId}>`;
+    return isSafeId(userId)
+      ? formatAccountLabel(client, userId)
+      : "*(author id not recorded)*";
   }
 
   // Same as actorLabel, but omits the username. Used whenever an account's
@@ -410,22 +411,26 @@ export function createPostGate(
   // filter already applies by naming only a rule id.
   function redactedActorLabel(userId) {
     return isSafeId(userId)
-      ? `<@${userId}>`
-      : "*(unknown — author id not recorded)*";
+      ? formatAccountLabel(client, userId, { redacted: true })
+      : "*(author id not recorded)*";
   }
 
   /** actorLabel for a held-post queue record, redacted for an identity trigger. */
   function queueActorLabel(record) {
     return record?.trigger === "prohibited_identity"
       ? redactedActorLabel(record.userId)
-      : actorLabel(record.userId);
+      : formatAccountLabel(client, record?.userId, {
+          username: record?.usernameSnapshot,
+        });
   }
 
   /** actorLabel for a user-hold record, redacted for an identity-sourced hold. */
   function holdActorLabel(record) {
     return IDENTITY_TRIGGER_SURFACES.has(record?.triggerSurface)
       ? redactedActorLabel(record.userId)
-      : actorLabel(record.userId);
+      : formatAccountLabel(client, record?.userId, {
+          username: record?.usernameSnapshot,
+        });
   }
 
   function channelLabel(channelId) {
@@ -1222,7 +1227,7 @@ export function createPostGate(
       [
         `**Request:** \`${challenge.requestId}\``,
         `**Requested by:** ${actorLabel(challenge.requestedBy)}`,
-        `**Approved by:** ${ENKA_APPROVER_TAG} (<@${approvedBy}>)`,
+        `**Approved by:** ${formatAccountLabel(client, approvedBy, { username: ENKA_APPROVER_TAG.replace(/^@/u, "") })}`,
         description,
       ],
       action === "off" ? "#E67E22" : "#2ECC71"
@@ -1745,6 +1750,7 @@ export function createPostGate(
       serverId,
       channelId,
       userId: held.authorId,
+      usernameSnapshot: held.usernameSnapshot,
       messageId,
       content: held.content,
       attachments: prepared.descriptors,
@@ -1959,7 +1965,11 @@ export function createPostGate(
 
     if (
       !classified &&
-      !(contactEligible && !approved && canInspectProfile(config, { channelId }))
+      !(
+        contactEligible &&
+        !approved &&
+        canInspectProfile(config, { channelId })
+      )
     ) {
       return;
     }
@@ -1972,6 +1982,10 @@ export function createPostGate(
     const held = {
       id: messageId,
       authorId,
+      usernameSnapshot:
+        classified?.trigger === "prohibited_identity"
+          ? null
+          : usernameSnapshot(client, authorId, message?.author?.username),
       content: message.content ?? "",
       attachments: message.attachments ?? [],
       trigger: classified?.trigger ?? null,
@@ -2050,6 +2064,7 @@ export function createPostGate(
         ) {
           await holdUser(serverId, authorId, null, {
             holdSource: "automatic",
+            usernameSnapshot: held.usernameSnapshot,
             triggerSurface: classified.triggerSurface,
             triggerRuleId: classified.match?.ruleId ?? null,
             originMessageId: messageId,
@@ -2452,7 +2467,9 @@ export function createPostGate(
   function holdSourceLabel(record) {
     return record.holdSource === "automatic"
       ? "Irminsul (automatic screening)"
-      : actorLabel(record.heldBy);
+      : formatAccountLabel(client, record.heldBy, {
+          username: record.heldByUsernameSnapshot,
+        });
   }
 
   // Never "content withheld" for message/bio and "name withheld" for an
@@ -2576,6 +2593,10 @@ export function createPostGate(
         userId,
         heldAt,
         heldBy: moderatorId,
+        usernameSnapshot: IDENTITY_TRIGGER_SURFACES.has(origin.triggerSurface)
+          ? null
+          : usernameSnapshot(client, userId, origin.usernameSnapshot),
+        heldByUsernameSnapshot: usernameSnapshot(client, moderatorId),
         holdSource: origin.holdSource === "automatic" ? "automatic" : "manual",
         triggerSurface: origin.triggerSurface ?? null,
         triggerRuleId: origin.triggerRuleId ?? null,
@@ -2827,6 +2848,7 @@ export function createPostGate(
       // phantom user id.
       const hold = isSafeId(record.userId)
         ? await holdUser(record.serverId, record.userId, moderatorId, {
+            usernameSnapshot: record.usernameSnapshot,
             originQueueId: record.queueId,
             originMessageId: record.messageId,
           })
@@ -3213,7 +3235,9 @@ export function createPostGate(
       }`;
       const descriptions = {
         approved:
-          action === "approve" ? approvedDescription : alreadyResolved("approved"),
+          action === "approve"
+            ? approvedDescription
+            : alreadyResolved("approved"),
         rejected: denyHoldRequested
           ? result.userHold === "held"
             ? "The held post was discarded, the author's protection strike stage was increased, and every later message from them will now be held for review."
