@@ -14,6 +14,7 @@ import {
   ULID_PATTERN,
 } from "./command-args.js";
 import { buildAuditEmbed } from "./embeds.js";
+import { formatAccountLabel, safeUsernameSnapshot } from "./identity-label.js";
 import {
   countArchivedMessages,
   getArchiveCoverage,
@@ -349,7 +350,11 @@ export function buildUserInfoLines(
   }
 
   lines.push(
-    `**Username:** ${record.username ? `@${record.username}` : "unknown"}${record.discriminator ? `#${record.discriminator}` : ""}`
+    `**Account:** ${formatAccountLabel(null, record.userId, {
+      username: record.username
+        ? `${record.username}${record.discriminator ? `#${record.discriminator}` : ""}`
+        : null,
+    })}`
   );
   if (verbose) {
     lines.push(`**Display name:** ${record.displayName ?? "none"}`);
@@ -405,7 +410,7 @@ export function buildUserInfoLines(
       `**Online:** ${record.online === null ? "unknown" : record.online ? "yes" : "no"}`
     );
     lines.push(
-      `**Bot owner:** ${record.isBot ? (record.botOwnerId ? `<@${record.botOwnerId}>` : "unknown") : "n/a"}`
+      `**Bot owner:** ${record.isBot ? formatAccountLabel(null, record.botOwnerId) : "n/a"}`
     );
     lines.push(
       `**Timed out until:** ${record.timeoutUntil && record.timeoutUntil.getTime() > now ? formatTimestamp(record.timeoutUntil, now) : "none"}`
@@ -445,7 +450,9 @@ export function buildUserInfoLines(
  */
 export function buildUserInfoEmbed(record, signals, { now = Date.now() } = {}) {
   const lines = buildUserInfoLines(record, signals, { now, verbose: true });
-  const label = record.username ? `@${record.username}` : record.userId;
+  const label = safeUsernameSnapshot(record.username)
+    ? `@${safeUsernameSnapshot(record.username)}`
+    : record.userId;
   return buildAuditEmbed(
     `🪪 Account Info — ${label}`,
     lines,

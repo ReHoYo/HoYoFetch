@@ -219,7 +219,11 @@ test("reconciliation seeds silently, detects offline changes, and redacts secret
   const inviteEmbed = embeds.find(
     (embed) => embed.title === "✉️ Server Invite Created"
   );
-  assert.match(inviteEmbed.description, /Verified actor:\*\* @Moderator/);
+  assert.match(
+    inviteEmbed.description,
+    /Verified actor:\*\* @\u200BModerator \(`MOD1`\)/
+  );
+  assert.doesNotMatch(inviteEmbed.description, /<@|Unknown User/iu);
   assert.doesNotMatch(inviteEmbed.description, /SECRETINVITECODE/);
 
   const persisted = readFileSync(
@@ -263,7 +267,11 @@ test("reconciliation seeds silently, detects offline changes, and redacts secret
   const webhookEmbed = embeds.find(
     (embed) => embed.title === "🪝 Webhook Created"
   );
-  assert.match(webhookEmbed.description, /Verified actor:\*\* @Moderator/);
+  assert.match(
+    webhookEmbed.description,
+    /Verified actor:\*\* @\u200BModerator \(`MOD1`\)/
+  );
+  assert.doesNotMatch(webhookEmbed.description, /<@|Unknown User/iu);
   assert.doesNotMatch(webhookEmbed.description, /SECRETWEBHOOKTOKEN/);
   assert.doesNotMatch(
     readFileSync(join(dataDir, "server_settings_snapshots.json"), "utf-8"),

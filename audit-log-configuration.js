@@ -3,6 +3,7 @@ import { randomBytes } from "crypto";
 import { APPROVAL_MAX_ATTEMPTS, ENKA_APPROVER_TAG } from "./approval-gate.js";
 import { parseChannelArg } from "./auditlog.js";
 import { buildAuditEmbed, buildStatusEmbed } from "./embeds.js";
+import { formatAccountLabel } from "./identity-label.js";
 import {
   disableAuditLog,
   enableAuditLog,
@@ -59,8 +60,7 @@ export function createAuditLogConfiguration(
   }
 
   function actorLabel(userId) {
-    const username = client.users?.get?.(userId)?.username;
-    return username ? `@${username} (<@${userId}>)` : `<@${userId}>`;
+    return formatAccountLabel(client, userId);
   }
 
   function channelLabel(channelId) {
@@ -305,7 +305,7 @@ export function createAuditLogConfiguration(
     }
 
     const approvalLines = [
-      `**Approved by:** ${ENKA_APPROVER_TAG} (<@${approvedBy}>)`,
+      `**Approved by:** ${formatAccountLabel(client, approvedBy, { username: ENKA_APPROVER_TAG.replace(/^@/u, "") })}`,
     ];
     if (isSafeId(previousChannelId)) {
       await sendLifecycle(
@@ -356,7 +356,7 @@ export function createAuditLogConfiguration(
         [
           `**Request:** \`${challenge.requestId}\``,
           `**Requested by:** ${actorLabel(challenge.requestedBy)}`,
-          `**Approved by:** ${ENKA_APPROVER_TAG} (<@${approvedBy}>)`,
+          `**Approved by:** ${formatAccountLabel(client, approvedBy, { username: ENKA_APPROVER_TAG.replace(/^@/u, "") })}`,
           outcome === "moved" && isSafeId(previousChannelId)
             ? `**Previous destination:** ${channelLabel(previousChannelId)}`
             : "**Previous destination:** audit logging was off",

@@ -10,6 +10,7 @@ import {
   tokenizeArgs,
 } from "./command-args.js";
 import { buildStatusEmbed } from "./embeds.js";
+import { formatAccountLabel } from "./identity-label.js";
 import {
   createSpamReport,
   findRecentSpamReport,
@@ -450,8 +451,8 @@ export function createSpamReporter(
                   : "🛡️ Member Spam Report",
                 description: [
                   `**Report ID:** \`${reportId}\``,
-                  `**Reporter:** <@${reporterId}>`,
-                  `**Reported account:** <@${parsed.targetId}>`,
+                  `**Reporter:** ${formatAccountLabel(client, reporterId, { username: reporter.user?.username })}`,
+                  `**Reported account:** ${formatAccountLabel(client, parsed.targetId, { username: target.user?.username })}`,
                   `**Source channel:** <#${channelId}>`,
                   `**Reason:** ${sanitizeSpamReportReason(parsed.reason)}`,
                   `**Unique reporters in 24 hours:** ${correlationCount}`,

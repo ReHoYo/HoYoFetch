@@ -13,9 +13,9 @@ The bot persists data needed to avoid duplicate announcements and resume configu
 - known redemption codes and source cache entries;
 - audit destinations and server-setting baselines;
 - Enka-approved channel exclusions in `channel_exclusions.json`;
-- automod modes, cases, approvals, strikes, and reversible actions;
+- automod modes, cases, approvals, strikes, and reversible actions, including bounded username snapshots used to keep protected action cards readable after cache eviction;
 - the post gate's mode, configured server moderation level, review channel, default-role Send Messages restoration marker, shared Raid Mode activation/refresh/expiry timestamps, and pending/resolved held-post queue;
-- full-user Post Gate holds in `post_gate_user_holds.json` — who was held, which moderator held them, when the hold began and which queue entry caused it, when the next reminder is due, and who or what released them and when. Manual release and member-departure cleanup records are kept for 7 days as an audit record and then dropped;
+- full-user Post Gate holds in `post_gate_user_holds.json` — who was held, bounded username snapshots for the member and moderator when available, when the hold began and which queue entry caused it, when the next reminder is due, and who or what released them and when. Manual release and member-departure cleanup records are kept for 7 days as an audit record and then dropped;
 - bounded spam-report correlation metadata without member-supplied reasons; and
 - protected-message records needed to restore deleted audit entries.
 
@@ -31,7 +31,7 @@ An approved `/AuditLog privacy exclude` request purges that channel's existing a
 
 A message held at Level 1 or 2 (see [Post Gate](/HoYoFetch/moderation/post-gate/)) is removed from its original channel. Its text and attachment metadata enter the held-post queue, while copied media is attached to the Stoat review card. Approval clears the author but does not republish the held content; the author may post it again. Approval, rejection, or 7-day expiry deletes the review card and its Stoat media. Privacy-excluded channels are never queued; Levels 3–4 may still deny messages there without retaining their content.
 
-The queue entry also records why the message was held and, for a prohibited-term match, the id of the rule that fired. The matched text itself is never stored separately or written to a log line — the original message content on the review card is the only copy.
+The queue entry also records why the message was held, a bounded username snapshot when safe, and, for a prohibited-term match, the id of the rule that fired. Prohibited-identity records never snapshot the matching username, display name, or nickname. The matched text itself is never stored separately or written to a log line — the original message content on the review card is the only copy.
 
 The prohibited-term list in `prohibited_terms.json` is operator-authored configuration, not observed member data. It lives in the gitignored data directory and Irminsul only ever reads it.
 

@@ -1,6 +1,6 @@
 {
   "name": "hoyofetch",
-  "version": "3.4.3",
+  "version": "3.5.0",
   "description": "HoYoverse redemption code fetcher bot for Revolt/Stoat.chat",
   "main": "bot.js",
   "type": "module",

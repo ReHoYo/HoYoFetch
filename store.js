@@ -10,6 +10,7 @@ import {
 } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { normalizeUsernameSnapshot } from "./identity-label.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Overridable so tests run hermetically and deployments can mount a volume.
@@ -39,10 +40,7 @@ const CHANNEL_EXCLUSIONS_PATH = join(DATA_DIR, "channel_exclusions.json");
 const POST_GATE_PATH = join(DATA_DIR, "post_gate.json");
 const POST_GATE_QUEUE_PATH = join(DATA_DIR, "post_gate_queue.json");
 const POST_GATE_USER_HOLDS_PATH = join(DATA_DIR, "post_gate_user_holds.json");
-const POST_GATE_APPROVED_PATH = join(
-  DATA_DIR,
-  "post_gate_approved_users.json"
-);
+const POST_GATE_APPROVED_PATH = join(DATA_DIR, "post_gate_approved_users.json");
 // Operator-maintained, never written by the bot. See website docs for the shape.
 const PROHIBITED_TERMS_PATH = join(DATA_DIR, "prohibited_terms.json");
 const PRIVACY_DIGEST_PATH = join(DATA_DIR, "privacy_digest.json");
@@ -1250,6 +1248,10 @@ function normalisePostGateUserHold(value = {}) {
     active: value.active === true,
     heldAt: finiteOrNull(value.heldAt),
     heldBy: safeStoreId(value.heldBy),
+    usernameSnapshot: normalizeUsernameSnapshot(value.usernameSnapshot),
+    heldByUsernameSnapshot: normalizeUsernameSnapshot(
+      value.heldByUsernameSnapshot
+    ),
     holdSource: value.holdSource === "automatic" ? "automatic" : "manual",
     triggerSurface: USER_HOLD_TRIGGER_SURFACES.has(value.triggerSurface)
       ? value.triggerSurface

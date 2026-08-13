@@ -9,6 +9,7 @@ import {
 } from "./approval-gate.js";
 import { parseChannelArg } from "./auditlog.js";
 import { buildAuditEmbed, buildStatusEmbed } from "./embeds.js";
+import { formatAccountLabel } from "./identity-label.js";
 import { purgeChannelFromArchive } from "./message-archive.js";
 import {
   addChannelExclusion,
@@ -117,8 +118,7 @@ export function createChannelExclusion(
   }
 
   function actorLabel(userId) {
-    const username = client.users?.get?.(userId)?.username;
-    return username ? `@${username} (<@${userId}>)` : `<@${userId}>`;
+    return formatAccountLabel(client, userId);
   }
 
   function channelLabel(channelId) {
@@ -404,7 +404,7 @@ export function createChannelExclusion(
         `**Request:** \`${challenge.requestId}\``,
         `**Channel:** ${channelLabel(channelId)}`,
         `**Requested by:** ${actorLabel(challenge.requestedBy)}`,
-        `**Approved by:** ${ENKA_APPROVER_TAG} (<@${approvedBy}>)`,
+        `**Approved by:** ${formatAccountLabel(client, approvedBy, { username: ENKA_APPROVER_TAG.replace(/^@/u, "") })}`,
         description,
       ],
       action === "exclude" ? "#9B59B6" : "#2ECC71"

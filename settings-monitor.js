@@ -5,6 +5,7 @@
 
 import { createHash } from "crypto";
 import { buildAuditEmbed } from "./embeds.js";
+import { formatAccountLabel } from "./identity-label.js";
 import {
   getAuditLogServers,
   getServerSettingsSnapshot,
@@ -314,9 +315,7 @@ function overrideLines(label, before, after) {
 }
 
 function formatUser(client, userId) {
-  if (!userId) return "Unknown user";
-  const user = client.users?.get?.(userId);
-  return user?.username ? `@${user.username} (${userId})` : `User ${userId}`;
+  return formatAccountLabel(client, userId);
 }
 
 function attributionLines(client, change, source) {

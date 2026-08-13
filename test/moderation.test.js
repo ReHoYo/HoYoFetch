@@ -399,7 +399,7 @@ test("ban waits for the invoker's own confirmation before acting", async () => {
   // The prompt is the typo guard, so it has to name who and why.
   assert.match(
     confirmation.payload.embeds[0].description,
-    new RegExp(`<@${TARGET_ID}>[\\s\\S]*spamming and stuff`)
+    new RegExp("Account `" + TARGET_ID + "`[\\s\\S]*spamming and stuff")
   );
   // Seeding the ✅/❌ reactions is the only traffic so far.
   assert.equal(mutations(harness).length, 0);
@@ -624,6 +624,8 @@ test("ban records a protected reversible action and authorized reaction unbans",
   assert.equal(harness.protectedLogs.length, 1);
   const record = harness.store.actions.get("MDACTION123");
   assert.equal(record.type, "ban");
+  assert.ok(Object.hasOwn(record, "targetUsernameSnapshot"));
+  assert.ok(Object.hasOwn(record, "actorUsernameSnapshot"));
   await harness.moderation.handleRawEvent({
     type: "MessageReact",
     id: record.logMessageId,
@@ -636,6 +638,9 @@ test("ban records a protected reversible action and authorized reaction unbans",
     )
   );
   assert.equal(harness.store.actions.get("MDACTION123").status, "undone");
+  const undoDescription =
+    harness.protectedLogs.at(-1).payload.embeds[0].description;
+  assert.doesNotMatch(undoDescription, /<@|Unknown User/iu);
 });
 
 test("mute duration picker is invoker-only and applies the chosen timeout", async () => {

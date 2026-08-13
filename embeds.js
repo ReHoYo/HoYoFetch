@@ -228,7 +228,7 @@ function auditText(value, max, fallback = "*(none)*") {
 }
 
 export function buildAuditMessageDeleteEmbed({
-  author = "Unknown user",
+  author = "Account unavailable",
   channelId,
   content,
   messageId,
@@ -279,7 +279,7 @@ export function buildAuditBulkDeleteEmbed({
 }
 
 export function buildAuditMessageEditEmbed({
-  author = "Unknown user",
+  author = "Account unavailable",
   channelId,
   before,
   after,
@@ -301,7 +301,7 @@ export function buildAuditMessageEditEmbed({
 
 export function buildAuditMemberEmbed({
   title,
-  user = "Unknown user",
+  user = "Account unavailable",
   lines = [],
   colour = "#E67E22",
 } = {}) {

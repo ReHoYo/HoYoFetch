@@ -165,6 +165,7 @@ function makeHarness({
   };
   const client = {
     user: { id: BOT_ID },
+    users: new Map([[TARGET_ID, { username: "PersistedTarget" }]]),
     channels: new Map([[CHANNEL_ID, channel]]),
     api: {
       async get(path) {
@@ -505,7 +506,17 @@ test("enforcement times out first, cleans messages, and opens one vote", async (
   assert.match(harness.requests[2].path, /reactions/);
   assert.equal(harness.protectedLogs.length, 1);
   assert.equal(harness.prompts.length, 1);
-  assert.equal(harness.store.getAutomodCase("AMCASE123").status, "pending");
+  const record = harness.store.getAutomodCase("AMCASE123");
+  assert.equal(record.status, "pending");
+  assert.equal(record.usernameSnapshot, "PersistedTarget");
+  assert.match(
+    harness.prompts[0].payload.embeds[0].description,
+    /PersistedTarget/
+  );
+  assert.doesNotMatch(
+    harness.prompts[0].payload.embeds[0].description,
+    /<@|Unknown User/iu
+  );
 });
 
 test("cleanup failure does not undo containment or escalate to a ban", async () => {

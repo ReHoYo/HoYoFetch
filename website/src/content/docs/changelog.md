@@ -3,6 +3,12 @@ title: Changelog
 description: Major public Irminsul capabilities and documentation milestones.
 ---
 
+## Version 3.5.0 — stable account labels
+
+- Irminsul-generated moderation, audit, Post Gate, reporting, configuration, account-information, and diagnostics cards now use non-pinging plain-text account labels. A known username appears beside the stable account ID; an uncached, departed, kicked, banned, or legacy account falls back to its ID instead of Stoat rendering "Unknown User".
+- Pending Post Gate entries and full-user holds retain a bounded username snapshot across cache eviction and restart, keeping review, reminder, hold-list, release, and departure cards readable. A prohibited-identity hold remains ID-only so Irminsul never republishes the name that triggered it.
+- The existing departure lifecycle is unchanged and regression-covered: leave, kick, and ban events end the account-level hold and remove its control/reminder cards, while pending messages remain reviewable. A current member's hold never expires merely because reminder windows pass.
+
 ## Version 3.4.3 — `/Post-Gate release` grants the exemption unconditionally
 
 Post Gate has two independent layers: the account-level full hold, and per-message queuing (a first link/media post, a contact-solicitation or identity match). Most accounts a moderator wants to release only ever hit the second layer, since a queued post alone never creates a full hold — so `/Post-Gate release @member` used to report "not currently in Post Gate" and do nothing for them.
