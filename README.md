@@ -1,5 +1,8 @@
 # 🌿 Irminsul — HoYoverse Code Bot for Revolt / Stoat.chat
 
+> [!IMPORTANT]
+> **This project is archived and no longer maintained.** I'm taking a break from HoYoFetch to focus more of my time on my relationships and life outside this project. The code will remain available for reference and forks, but I don't plan to provide updates or support. Thank you to everyone who used, contributed to, or supported HoYoFetch.
+
 Automatically fetches and posts redemption codes for **Genshin Impact**, **Honkai: Star Rail**, **Zenless Zone Zero**, **Honkai Impact 3rd**, **Neverness to Everness**, and **Wuthering Waves** in your Revolt server channels.
 
 📚 **Documentation:** [Irminsul Docs](https://rehoyo.github.io/HoYoFetch/) — searchable commands, setup, moderation, audit-log, Post Gate Protection, troubleshooting, and self-hosting guides.
